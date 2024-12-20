@@ -455,29 +455,18 @@
       },
       "type": "object"
     },
-    "bgp": {
-      "properties": {
-        "announce": {
-          "properties": {
-            "loadbalancerIP": {
-              "type": "boolean"
-            },
-            "podCIDR": {
-              "type": "boolean"
-            }
-          },
-          "type": "object"
-        },
-        "enabled": {
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
     "bgpControlPlane": {
       "properties": {
         "enabled": {
           "type": "boolean"
+        },
+        "routerIDAllocation": {
+          "properties": {
+            "mode": {
+              "type": "string"
+            }
+          },
+          "type": "object"
         },
         "secretsNamespace": {
           "properties": {
@@ -587,6 +576,9 @@
             "boolean"
           ]
         },
+        "lbAlgorithmAnnotation": {
+          "type": "boolean"
+        },
         "lbExternalClusterIP": {
           "type": "boolean"
         },
@@ -595,6 +587,9 @@
             "null",
             "integer"
           ]
+        },
+        "lbModeAnnotation": {
+          "type": "boolean"
         },
         "lbSourceRangeAllTypes": {
           "type": "boolean"
@@ -1491,6 +1486,12 @@
       },
       "type": "object"
     },
+    "commonLabels": {
+      "type": [
+        "null",
+        "object"
+      ]
+    },
     "conntrackGCInterval": {
       "type": "string"
     },
@@ -1744,6 +1745,9 @@
       },
       "type": "object"
     },
+    "endpointLockdownOnMapOverflow": {
+      "type": "boolean"
+    },
     "endpointRoutes": {
       "properties": {
         "enabled": {
@@ -1924,6 +1928,12 @@
         "baseID": {
           "type": "integer"
         },
+        "bootstrapConfigMap": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
         "connectTimeoutSeconds": {
           "type": "integer"
         },
@@ -1980,6 +1990,9 @@
           "type": "array"
         },
         "healthPort": {
+          "type": "integer"
+        },
+        "httpRetryCount": {
           "type": "integer"
         },
         "idleTimeoutDurationSeconds": {
@@ -2062,6 +2075,9 @@
             }
           },
           "type": "object"
+        },
+        "maxConcurrentRetries": {
+          "type": "integer"
         },
         "maxConnectionDurationSeconds": {
           "type": "integer"
@@ -2441,6 +2457,9 @@
     "global": {
       "type": "object"
     },
+    "healthCheckICMPFailureThreshold": {
+      "type": "integer"
+    },
     "healthChecking": {
       "type": "boolean"
     },
@@ -2609,6 +2628,51 @@
                     "null",
                     "string"
                   ]
+                }
+              },
+              "type": "object"
+            },
+            "dynamic": {
+              "properties": {
+                "config": {
+                  "properties": {
+                    "configMapName": {
+                      "type": "string"
+                    },
+                    "content": {
+                      "items": {
+                        "anyOf": [
+                          {
+                            "properties": {
+                              "contextOptions": {
+                                "items": {},
+                                "type": "array"
+                              },
+                              "excludeFilters": {
+                                "items": {},
+                                "type": "array"
+                              },
+                              "includeFilters": {
+                                "items": {},
+                                "type": "array"
+                              },
+                              "name": {
+                                "type": "string"
+                              }
+                            }
+                          }
+                        ]
+                      },
+                      "type": "array"
+                    },
+                    "createConfigMap": {
+                      "type": "boolean"
+                    }
+                  },
+                  "type": "object"
+                },
+                "enabled": {
+                  "type": "boolean"
                 }
               },
               "type": "object"
@@ -3712,7 +3776,13 @@
         "ciliumNodeUpdateRate": {
           "type": "string"
         },
+        "installUplinkRoutesForDelegatedIPAM": {
+          "type": "boolean"
+        },
         "mode": {
+          "type": "string"
+        },
+        "multiPoolPreAllocation": {
           "type": "string"
         },
         "operator": {
@@ -4438,6 +4508,9 @@
             "enabled": {
               "type": "boolean"
             },
+            "metricsService": {
+              "type": "boolean"
+            },
             "port": {
               "type": "integer"
             },
@@ -4816,6 +4889,9 @@
             "null",
             "array"
           ]
+        },
+        "metricsService": {
+          "type": "boolean"
         },
         "port": {
           "type": "integer"

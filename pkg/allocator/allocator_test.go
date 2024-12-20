@@ -202,7 +202,7 @@ func (d *dummyBackend) ListIDs(ctx context.Context) (identityIDs []idpool.ID, er
 	return slices.Collect(maps.Keys(d.masterKeys)), nil
 }
 
-func (d *dummyBackend) ListAndWatch(ctx context.Context, handler CacheMutations, stopChan chan struct{}) {
+func (d *dummyBackend) ListAndWatch(ctx context.Context, handler CacheMutations) {
 	d.mutex.Lock()
 	d.handler = handler
 
@@ -216,7 +216,7 @@ func (d *dummyBackend) ListAndWatch(ctx context.Context, handler CacheMutations,
 		d.handler.OnListDone()
 	}
 
-	<-stopChan
+	<-ctx.Done()
 }
 
 func (d *dummyBackend) RunLocksGC(_ context.Context, _ map[string]kvstore.Value) (map[string]kvstore.Value, error) {
@@ -225,10 +225,6 @@ func (d *dummyBackend) RunLocksGC(_ context.Context, _ map[string]kvstore.Value)
 
 func (d *dummyBackend) RunGC(context.Context, *rate.Limiter, map[string]uint64, idpool.ID, idpool.ID) (map[string]uint64, *GCStats, error) {
 	return nil, nil, nil
-}
-
-func (d *dummyBackend) Status() (string, error) {
-	return "", nil
 }
 
 type TestAllocatorKey string

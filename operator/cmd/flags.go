@@ -240,12 +240,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 		"Duration that LeaderElector clients should wait between retries of the actions")
 	option.BindEnv(vp, operatorOption.LeaderElectionRetryPeriod)
 
-	flags.Bool(option.BGPAnnounceLBIP, false, "Announces service IPs of type LoadBalancer via BGP")
-	option.BindEnv(vp, option.BGPAnnounceLBIP)
-
-	flags.String(option.BGPConfigPath, "/var/lib/cilium/bgp/config.yaml", "Path to file containing the BGP configuration")
-	option.BindEnv(vp, option.BGPConfigPath)
-
 	flags.Bool(option.EnableCiliumEndpointSlice, false, "If set to true, the CiliumEndpointSlice feature is enabled. If any CiliumEndpoints resources are created, updated, or deleted in the cluster, all those changes are broadcast as CiliumEndpointSlice updates to all of the Cilium agents.")
 	option.BindEnv(vp, option.EnableCiliumEndpointSlice)
 
@@ -274,12 +268,18 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	option.BindEnv(vp, option.KVstoreMaxConsecutiveQuorumErrorsName)
 
 	flags.Duration(option.KVstoreLeaseTTL, defaults.KVstoreLeaseTTL, "Time-to-live for the KVstore lease.")
-	flags.MarkHidden(option.KVstoreLeaseTTL)
 	option.BindEnv(vp, option.KVstoreLeaseTTL)
 
 	flags.Bool(option.KVstorePodNetworkSupport, defaults.KVstorePodNetworkSupport, "Enable the support for running the Cilium KVstore in pod network")
 	flags.MarkHidden(option.KVstorePodNetworkSupport)
 	option.BindEnv(vp, option.KVstorePodNetworkSupport)
+
+	flags.String(option.EnablePolicy, option.DefaultEnforcement, "Enable policy enforcement")
+	option.BindEnv(vp, option.EnablePolicy)
+
+	flags.Bool(option.EnableK8sNetworkPolicy, defaults.EnableK8sNetworkPolicy, "Enable support for K8s NetworkPolicy")
+	flags.MarkHidden(option.EnableK8sNetworkPolicy)
+	option.BindEnv(vp, option.EnableK8sNetworkPolicy)
 
 	flags.Bool(option.EnableCiliumNetworkPolicy, defaults.EnableCiliumNetworkPolicy, "Enable support for Cilium Network Policy")
 	flags.MarkHidden(option.EnableCiliumNetworkPolicy)

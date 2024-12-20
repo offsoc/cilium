@@ -18,20 +18,16 @@ func (t toFqdns) build(ct *check.ConnectivityTest, templates map[string]string) 
 	// This policy only allows port 80 to domain-name, default one.one.one.one., DNS proxy enabled.
 	newTest("to-fqdns", ct).
 		WithCiliumPolicy(templates["clientEgressToFQDNsPolicyYAML"]).
+		WithCiliumPolicy(templates["clientEgressOnlyDNSPolicyYAML"]).
 		WithFeatureRequirements(features.RequireEnabled(features.L7Proxy)).
 		WithScenarios(
 			tests.PodToWorld(tests.WithRetryDestPort(80)),
-			tests.PodToWorld2(), // resolves cilium.io.
+			tests.PodToWorld2(), // resolves to ExternalOtherTarget
 		).
 		WithExpectations(func(a *check.Action) (egress, ingress check.Result) {
-			if a.Destination().Address(features.IPFamilyAny) == "cilium.io." {
+			if a.Destination().Address(features.IPFamilyAny) == ct.Params().ExternalOtherTarget {
 				if a.Destination().Path() == "/" || a.Destination().Path() == "" {
-					egress = check.ResultDNSOK
-					egress.HTTP = check.HTTP{
-						Method: "GET",
-						URL:    "https://cilium.io",
-					}
-					// Expect packets for cilium.io / 104.198.14.52 to be dropped.
+					// Expect packets to other external target to be dropped.
 					return check.ResultDropCurlTimeout, check.ResultNone
 				}
 				// Else expect HTTP drop by proxy

@@ -151,10 +151,10 @@ nodeport_fib_lookup_and_redirect(struct __ctx_buff *ctx,
 				 struct bpf_fib_lookup_padded *fib_params,
 				 __s8 *ext_err)
 {
-	int oif = NATIVE_DEV_IFINDEX;
+	int oif = THIS_INTERFACE_IFINDEX;
 	int ret;
 
-	ret = fib_lookup(ctx, &fib_params->l, sizeof(fib_params->l), 0);
+	ret = (int)fib_lookup(ctx, &fib_params->l, sizeof(fib_params->l), 0);
 
 	switch (ret) {
 	case BPF_FIB_LKUP_RET_SUCCESS:
@@ -569,7 +569,7 @@ static __always_inline int dsr_reply_icmp6(struct __ctx_buff *ctx,
 		goto drop_err;
 
 	if (ctx_load_bytes(ctx, off + sizeof(inner_ipv6_hdr), orig_ipv6_hdr,
-			   sizeof(orig_ipv6_hdr)) < 0)
+			   (__u32)sizeof(orig_ipv6_hdr)) < 0)
 		goto drop_err;
 	memcpy(orig_ipv6_hdr + l4_dport_offset, &dport, sizeof(dport));
 
@@ -584,13 +584,13 @@ static __always_inline int dsr_reply_icmp6(struct __ctx_buff *ctx,
 
 	wsum = ipv6_pseudohdr_checksum(&ip, IPPROTO_ICMPV6,
 				       bpf_ntohs(ip.payload_len), 0);
-	icmp.icmp6_cksum = csum_fold(csum_diff(NULL, 0, orig_ipv6_hdr, sizeof(orig_ipv6_hdr),
+	icmp.icmp6_cksum = csum_fold(csum_diff(NULL, 0, orig_ipv6_hdr, (__u32)sizeof(orig_ipv6_hdr),
 					       csum_diff(NULL, 0, &inner_ipv6_hdr,
 							 sizeof(inner_ipv6_hdr),
 							 csum_diff(NULL, 0, &icmp,
 								   sizeof(icmp), wsum))));
 
-	if (ctx_adjust_troom(ctx, -(len_old - len_new)) < 0)
+	if (ctx_adjust_troom(ctx, -(__s32)(len_old - len_new)) < 0)
 		goto drop_err;
 	if (ctx_adjust_hroom(ctx, sizeof(ip) + sizeof(icmp),
 			     BPF_ADJ_ROOM_NET,
@@ -1219,6 +1219,7 @@ static __always_inline int nodeport_svc_lb6(struct __ctx_buff *ctx,
 					    int l3_off,
 					    int l4_off,
 					    __u32 src_sec_identity __maybe_unused,
+					    bool *punt_to_stack __maybe_unused,
 					    __s8 *ext_err)
 {
 	struct ct_state ct_state_svc = {};
@@ -1234,14 +1235,25 @@ static __always_inline int nodeport_svc_lb6(struct __ctx_buff *ctx,
 
 #if defined(ENABLE_L7_LB)
 	if (lb6_svc_is_l7loadbalancer(svc) && svc->l7_lb_proxy_port > 0) {
-		if (ctx_is_xdp())
-			return CTX_ACT_OK;
+# if !defined(IS_BPF_XDP)
+		__be16 proxy_port = (__be16)svc->l7_lb_proxy_port;
 
 		send_trace_notify(ctx, TRACE_TO_PROXY, src_sec_identity, UNKNOWN_ID,
 				  bpf_ntohs((__u16)svc->l7_lb_proxy_port),
-				  NATIVE_DEV_IFINDEX, TRACE_REASON_POLICY, monitor);
-		return ctx_redirect_to_proxy_hairpin_ipv6(ctx,
-							  (__be16)svc->l7_lb_proxy_port);
+				  THIS_INTERFACE_IFINDEX, TRACE_REASON_POLICY, monitor);
+
+#  if defined(ENABLE_TPROXY)
+		return ctx_redirect_to_proxy_hairpin_ipv6(ctx, proxy_port);
+#  else
+		cilium_dbg_capture(ctx, DBG_CAPTURE_PROXY_PRE, proxy_port);
+		ctx->mark = MARK_MAGIC_TO_PROXY | (proxy_port << 16);
+		cilium_dbg_capture(ctx, DBG_CAPTURE_PROXY_POST, proxy_port);
+
+		*punt_to_stack = true;
+#  endif /* ENABLE_TPROXY */
+# endif /* IS_BPF_XDP */
+
+		return CTX_ACT_OK;
 	}
 #endif
 	ret = lb6_local(get_ct_map6(tuple), ctx, l3_off, l4_off,
@@ -1281,7 +1293,7 @@ static __always_inline int nodeport_svc_lb6(struct __ctx_buff *ctx,
 			ct_state.src_sec_id = WORLD_IPV6_ID;
 			ct_state.node_port = 1;
 #ifndef HAVE_FIB_IFINDEX
-			ct_state.ifindex = (__u16)NATIVE_DEV_IFINDEX;
+			ct_state.ifindex = (__u16)THIS_INTERFACE_IFINDEX;
 #endif
 
 			ret = ct_create6(get_ct_map6(tuple), NULL, tuple, ctx,
@@ -1339,6 +1351,7 @@ static __always_inline int nodeport_svc_lb6(struct __ctx_buff *ctx,
 static __always_inline int nodeport_lb6(struct __ctx_buff *ctx,
 					struct ipv6hdr *ip6,
 					__u32 src_sec_identity,
+					bool *punt_to_stack,
 					__s8 *ext_err,
 					bool __maybe_unused *dsr)
 {
@@ -1368,7 +1381,8 @@ static __always_inline int nodeport_lb6(struct __ctx_buff *ctx,
 	svc = lb6_lookup_service(&key, false);
 	if (svc) {
 		return nodeport_svc_lb6(ctx, &tuple, svc, &key, ip6, l3_off,
-					l4_off, src_sec_identity, ext_err);
+					l4_off, src_sec_identity, punt_to_stack,
+					ext_err);
 	} else {
 skip_service_lookup:
 #ifdef ENABLE_NAT_46X64_GATEWAY
@@ -1822,7 +1836,7 @@ static __always_inline int dsr_reply_icmp4(struct __ctx_buff *ctx,
 	const __u32 l3_max = MAX_IPOPTLEN + sizeof(*ip4) + orig_dgram;
 	__be16 type = bpf_htons(ETH_P_IP);
 	__s32 len_new = off + ipv4_hdrlen(ip4) + orig_dgram;
-	__s32 len_old = ctx_full_len(ctx);
+	__s32 len_old = (__s32)ctx_full_len(ctx);
 	__u8 reason = (__u8)-code;
 	__u8 tmp[l3_max];
 	union macaddr smac, dmac;
@@ -1885,13 +1899,13 @@ static __always_inline int dsr_reply_icmp4(struct __ctx_buff *ctx,
 	memset(tmp, 0, MAX_IPOPTLEN);
 	if (ctx_store_bytes(ctx, len_new, tmp, MAX_IPOPTLEN, 0) < 0)
 		goto drop_err;
-	if (ctx_load_bytes(ctx, off, tmp, sizeof(tmp)) < 0)
+	if (ctx_load_bytes(ctx, off, tmp, (__u32)sizeof(tmp)) < 0)
 		goto drop_err;
 
 	memcpy(tmp, &inner_ip_hdr, sizeof(inner_ip_hdr));
 	memcpy(tmp + sizeof(inner_ip_hdr) + l4_dport_offset, &dport, sizeof(dport));
 
-	icmp.checksum = csum_fold(csum_diff(NULL, 0, tmp, sizeof(tmp),
+	icmp.checksum = csum_fold(csum_diff(NULL, 0, tmp, (__u32)sizeof(tmp),
 					    csum_diff(NULL, 0, &icmp,
 						      sizeof(icmp), 0)));
 
@@ -2504,6 +2518,7 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 					    bool has_l4_header,
 					    int l4_off,
 					    __u32 src_sec_identity,
+					    bool *punt_to_stack __maybe_unused,
 					    __s8 *ext_err)
 {
 	bool is_fragment = ipv4_is_fragment(ip4);
@@ -2525,14 +2540,28 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		 * Therefore, let the bpf_host to handle the L7 ingress
 		 * request.
 		 */
-		if (ctx_is_xdp())
-			return CTX_ACT_OK;
+# if !defined(IS_BPF_XDP)
+		__be16 proxy_port = (__be16)svc->l7_lb_proxy_port;
 
 		send_trace_notify(ctx, TRACE_TO_PROXY, src_sec_identity, UNKNOWN_ID,
-				  bpf_ntohs((__u16)svc->l7_lb_proxy_port),
-				  NATIVE_DEV_IFINDEX, TRACE_REASON_POLICY, monitor);
-		return ctx_redirect_to_proxy_hairpin_ipv4(ctx, ip4,
-							  (__be16)svc->l7_lb_proxy_port);
+				  bpf_ntohs(proxy_port),
+				  THIS_INTERFACE_IFINDEX, TRACE_REASON_POLICY, monitor);
+
+#  if defined(ENABLE_TPROXY)
+		return ctx_redirect_to_proxy_hairpin_ipv4(ctx, ip4, proxy_port);
+#  else
+		/* Pass the packet straight to the proxy, without redirecting via
+		 * cilium_host.
+		 */
+		cilium_dbg_capture(ctx, DBG_CAPTURE_PROXY_PRE, proxy_port);
+		ctx->mark = MARK_MAGIC_TO_PROXY | (proxy_port << 16);
+		cilium_dbg_capture(ctx, DBG_CAPTURE_PROXY_POST, proxy_port);
+
+		*punt_to_stack = true;
+#  endif /* ENABLE_TPROXY */
+# endif /* IS_BPF_XDP */
+
+		return CTX_ACT_OK;
 	}
 #endif
 	if (lb4_to_lb6_service(svc)) {
@@ -2565,7 +2594,7 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		struct ct_state ct_state = {};
 
 #if (defined(ENABLE_CLUSTER_AWARE_ADDRESSING) && defined(ENABLE_INTER_CLUSTER_SNAT))
-		if (src_sec_identity == 0)
+		if (src_sec_identity == UNKNOWN_ID)
 			src_sec_identity = WORLD_IPV4_ID;
 
 		 /* Before forwarding the identity, make sure it's not local,
@@ -2598,7 +2627,7 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 			ct_state.src_sec_id = src_sec_identity;
 			ct_state.node_port = 1;
 #ifndef HAVE_FIB_IFINDEX
-			ct_state.ifindex = (__u16)NATIVE_DEV_IFINDEX;
+			ct_state.ifindex = (__u16)THIS_INTERFACE_IFINDEX;
 #endif
 
 			ret = ct_create4(get_ct_map4(tuple), NULL, tuple, ctx,
@@ -2657,6 +2686,7 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 					struct iphdr *ip4,
 					int l3_off,
 					__u32 src_sec_identity,
+					bool *punt_to_stack,
 					__s8 *ext_err,
 					bool __maybe_unused *dsr)
 {
@@ -2688,7 +2718,7 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	if (svc) {
 		return nodeport_svc_lb4(ctx, &tuple, svc, &key, ip4, l3_off,
 					has_l4_header, l4_off,
-					src_sec_identity, ext_err);
+					src_sec_identity, punt_to_stack, ext_err);
 	} else {
 skip_service_lookup:
 #ifdef ENABLE_NAT_46X64_GATEWAY

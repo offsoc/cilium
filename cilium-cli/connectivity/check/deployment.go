@@ -28,14 +28,19 @@ import (
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	slimmetav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	policyapi "github.com/cilium/cilium/pkg/policy/api"
+	"github.com/cilium/cilium/pkg/versioncheck"
 )
 
 const (
 	PerfHostName                          = "-host-net"
 	PerfOtherNode                         = "-other-node"
+	PerfLowPriority                       = "-low-priority"
+	PerfHighPriority                      = "-high-priority"
 	perfClientDeploymentName              = "perf-client"
 	perfClientHostNetDeploymentName       = perfClientDeploymentName + PerfHostName
 	perfClientAcrossDeploymentName        = perfClientDeploymentName + PerfOtherNode
+	perClientLowPriorityDeploymentName    = perfClientDeploymentName + PerfLowPriority
+	perClientHighPriorityDeploymentName   = perfClientDeploymentName + PerfHighPriority
 	perfClientHostNetAcrossDeploymentName = perfClientAcrossDeploymentName + PerfHostName
 	perfServerDeploymentName              = "perf-server"
 	perfServerHostNetDeploymentName       = perfServerDeploymentName + PerfHostName
@@ -70,6 +75,8 @@ const (
 	testConnDisruptServiceName          = "test-conn-disrupt"
 	testConnDisruptCNPName              = "test-conn-disrupt"
 	KindTestConnDisrupt                 = "test-conn-disrupt"
+
+	bwPrioAnnotationString = "bandwidth.cilium.io/priority"
 )
 
 var (
@@ -568,6 +575,11 @@ func (ct *ConnectivityTest) deploy(ctx context.Context) error {
 			}
 
 			if enabled, _ := ct.Features.MatchRequirements(features.RequireEnabled(features.CNP)); enabled {
+				ipsec, _ := ct.Features.MatchRequirements(features.RequireMode(features.EncryptionPod, "ipsec"))
+				if ipsec && versioncheck.MustCompile(">=1.14.0 <1.16.0")(ct.CiliumVersion) {
+					// https://github.com/cilium/cilium/issues/36681
+					continue
+				}
 				for _, client := range ct.Clients() {
 					ct.Logf("✨ [%s] Deploying %s CiliumNetworkPolicy...", client.ClusterName(), testConnDisruptCNPName)
 					_, err = client.ApplyGeneric(ctx, newConnDisruptCNP(ct.params.TestNamespace))
@@ -1249,15 +1261,39 @@ func (ct *ConnectivityTest) deployPerf(ctx context.Context) error {
 	}
 
 	if ct.params.PerfParameters.PodNet {
-		if err = ct.createClientPerfDeployment(ctx, perfClientDeploymentName, firstNodeName, false); err != nil {
-			ct.Warnf("unable to create deployment: %w", err)
-		}
-		// Create second client on other node
-		if err = ct.createClientPerfDeployment(ctx, perfClientAcrossDeploymentName, secondNodeName, false); err != nil {
-			ct.Warnf("unable to create deployment: %w", err)
-		}
-		if err = ct.createServerPerfDeployment(ctx, perfServerDeploymentName, firstNodeName, false); err != nil {
-			ct.Warnf("unable to create deployment: %w", err)
+		if ct.params.PerfParameters.NetQos {
+			// Disable host net deploys
+			ct.params.PerfParameters.HostNet = false
+			// TODO: Merge with existing annotations
+			var lowPrioDeployAnnotations = annotations{bwPrioAnnotationString: "5"}
+			var highPrioDeployAnnotations = annotations{bwPrioAnnotationString: "6"}
+
+			ct.params.DeploymentAnnotations.Set(`{
+				"` + perClientLowPriorityDeploymentName + `": ` + lowPrioDeployAnnotations.String() + `,
+			    "` + perClientHighPriorityDeploymentName + `": ` + highPrioDeployAnnotations.String() + `
+			}`)
+			if err = ct.createServerPerfDeployment(ctx, perfServerDeploymentName, firstNodeName, false); err != nil {
+				ct.Warnf("unable to create deployment: %w", err)
+			}
+			// Create low priority client on other node
+			if err = ct.createClientPerfDeployment(ctx, perClientLowPriorityDeploymentName, secondNodeName, false); err != nil {
+				ct.Warnf("unable to create deployment: %w", err)
+			}
+			// Create high priority client on other node
+			if err = ct.createClientPerfDeployment(ctx, perClientHighPriorityDeploymentName, secondNodeName, false); err != nil {
+				ct.Warnf("unable to create deployment: %w", err)
+			}
+		} else {
+			if err = ct.createClientPerfDeployment(ctx, perfClientDeploymentName, firstNodeName, false); err != nil {
+				ct.Warnf("unable to create deployment: %w", err)
+			}
+			// Create second client on other node
+			if err = ct.createClientPerfDeployment(ctx, perfClientAcrossDeploymentName, secondNodeName, false); err != nil {
+				ct.Warnf("unable to create deployment: %w", err)
+			}
+			if err = ct.createServerPerfDeployment(ctx, perfServerDeploymentName, firstNodeName, false); err != nil {
+				ct.Warnf("unable to create deployment: %w", err)
+			}
 		}
 	}
 
@@ -1281,9 +1317,15 @@ func (ct *ConnectivityTest) deployPerf(ctx context.Context) error {
 func (ct *ConnectivityTest) deploymentList() (srcList []string, dstList []string) {
 	if ct.params.Perf && ct.params.TestNamespaceIndex == 0 {
 		if ct.params.PerfParameters.PodNet {
-			srcList = append(srcList, perfClientDeploymentName)
-			srcList = append(srcList, perfClientAcrossDeploymentName)
-			srcList = append(srcList, perfServerDeploymentName)
+			if ct.params.PerfParameters.NetQos {
+				srcList = append(srcList, perClientLowPriorityDeploymentName)
+				srcList = append(srcList, perClientHighPriorityDeploymentName)
+				srcList = append(srcList, perfServerDeploymentName)
+			} else {
+				srcList = append(srcList, perfClientDeploymentName)
+				srcList = append(srcList, perfClientAcrossDeploymentName)
+				srcList = append(srcList, perfServerDeploymentName)
+			}
 		}
 		if ct.params.PerfParameters.HostNet {
 			srcList = append(srcList, perfClientHostNetDeploymentName)
@@ -1715,7 +1757,7 @@ func (ct *ConnectivityTest) validateDeployment(ctx context.Context) error {
 					}
 					ct.secondaryNetworkNodeIPv4[pod.Spec.NodeName] = strings.TrimSuffix(addr.String(), "\n")
 				}
-				if ct.Features[features.IPv4].Enabled {
+				if ct.Features[features.IPv6].Enabled {
 					cmd := []string{"/bin/sh", "-c", fmt.Sprintf("ip -family inet6 -oneline address show dev %s scope global | awk '{print $4}' | cut -d/ -f1", iface)}
 					addr, err := client.ExecInPod(ctx, pod.Namespace, pod.Name, "", cmd)
 					if err != nil {

@@ -13,8 +13,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/cilium/cilium/pkg/logging"
+	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
+	"github.com/cilium/cilium/pkg/policy/api"
 	testidentity "github.com/cilium/cilium/pkg/testutils/identity"
 	testipcache "github.com/cilium/cilium/pkg/testutils/ipcache"
 )
@@ -23,8 +25,8 @@ func TestEndpointLogFormat(t *testing.T) {
 	setupEndpointSuite(t)
 
 	// Default log format is text
-	do := &DummyOwner{repo: policy.NewPolicyRepository(nil, nil, nil, nil)}
-	ep := NewTestEndpointWithState(do, do, testipcache.NewMockIPCache(), nil, testidentity.NewMockIdentityAllocator(nil), 12345, StateReady)
+	do := &DummyOwner{repo: policy.NewPolicyRepository(nil, nil, nil, nil, api.NewPolicyMetricsNoop())}
+	ep := NewTestEndpointWithState(do, do, testipcache.NewMockIPCache(), nil, testidentity.NewMockIdentityAllocator(nil), ctmap.NewFakeGCRunner(), 12345, StateReady)
 
 	_, ok := ep.getLogger().Logger.Formatter.(*logrus.TextFormatter)
 	require.True(t, ok)
@@ -34,8 +36,8 @@ func TestEndpointLogFormat(t *testing.T) {
 	defer func() {
 		logging.SetLogFormat(logging.LogFormatText)
 	}()
-	do = &DummyOwner{repo: policy.NewPolicyRepository(nil, nil, nil, nil)}
-	ep = NewTestEndpointWithState(do, do, testipcache.NewMockIPCache(), nil, testidentity.NewMockIdentityAllocator(nil), 12345, StateReady)
+	do = &DummyOwner{repo: policy.NewPolicyRepository(nil, nil, nil, nil, api.NewPolicyMetricsNoop())}
+	ep = NewTestEndpointWithState(do, do, testipcache.NewMockIPCache(), nil, testidentity.NewMockIdentityAllocator(nil), ctmap.NewFakeGCRunner(), 12345, StateReady)
 
 	_, ok = ep.getLogger().Logger.Formatter.(*logrus.JSONFormatter)
 	require.True(t, ok)
@@ -44,8 +46,8 @@ func TestEndpointLogFormat(t *testing.T) {
 func TestPolicyLog(t *testing.T) {
 	setupEndpointSuite(t)
 
-	do := &DummyOwner{repo: policy.NewPolicyRepository(nil, nil, nil, nil)}
-	ep := NewTestEndpointWithState(do, do, testipcache.NewMockIPCache(), nil, testidentity.NewMockIdentityAllocator(nil), 12345, StateReady)
+	do := &DummyOwner{repo: policy.NewPolicyRepository(nil, nil, nil, nil, api.NewPolicyMetricsNoop())}
+	ep := NewTestEndpointWithState(do, do, testipcache.NewMockIPCache(), nil, testidentity.NewMockIdentityAllocator(nil), ctmap.NewFakeGCRunner(), 12345, StateReady)
 
 	// Initially nil
 	policyLogger := ep.getPolicyLogger()

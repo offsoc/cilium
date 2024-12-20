@@ -31,9 +31,11 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/testutils"
 	"github.com/cilium/cilium/pkg/k8s/version"
 	"github.com/cilium/cilium/pkg/loadbalancer/experimental"
+	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/promise"
+	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/time"
 )
 
@@ -46,17 +48,19 @@ func TestScript(t *testing.T) {
 		h := hive.New(
 			client.FakeClientCell,
 			daemonk8s.ResourcesCell,
+			cell.Config(cecConfig{}),
 			experimental.Cell,
+			maglev.Cell,
 			cell.Provide(
 				tables.NewNodeAddressTable,
 				statedb.RWTable[tables.NodeAddress].ToTable,
+				source.NewSources,
 				func() *option.DaemonConfig {
 					return &option.DaemonConfig{
 						EnableIPv4:        true,
 						EnableIPv6:        true,
 						SockRevNatEntries: 1000,
 						LBMapEntries:      1000,
-						MaglevTableSize:   1021,
 					}
 				},
 				func() *experimental.TestConfig {

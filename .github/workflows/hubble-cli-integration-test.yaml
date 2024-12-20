@@ -91,7 +91,7 @@ jobs:
         id: default_vars
         uses: ./.github/actions/helm-default
         with:
-          image-tag: ${{ inputs.SHA }}
+          image-tag: ${{ inputs.SHA || github.sha }}
           chart-dir: ./untrusted/install/kubernetes/cilium
 
       - name: Set image tag
@@ -119,7 +119,7 @@ jobs:
       # Build hubble CLI before setting up the cluster and waiting on images to
       # save time on failures.
       - name: Setup go
-        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
           go-version-file: 'go.mod'
 
@@ -130,7 +130,7 @@ jobs:
 
       # Setup the cluster
       - name: Create kind cluster
-        uses: helm/kind-action@0025e74a8c7512023d06dc019c617aa3cf561fde # v1.10.0 -C hubble
+        uses: helm/kind-action@9fdad0686e6f19fcd572f62516f5e0436f562ee7 # v1.10.0 -C hubble
         with:
           version: ${{ env.KIND_VERSION }}
           node_image: ${{ env.KIND_K8S_IMAGE }}
@@ -147,7 +147,7 @@ jobs:
           done
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@3286926bbf80fdd0103a372256459e577224f9f6 # v0.16.20
+        uses: cilium/cilium-cli@c52e8c38e6d6235bd8e6e961199a984275547d6f # v0.16.22
         with:
           skip-build: ${{ env.CILIUM_CLI_SKIP_BUILD }}
           image-repo: ${{ env.CILIUM_CLI_IMAGE_REPO }}

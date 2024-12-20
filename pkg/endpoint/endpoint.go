@@ -196,6 +196,10 @@ type Endpoint struct {
 	// Immutable after Endpoint creation.
 	containerIfName string
 
+	// parentIfIndex is the interface index of the network device over which traffic
+	// with the source endpoints IP should egress when that traffic is not masqueraded.
+	parentIfIndex int
+
 	// disableLegacyIdentifiers disables lookup using legacy endpoint identifiers
 	// (container name, container id, pod name) for this endpoint.
 	// Immutable after Endpoint creation.
@@ -297,6 +301,10 @@ type Endpoint struct {
 	// K8sUID is the Kubernetes UID of the pod. Passed directly from the CNI.
 	// Immutable after Endpoint creation.
 	K8sUID string
+
+	// lockdown indicates whether the endpoint is locked down or not do to
+	// a policy map overflow.
+	lockdown bool
 
 	// pod
 	pod atomic.Pointer[slim_corev1.Pod]
@@ -416,6 +424,8 @@ type Endpoint struct {
 
 	// NetNsCookie is the network namespace cookie of the Endpoint.
 	NetNsCookie uint64
+
+	ctMapGC ctmap.GCRunner
 }
 
 func (e *Endpoint) GetReporter(name string) cell.Health {
@@ -483,6 +493,11 @@ func (e *Endpoint) GetIfIndex() int {
 	return e.ifIndex
 }
 
+// GetParentIfIndex returns the parentIfIndex for this endpoint.
+func (e *Endpoint) GetParentIfIndex() int {
+	return e.parentIfIndex
+}
+
 // LXCMac returns the LXCMac for this endpoint.
 func (e *Endpoint) LXCMac() mac.MAC {
 	return e.mac
@@ -539,9 +554,9 @@ func (e *Endpoint) waitForProxyCompletions(proxyWaitGroup *completion.WaitGroup)
 // NewTestEndpointWithState creates a new endpoint useful for testing purposes
 //
 // Note: This function is intended for testing purposes only and should not be used in production code.
-func NewTestEndpointWithState(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ID uint16, state State) *Endpoint {
+func NewTestEndpointWithState(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner, ID uint16, state State) *Endpoint {
 	endpointQueueName := "endpoint-" + strconv.FormatUint(uint64(ID), 10)
-	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, ID, "")
+	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, ctMapGC, ID, "")
 	ep.SetPropertyValue(PropertyFakeEndpoint, true)
 	ep.state = state
 	ep.eventQueue = eventqueue.NewEventQueueBuffered(endpointQueueName, option.Config.EndpointQueueSize)
@@ -553,7 +568,7 @@ func NewTestEndpointWithState(owner regeneration.Owner, policyGetter policyRepoG
 	return ep
 }
 
-func createEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ID uint16, ifName string) *Endpoint {
+func createEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner, ID uint16, ifName string) *Endpoint {
 	ep := &Endpoint{
 		owner:            owner,
 		policyGetter:     policyGetter,
@@ -578,6 +593,7 @@ func createEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, nam
 		logLimiter:       logging.NewLimiter(10*time.Second, 3), // 1 log / 10 secs, burst of 3
 		noTrackPort:      0,
 		properties:       map[string]interface{}{},
+		ctMapGC:          ctMapGC,
 
 		forcePolicyCompute: true,
 	}
@@ -613,8 +629,8 @@ func (e *Endpoint) initDNSHistoryTrigger() {
 }
 
 // CreateIngressEndpoint creates the endpoint corresponding to Cilium Ingress.
-func CreateIngressEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator) (*Endpoint, error) {
-	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, 0, "")
+func CreateIngressEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner) (*Endpoint, error) {
+	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, ctMapGC, 0, "")
 	ep.DatapathConfiguration = NewDatapathConfiguration()
 
 	ep.isIngress = true
@@ -644,13 +660,13 @@ func CreateIngressEndpoint(owner regeneration.Owner, policyGetter policyRepoGett
 }
 
 // CreateHostEndpoint creates the endpoint corresponding to the host.
-func CreateHostEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator) (*Endpoint, error) {
+func CreateHostEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner) (*Endpoint, error) {
 	mac, err := link.GetHardwareAddr(defaults.HostDevice)
 	if err != nil {
 		return nil, err
 	}
 
-	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, 0, defaults.HostDevice)
+	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, ctMapGC, 0, defaults.HostDevice)
 	ep.isHost = true
 	ep.mac = mac
 	ep.nodeMAC = mac
@@ -795,7 +811,7 @@ func (e *Endpoint) Allows(id identity.NumericIdentity) bool {
 	keyToLookup := policy.IngressKey().WithIdentity(id)
 
 	v, ok := e.desiredPolicy.Get(keyToLookup)
-	return ok && !v.IsDeny
+	return ok && !v.IsDeny()
 }
 
 // String returns endpoint on a JSON format.
@@ -1723,34 +1739,20 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
 		return false, nil
 	}
 
-	filterResolveMetadataError := func(err error) error {
-		if restoredEndpoint && k8sErrors.IsNotFound(err) {
-			e.getLogger().WithError(err).Info("Unable to resolve metadata during endpoint restoration. Is the pod still running?")
-			return nil
-		}
-
-		return err
-	}
-
 	// copy the base labels into this local variable
 	// so that we don't override 'baseLabels'.
 	controllerBaseLabels := labels.NewFrom(baseLabels)
 
 	ns, podName := e.GetK8sNamespace(), e.GetK8sPodName()
 
-	pod, k8sMetadata, err := resolveMetadata(ns, podName)
-	switch {
-	case err != nil:
-		if filterResolveMetadataError(err) == nil {
-			break
+	pod, k8sMetadata, err := resolveMetadata(ns, podName, e.K8sUID)
+	if err != nil {
+		if restoredEndpoint && k8sErrors.IsNotFound(err) {
+			e.Logger(resolveLabels).WithError(err).Info("Unable to resolve metadata during endpoint restoration. Is the pod still running?")
+		} else {
+			e.Logger(resolveLabels).WithError(err).Warning("Unable to fetch kubernetes labels")
 		}
 
-		e.Logger(resolveLabels).WithError(err).Warning("Unable to fetch kubernetes labels")
-		fallthrough
-	case e.K8sUID != "" && e.K8sUID != string(pod.GetUID()):
-		if err == nil {
-			err = errors.New("metadata resolver: pod store out-of-date")
-		}
 		// If we were unable to fetch the k8s endpoints then
 		// we will mark the endpoint with the init identity.
 		if !restoredEndpoint {
@@ -1773,21 +1775,14 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
 
 	e.SetPod(pod)
 	e.SetK8sMetadata(k8sMetadata.ContainerPorts)
-	e.UpdateNoTrackRules(func(_, _ string) (noTrackPort string, err error) {
-		po, _, err := resolveMetadata(ns, podName)
-		if err != nil {
-			return "", filterResolveMetadataError(err)
-		}
-		value, _ := annotation.Get(po, annotation.NoTrack, annotation.NoTrackAlias)
-		return value, nil
-	})
-	e.UpdateBandwidthPolicy(bwm, func(ns, podName string) (bandwidthEgress string, err error) {
-		_, k8sMetadata, err := resolveMetadata(ns, podName)
-		if err != nil {
-			return "", filterResolveMetadataError(err)
-		}
-		return k8sMetadata.Annotations[bandwidth.EgressBandwidth], nil
-	})
+	e.UpdateNoTrackRules(func() string {
+		value, _ := annotation.Get(pod, annotation.NoTrack, annotation.NoTrackAlias)
+		return value
+	}())
+	e.UpdateBandwidthPolicy(bwm,
+		pod.Annotations[bandwidth.EgressBandwidth],
+		pod.Annotations[bandwidth.Priority],
+	)
 
 	// If 'baseLabels' are not set then 'controllerBaseLabels' only contains
 	// labels from k8s. Thus, we should only replace the labels that have their
@@ -1808,12 +1803,11 @@ type K8sMetadata struct {
 	ContainerPorts []slim_corev1.ContainerPort
 	IdentityLabels labels.Labels
 	InfoLabels     labels.Labels
-	Annotations    map[string]string
 }
 
 // MetadataResolverCB provides an implementation for resolving the endpoint
 // metadata for an endpoint such as the associated labels and annotations.
-type MetadataResolverCB func(ns, podName string) (pod *slim_corev1.Pod, k8sMetadata *K8sMetadata, err error)
+type MetadataResolverCB func(ns, podName, uid string) (pod *slim_corev1.Pod, k8sMetadata *K8sMetadata, err error)
 
 // RunMetadataResolver starts a controller associated with the received
 // endpoint which will periodically attempt to resolve the metadata for the
@@ -2484,7 +2478,8 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
 	}
 	e.setState(StateDisconnecting, "Deleting endpoint")
 
-	if option.Config.IPAM == ipamOption.IPAMENI || option.Config.IPAM == ipamOption.IPAMAzure || option.Config.IPAM == ipamOption.IPAMAlibabaCloud {
+	if option.Config.IPAM == ipamOption.IPAMENI || option.Config.IPAM == ipamOption.IPAMAzure || option.Config.IPAM == ipamOption.IPAMAlibabaCloud ||
+		(option.Config.IPAM == ipamOption.IPAMDelegatedPlugin && option.Config.InstallUplinkRoutesForDelegatedIPAM) {
 		e.getLogger().WithFields(logrus.Fields{
 			"ep":     e.GetID(),
 			"ipAddr": e.GetIPv4Address(),
@@ -2525,7 +2520,7 @@ func (e *Endpoint) Delete(conf DeleteConfig) []error {
 		e.owner.Orchestrator().Unload(e.createEpInfoCache(""))
 
 		// Delete the endpoint's entries from the global cilium_(egress)call_policy
-		// maps and remove per-endpoint cilium_calls_ and cilium_policy_ map pins.
+		// maps and remove per-endpoint cilium_calls_ and cilium_policy_v2_ map pins.
 		if err := e.deleteMaps(); err != nil {
 			errs = append(errs, err...)
 		}
@@ -2657,4 +2652,11 @@ func (e *Endpoint) isProperty(propertyKey string) bool {
 		return ok && isSet
 	}
 	return false
+}
+
+// SetCtMapGC sets the ct map GC runner for this endpoint.
+func (e *Endpoint) SetCtMapGC(ctMapGC ctmap.GCRunner) {
+	e.unconditionalLock()
+	defer e.unlock()
+	e.ctMapGC = ctMapGC
 }

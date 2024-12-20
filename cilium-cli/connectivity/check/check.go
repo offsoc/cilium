@@ -31,6 +31,7 @@ type PerfParameters struct {
 	RR          bool
 	UDP         bool
 	Image       string
+	NetQos      bool
 }
 
 type Parameters struct {
@@ -73,6 +74,7 @@ type Parameters struct {
 	DeploymentAnnotations  annotationsMap
 	NamespaceAnnotations   annotations
 	ExternalTarget         string
+	ExternalOtherTarget    string
 	ExternalCIDR           string
 	ExternalIP             string
 	ExternalDeploymentPort int
@@ -98,6 +100,8 @@ type Parameters struct {
 	ExpectedDropReasons []string
 	ExpectedXFRMErrors  []string
 
+	LogCheckLevels []string
+
 	FlushCT               bool
 	SecondaryNetworkIface string
 
@@ -111,6 +115,7 @@ type Parameters struct {
 	ConnectTimeout time.Duration
 	RequestTimeout time.Duration
 	CurlInsecure   bool
+	CurlParallel   uint
 
 	CollectSysdumpOnFailure bool
 	SysdumpOptions          sysdump.Options

@@ -31,7 +31,9 @@ import (
 	k8sTestUtils "github.com/cilium/cilium/pkg/k8s/testutils"
 	"github.com/cilium/cilium/pkg/loadbalancer"
 	"github.com/cilium/cilium/pkg/loadbalancer/experimental"
+	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/option"
+	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/testutils"
 	"github.com/cilium/cilium/pkg/time"
 )
@@ -42,6 +44,11 @@ var (
 
 	//go:embed testdata/endpointslice.yaml
 	endpointSliceYaml []byte
+
+	maglevConfig = maglev.Config{
+		MaglevTableSize: 1021,
+		MaglevHashSeed:  maglev.DefaultHashSeed,
+	}
 )
 
 func RunBenchmark(testSize int, iterations int, loglevel slog.Level, validate bool) {
@@ -66,8 +73,8 @@ func RunBenchmark(testSize int, iterations int, loglevel slog.Level, validate bo
 				AffinityMapMaxEntries:    3 * testSize,
 				SourceRangeMapMaxEntries: 3 * testSize,
 				MaglevMapMaxEntries:      3 * testSize,
-				MaglevTableSize:          1021,
 			},
+			MaglevCfg: maglevConfig,
 		}
 	} else {
 		maps = experimental.NewFakeLBMaps()
@@ -467,9 +474,9 @@ func checkTables(db *statedb.DB, writer *experimental.Writer, svcs []*slim_corev
 				if be.Instances.Len() != 1 {
 					err = errors.Join(err, fmt.Errorf("Incorrect instances count for backend #%06d, got %v, want %v", i, be.Instances.Len(), 1))
 				} else {
-					for svcName, instance := range be.Instances.All() { // There should
-						if svcName.Name != svcs[i].Name {
-							err = errors.Join(err, fmt.Errorf("Incorrect service name for backend #%06d, got %v, want %v", i, svcName.Name, svcs[i].Name))
+					for k, instance := range be.Instances.All() { // There should
+						if k.ServiceName.Name != svcs[i].Name {
+							err = errors.Join(err, fmt.Errorf("Incorrect service name for backend #%06d, got %v, want %v", i, k.ServiceName.Name, svcs[i].Name))
 						}
 						if state, tmpErr := instance.State.String(); tmpErr != nil || state != "active" {
 							err = errors.Join(err, fmt.Errorf("Incorrect state for backend #%06d, got %q, want %q", i, state, "active"))
@@ -524,22 +531,24 @@ func testHive(maps experimental.LBMaps,
 					}
 				},
 				func() experimental.ExternalConfig { return extConfig },
-			),
 
-			cell.Provide(func() experimental.StreamsOut {
-				return experimental.StreamsOut{
-					ServicesStream:  stream.FromChannel(services),
-					EndpointsStream: stream.FromChannel(endpoints),
-					PodsStream:      stream.FromChannel(pods),
-				}
-			}),
+				func() experimental.StreamsOut {
+					return experimental.StreamsOut{
+						ServicesStream:  stream.FromChannel(services),
+						EndpointsStream: stream.FromChannel(endpoints),
+						PodsStream:      stream.FromChannel(pods),
+					}
+				},
 
-			cell.Provide(
 				func(lc cell.Lifecycle) experimental.LBMaps {
 					if rm, ok := maps.(*experimental.BPFLBMaps); ok {
 						lc.Append(rm)
 					}
 					return maps
+				},
+
+				func(lc cell.Lifecycle) (*maglev.Maglev, error) {
+					return maglev.New(maglevConfig, lc)
 				},
 			),
 
@@ -562,6 +571,7 @@ func testHive(maps experimental.LBMaps,
 			cell.Provide(
 				tables.NewNodeAddressTable,
 				statedb.RWTable[tables.NodeAddress].ToTable,
+				source.NewSources,
 			),
 			cell.Invoke(func(db *statedb.DB, nodeAddrs statedb.RWTable[tables.NodeAddress]) {
 				db.RegisterTable(nodeAddrs)

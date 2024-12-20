@@ -25,8 +25,7 @@
 #define BACKEND_IP		v4_pod_one
 #define BACKEND_PORT		__bpf_htons(8080)
 
-#define NATIVE_DEV_IFINDEX	24
-#define DEFAULT_IFACE		NATIVE_DEV_IFINDEX
+#define DEFAULT_IFACE		24
 #define BACKEND_IFACE		25
 #define SVC_EGRESS_IFACE	26
 
@@ -114,6 +113,8 @@ mock_ctx_redirect(const struct __sk_buff *ctx __maybe_unused,
 #define FROM_NETDEV	0
 #define TO_NETDEV	1
 
+ASSIGN_CONFIG(__u32, interface_ifindex, DEFAULT_IFACE)
+
 struct {
 	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);
 	__uint(key_size, sizeof(__u32));
@@ -187,7 +188,7 @@ SETUP("tc", "tc_nodeport_dsr_backend")
 int nodeport_dsr_backend_setup(struct __ctx_buff *ctx)
 {
 	/* add local backend */
-	endpoint_v4_add_entry(BACKEND_IP, BACKEND_IFACE, BACKEND_EP_ID, 0, 0,
+	endpoint_v4_add_entry(BACKEND_IP, BACKEND_IFACE, BACKEND_EP_ID, 0, 0, 0,
 			      (__u8 *)backend_mac, (__u8 *)node_mac);
 
 	ipcache_v4_add_entry(BACKEND_IP, 0, 112233, 0, 0);

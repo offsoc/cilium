@@ -82,27 +82,45 @@ func registerMetricsManager(p params) {
 		metrics:    p.Metrics,
 	}
 
-	if p.SharedCfg.EnableGatewayAPI {
-		// Use the same Registry as controller-runtime, so that we don't need
-		// to expose multiple metrics endpoints or servers.
-		//
-		// Ideally, we should use our own Registry instance, but the metrics
-		// registration is done by init() functions, which are executed before
-		// this function is called.
-		Registry = controllerRuntimeMetrics.Registry
-	} else {
-		Registry = prometheus.NewPedanticRegistry()
-		Registry.MustRegister(collectors.NewGoCollector(
-			collectors.WithGoCollectorRuntimeMetrics(
-				collectors.GoRuntimeMetricsRule{Matcher: goCustomCollectorsRX},
-			)))
-	}
+	// Use the same Registry as controller-runtime, so that we don't need
+	// to expose multiple metrics endpoints or servers.
+	//
+	// Ideally, we should use our own Registry instance, but the metrics
+	// registration is done by init() functions, which are executed before
+	// this function is called.
+	Registry = controllerRuntimeMetrics.Registry
+
+	// Unregister default Go collector that is added by default by the controller-runtime library.
+	// This is necessary to be able to register a Go collector with additional runtime metrics
+	// without any clashes with the existing Go collector.
+	Registry.Unregister(collectors.NewGoCollector())
+
+	Registry.MustRegister(collectors.NewGoCollector(
+		collectors.WithGoCollectorRuntimeMetrics(
+			collectors.GoRuntimeMetricsRule{Matcher: goCustomCollectorsRX},
+		),
+	))
 
 	Registry.MustRegister(collectors.NewProcessCollector(collectors.ProcessCollectorOpts{Namespace: metrics.CiliumOperatorNamespace}))
 
 	for _, metric := range mm.metrics {
 		Registry.MustRegister(metric.(prometheus.Collector))
 	}
+
+	// Constructing the legacy metrics and register them at the metrics global variable.
+	// This is a hack until we can unify this metrics manager with the metrics.Registry.
+	metrics.NewLegacyMetrics()
+	Registry.MustRegister(
+		metrics.VersionMetric,
+		metrics.KVStoreOperationsDuration,
+		metrics.KVStoreEventsQueueDuration,
+		metrics.KVStoreQuorumErrors,
+		metrics.APILimiterProcessingDuration,
+		metrics.APILimiterWaitDuration,
+		metrics.APILimiterRequestsInFlight,
+		metrics.APILimiterRateLimit,
+		metrics.APILimiterProcessedRequests,
+	)
 
 	metrics.InitOperatorMetrics()
 	Registry.MustRegister(metrics.ErrorsWarnings)

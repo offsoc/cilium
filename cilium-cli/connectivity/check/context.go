@@ -50,6 +50,9 @@ type ConnectivityTest struct {
 	// Features contains the features enabled on the running Cilium cluster
 	Features features.Set
 
+	// ClusterName is the identifier of the local cluster.
+	ClusterName string
+
 	// Parameters to the test suite, specified by the CLI user.
 	params Parameters
 
@@ -508,7 +511,7 @@ func (ct *ConnectivityTest) report() error {
 		return fmt.Errorf("[%s] %d tests failed", ct.params.TestNamespace, nf)
 	}
 
-	if ct.params.Perf {
+	if ct.params.Perf && !ct.params.PerfParameters.NetQos {
 		ct.Header(fmt.Sprintf("🔥 Network Performance Test Summary [%s]:", ct.params.TestNamespace))
 		ct.Logf("%s", strings.Repeat("-", 200))
 		ct.Logf("📋 %-15s | %-10s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s", "Scenario", "Node", "Test", "Duration", "Min", "Mean", "Max", "P50", "P90", "P99", "Transaction rate OP/s")
@@ -945,11 +948,21 @@ func (ct *ConnectivityTest) CurlCommand(peer TestPeer, ipFam features.IPFamily, 
 		cmd = append(cmd, "-H", fmt.Sprintf("Host: %s", strings.TrimSuffix(host, ".")))
 	}
 
+	numTargets := 1
+	if ct.params.CurlParallel > 0 {
+		numTargets = int(ct.params.CurlParallel)
+		cmd = append(cmd, "--parallel", "--parallel-immediate")
+	}
+
 	cmd = append(cmd, opts...)
-	cmd = append(cmd, fmt.Sprintf("%s://%s%s",
-		peer.Scheme(),
-		net.JoinHostPort(peer.Address(ipFam), fmt.Sprint(peer.Port())),
-		peer.Path()))
+
+	for range numTargets {
+		cmd = append(cmd, fmt.Sprintf("%s://%s%s",
+			peer.Scheme(),
+			net.JoinHostPort(peer.Address(ipFam), fmt.Sprint(peer.Port())),
+			peer.Path()))
+	}
+
 	return cmd
 }
 

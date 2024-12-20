@@ -25,7 +25,6 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/tables"
 	"github.com/cilium/cilium/pkg/datapath/tunnel"
 	"github.com/cilium/cilium/pkg/logging/logfields"
-	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/mountinfo"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/safeio"
@@ -62,9 +61,13 @@ func initKubeProxyReplacementOptions(sysctl sysctl.Sysctl, tunnelConfig tunnel.C
 	if option.Config.EnableNodePort {
 		if option.Config.NodePortMode != option.NodePortModeSNAT &&
 			option.Config.NodePortMode != option.NodePortModeDSR &&
-			option.Config.NodePortMode != option.NodePortModeHybrid &&
-			option.Config.NodePortMode != option.NodePortModeAnnotation {
+			option.Config.NodePortMode != option.NodePortModeHybrid {
 			return fmt.Errorf("Invalid value for --%s: %s", option.NodePortMode, option.Config.NodePortMode)
+		}
+
+		if option.Config.LoadBalancerModeAnnotation &&
+			option.Config.NodePortMode == option.NodePortModeHybrid {
+			return fmt.Errorf("The value --%s=%s is not supported as default under annotation mode", option.NodePortMode, option.Config.NodePortMode)
 		}
 
 		if option.Config.NodePortMode == option.NodePortModeDSR &&
@@ -80,7 +83,7 @@ func initKubeProxyReplacementOptions(sysctl sysctl.Sysctl, tunnelConfig tunnel.C
 			return fmt.Errorf("Invalid value for --%s: %s", option.LoadBalancerDSRDispatch, option.Config.LoadBalancerDSRDispatch)
 		}
 
-		if option.Config.NodePortMode == option.NodePortModeAnnotation &&
+		if option.Config.LoadBalancerModeAnnotation &&
 			option.Config.LoadBalancerDSRDispatch != option.DSRDispatchIPIP {
 			return fmt.Errorf("Invalid value for --%s: %s", option.LoadBalancerDSRDispatch, option.Config.LoadBalancerDSRDispatch)
 		}
@@ -144,30 +147,6 @@ func initKubeProxyReplacementOptions(sysctl sysctl.Sysctl, tunnelConfig tunnel.C
 			log.Warning("NodePort BPF configured without bind(2) protection against service ports")
 		}
 
-		if option.Config.NodePortAlg == option.NodePortAlgMaglev {
-			// "Let N be the size of a VIP's backend pool." [...] "In practice, we choose M to be
-			// larger than 100 x N to ensure at most a 1% difference in hash space assigned to
-			// backends." (from Maglev paper, page 6)
-			supportedPrimes := []int{251, 509, 1021, 2039, 4093, 8191, 16381, 32749, 65521, 131071}
-			found := false
-			for _, prime := range supportedPrimes {
-				if option.Config.MaglevTableSize == prime {
-					found = true
-					break
-				}
-			}
-			if !found {
-				return fmt.Errorf("Invalid value for --%s: %d, supported values are: %v",
-					option.MaglevTableSize, option.Config.MaglevTableSize, supportedPrimes)
-			}
-			if err := maglev.Init(
-				option.Config.MaglevHashSeed,
-				uint64(option.Config.MaglevTableSize),
-			); err != nil {
-				return fmt.Errorf("Failed to initialize maglev hash seeds: %w", err)
-			}
-		}
-
 		if option.Config.TunnelingEnabled() && tunnelConfig.Protocol() == tunnel.VXLAN &&
 			option.Config.LoadBalancerUsesDSR() {
 			return fmt.Errorf("Node Port %q mode cannot be used with %s tunneling.", option.Config.NodePortMode, tunnel.VXLAN)
@@ -207,7 +186,7 @@ func initKubeProxyReplacementOptions(sysctl sysctl.Sysctl, tunnelConfig tunnel.C
 		option.Config.EnableHealthDatapath =
 			option.Config.DatapathMode == datapathOption.DatapathModeLBOnly &&
 				(option.Config.NodePortMode == option.NodePortModeDSR ||
-					option.Config.NodePortMode == option.NodePortModeAnnotation) &&
+					option.Config.LoadBalancerModeAnnotation) &&
 				option.Config.LoadBalancerDSRDispatch == option.DSRDispatchIPIP
 	}
 
@@ -227,6 +206,11 @@ func initKubeProxyReplacementOptions(sysctl sysctl.Sysctl, tunnelConfig tunnel.C
 	}
 	if option.Config.BPFSocketLBHostnsOnly {
 		option.Config.EnableSocketLBTracing = false
+	}
+
+	if !option.Config.EnableSocketLB {
+		option.Config.EnableSocketLBTracing = false
+		option.Config.EnableSocketLBPeer = false
 	}
 
 	if option.Config.DryMode {

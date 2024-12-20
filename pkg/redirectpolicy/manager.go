@@ -97,9 +97,11 @@ type Manager struct {
 	policyEndpoints map[podID]sets.Set[policyID]
 
 	noNetnsCookieSupport bool
+
+	metricsManager LRPMetrics
 }
 
-func NewRedirectPolicyManager(svc svcManager, svcCache *k8s.ServiceCache, lpr agentK8s.LocalPodResource, epM endpointManager) *Manager {
+func NewRedirectPolicyManager(svc svcManager, svcCache *k8s.ServiceCache, lpr agentK8s.LocalPodResource, epM endpointManager, metricsManager LRPMetrics) *Manager {
 	return &Manager{
 		svcManager:            svc,
 		svcCache:              svcCache,
@@ -110,6 +112,7 @@ func NewRedirectPolicyManager(svc svcManager, svcCache *k8s.ServiceCache, lpr ag
 		policyPods:            make(map[podID][]policyID),
 		policyConfigs:         make(map[policyID]*LRPConfig),
 		policyEndpoints:       make(map[podID]sets.Set[policyID]),
+		metricsManager:        metricsManager,
 	}
 }
 
@@ -140,7 +143,7 @@ func (rpm *Manager) AddRedirectPolicy(config LRPConfig) (bool, error) {
 		})()
 		if rpm.noNetnsCookieSupport {
 			err := fmt.Errorf("policy with skipRedirectFromBackend flag set not applied" +
-				":SO_NETNS_COOKIE not supported. Needs kernel version >= 5.8")
+				":`getsockopt() with SO_NETNS_COOKIE option not supported. Needs kernel version >= 5.12")
 			log.WithFields(logrus.Fields{
 				logfields.LRPType:      config.lrpType,
 				logfields.K8sNamespace: config.id.Namespace,
@@ -552,6 +555,7 @@ func (rpm *Manager) getAndUpsertPolicySvcConfig(config *LRPConfig) error {
 // storePolicyConfig stores various state for the given policy config.
 func (rpm *Manager) storePolicyConfig(config LRPConfig) {
 	rpm.policyConfigs[config.id] = &config
+	rpm.metricsManager.AddLRPConfig(&config)
 
 	switch config.lrpType {
 	case lrpConfigTypeAddr:
@@ -565,6 +569,7 @@ func (rpm *Manager) storePolicyConfig(config LRPConfig) {
 
 // deletePolicyConfig cleans up stored state for the given policy config.
 func (rpm *Manager) deletePolicyConfig(config *LRPConfig) {
+	rpm.metricsManager.DelLRPConfig(config)
 	switch config.lrpType {
 	case lrpConfigTypeAddr:
 		for _, feM := range config.frontendMappings {

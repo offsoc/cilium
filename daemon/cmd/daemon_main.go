@@ -31,7 +31,6 @@ import (
 	agentK8s "github.com/cilium/cilium/daemon/k8s"
 	"github.com/cilium/cilium/pkg/auth"
 	"github.com/cilium/cilium/pkg/aws/eni"
-	"github.com/cilium/cilium/pkg/bgp/speaker"
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/cgroups"
 	"github.com/cilium/cilium/pkg/clustermesh"
@@ -80,7 +79,6 @@ import (
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
-	"github.com/cilium/cilium/pkg/maps/ctmap/gc"
 	"github.com/cilium/cilium/pkg/maps/lbmap"
 	"github.com/cilium/cilium/pkg/maps/nat"
 	"github.com/cilium/cilium/pkg/maps/neighborsmap"
@@ -96,7 +94,6 @@ import (
 	"github.com/cilium/cilium/pkg/pidfile"
 	"github.com/cilium/cilium/pkg/policy"
 	policyDirectory "github.com/cilium/cilium/pkg/policy/directory"
-	policyK8s "github.com/cilium/cilium/pkg/policy/k8s"
 	"github.com/cilium/cilium/pkg/promise"
 	"github.com/cilium/cilium/pkg/proxy"
 	"github.com/cilium/cilium/pkg/rate"
@@ -273,6 +270,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableEndpointHealthChecking, defaults.EnableEndpointHealthChecking, "Enable connectivity health checking between virtual endpoints")
 	option.BindEnv(vp, option.EnableEndpointHealthChecking)
 
+	flags.Int(option.HealthCheckICMPFailureThreshold, defaults.HealthCheckICMPFailureThreshold, "Number of ICMP requests sent for each run of the health checker. If at least one ICMP response is received, the node or endpoint is marked as healthy.")
+	option.BindEnv(vp, option.HealthCheckICMPFailureThreshold)
+
 	flags.Bool(option.EnableLocalNodeRoute, defaults.EnableLocalNodeRoute, "Enable installation of the route which points the allocation prefix of the local node")
 	option.BindEnv(vp, option.EnableLocalNodeRoute)
 
@@ -333,7 +333,7 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.DisableCiliumEndpointCRDName, false, "Disable use of CiliumEndpoint CRD")
 	option.BindEnv(vp, option.DisableCiliumEndpointCRDName)
 
-	flags.StringSlice(option.MasqueradeInterfaces, []string{}, "Limit iptables-based egress masquerading to interface selector")
+	flags.StringSlice(option.MasqueradeInterfaces, []string{}, "Limit iptables-based egress masquerading to interfaces selector")
 	option.BindEnv(vp, option.MasqueradeInterfaces)
 
 	flags.Bool(option.BPFSocketLBHostnsOnly, false, "Skip socket LB for services when inside a pod namespace, in favor of service LB at the pod interface. Socket LB is still used when in the host namespace. Required by service mesh (e.g., Istio, Linkerd).")
@@ -360,9 +360,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 
 	flags.Bool(option.EnableHostLegacyRouting, defaults.EnableHostLegacyRouting, "Enable the legacy host forwarding model which does not bypass upper stack in host namespace")
 	option.BindEnv(vp, option.EnableHostLegacyRouting)
-
-	flags.Bool(option.EnableXTSocketFallbackName, defaults.EnableXTSocketFallback, "Enable fallback for missing xt_socket module")
-	option.BindEnv(vp, option.EnableXTSocketFallbackName)
 
 	flags.String(option.EnablePolicy, option.DefaultEnforcement, "Enable policy enforcement")
 	option.BindEnv(vp, option.EnablePolicy)
@@ -493,6 +490,14 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	option.BindEnv(vp, option.K8sServiceCacheSize)
 	flags.MarkHidden(option.K8sServiceCacheSize)
 
+	flags.Int(option.K8sServiceDebounceBufferSize, 128, "Number of distinct services to buffer for event debouncing")
+	option.BindEnv(vp, option.K8sServiceDebounceBufferSize)
+	flags.MarkHidden(option.K8sServiceDebounceBufferSize)
+
+	flags.Duration(option.K8sServiceDebounceWaitTime, 200*time.Millisecond, "The amount of time to wait to debounce service events")
+	option.BindEnv(vp, option.K8sServiceDebounceWaitTime)
+	flags.MarkHidden(option.K8sServiceDebounceWaitTime)
+
 	flags.String(option.K8sWatcherEndpointSelector, defaults.K8sWatcherEndpointSelector, "K8s endpoint watcher will watch for these k8s endpoints")
 	option.BindEnv(vp, option.K8sWatcherEndpointSelector)
 
@@ -503,7 +508,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	option.BindEnv(vp, option.KVStore)
 
 	flags.Duration(option.KVstoreLeaseTTL, defaults.KVstoreLeaseTTL, "Time-to-live for the KVstore lease.")
-	flags.MarkHidden(option.KVstoreLeaseTTL)
 	option.BindEnv(vp, option.KVstoreLeaseTTL)
 
 	flags.Uint(option.KVstoreMaxConsecutiveQuorumErrorsName, defaults.KVstoreMaxConsecutiveQuorumErrors, "Max acceptable kvstore consecutive quorum errors before the agent assumes permanent failure")
@@ -586,11 +590,17 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.MarkHidden(option.NodePortAcceleration)
 	option.BindEnv(vp, option.NodePortAcceleration)
 
+	flags.Bool(option.LoadBalancerModeAnnotation, false, "Enable service-level annotation for configuring BPF load balancing mode")
+	option.BindEnv(vp, option.LoadBalancerModeAnnotation)
+
 	flags.String(option.LoadBalancerMode, option.NodePortModeSNAT, "BPF load balancing mode (\"snat\", \"dsr\", \"hybrid\")")
 	option.BindEnv(vp, option.LoadBalancerMode)
 
-	flags.String(option.LoadBalancerAlg, option.NodePortAlgRandom, "BPF load balancing algorithm (\"random\", \"maglev\")")
-	option.BindEnv(vp, option.LoadBalancerAlg)
+	flags.Bool(option.LoadBalancerAlgorithmAnnotation, false, "Enable service-level annotation for configuring BPF load balancing algorithm")
+	option.BindEnv(vp, option.LoadBalancerAlgorithmAnnotation)
+
+	flags.String(option.LoadBalancerAlgorithm, option.NodePortAlgRandom, "BPF load balancing algorithm (\"random\", \"maglev\")")
+	option.BindEnv(vp, option.LoadBalancerAlgorithm)
 
 	flags.String(option.LoadBalancerDSRDispatch, option.DSRDispatchOption, "BPF load balancing DSR dispatch method (\"opt\", \"ipip\", \"geneve\")")
 	option.BindEnv(vp, option.LoadBalancerDSRDispatch)
@@ -608,12 +618,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 
 	flags.Bool(option.LoadBalancerProtocolDifferentiation, true, "Enable support for service protocol differentiation (TCP, UDP, SCTP)")
 	option.BindEnv(vp, option.LoadBalancerProtocolDifferentiation)
-
-	flags.Uint(option.MaglevTableSize, maglev.DefaultTableSize, "Maglev per service backend table size (parameter M)")
-	option.BindEnv(vp, option.MaglevTableSize)
-
-	flags.String(option.MaglevHashSeed, maglev.DefaultHashSeed, "Maglev cluster-wide hash seed (base64 encoded)")
-	option.BindEnv(vp, option.MaglevHashSeed)
 
 	flags.Bool(option.EnableAutoProtectNodePortRange, true,
 		"Append NodePort range to net.ipv4.ip_local_reserved_ports if it overlaps "+
@@ -634,6 +638,7 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 
 	flags.Bool(option.EnableHighScaleIPcache, defaults.EnableHighScaleIPcache, "Enable the high scale mode for ipcache")
 	option.BindEnv(vp, option.EnableHighScaleIPcache)
+	flags.MarkDeprecated(option.EnableHighScaleIPcache, "The high-scale mode for ipcache is deprecated and will be removed in v1.18.")
 
 	flags.Bool(option.EnableHostFirewall, false, "Enable host network policies")
 	option.BindEnv(vp, option.EnableHostFirewall)
@@ -869,9 +874,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.MarkHidden(option.DNSProxyInsecureSkipTransparentModeCheck)
 	option.BindEnv(vp, option.DNSProxyInsecureSkipTransparentModeCheck)
 
-	flags.Int(option.PolicyQueueSize, defaults.PolicyQueueSize, "Size of queues for policy-related events")
-	option.BindEnv(vp, option.PolicyQueueSize)
-
 	flags.Int(option.EndpointQueueSize, defaults.EndpointQueueSize, "Size of EventQueue per-endpoint")
 	option.BindEnv(vp, option.EndpointQueueSize)
 
@@ -942,6 +944,10 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 		"Offset routing table IDs under ENI IPAM mode to avoid collisions with reserved table IDs. If false, the offset is performed (new scheme), otherwise, the old scheme stays in-place.")
 	option.BindEnv(vp, option.EgressMultiHomeIPRuleCompat)
 
+	flags.Bool(option.InstallUplinkRoutesForDelegatedIPAM, false,
+		"Install ingress/egress routes through uplink on host for Pods when working with delegated IPAM plugin.")
+	option.BindEnv(vp, option.InstallUplinkRoutesForDelegatedIPAM)
+
 	flags.Bool(option.InstallNoConntrackIptRules, defaults.InstallNoConntrackIptRules, "Install Iptables rules to skip netfilter connection tracking on all pod traffic. This option is only effective when Cilium is running in direct routing and full KPR mode. Moreover, this option cannot be enabled when Cilium is running in a managed Kubernetes environment or in a chained CNI setup.")
 	option.BindEnv(vp, option.InstallNoConntrackIptRules)
 
@@ -952,15 +958,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 
 	flags.Bool(option.EnableCustomCallsName, false, "Enable tail call hooks for custom eBPF programs")
 	option.BindEnv(vp, option.EnableCustomCallsName)
-
-	flags.Bool(option.BGPAnnounceLBIP, false, "Announces service IPs of type LoadBalancer via BGP")
-	option.BindEnv(vp, option.BGPAnnounceLBIP)
-
-	flags.Bool(option.BGPAnnouncePodCIDR, false, "Announces the node's pod CIDR via BGP")
-	option.BindEnv(vp, option.BGPAnnouncePodCIDR)
-
-	flags.String(option.BGPConfigPath, "/var/lib/cilium/bgp/config.yaml", "Path to file containing the BGP configuration")
-	option.BindEnv(vp, option.BGPConfigPath)
 
 	flags.Bool(option.ExternalClusterIPName, false, "Enable external access to ClusterIP services (default false)")
 	option.BindEnv(vp, option.ExternalClusterIPName)
@@ -1016,6 +1013,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableBGPControlPlaneStatusReport, true, "Enable the BGP control plane status reporting")
 	option.BindEnv(vp, option.EnableBGPControlPlaneStatusReport)
 
+	flags.String(option.BGPRouterIDAllocationMode, defaults.BGPRouterIDAllocationMode, "BGP router-id allocation mode. Currently supported values: 'default' ")
+	option.BindEnv(vp, option.BGPRouterIDAllocationMode)
+
 	flags.Bool(option.EnablePMTUDiscovery, false, "Enable path MTU discovery to send ICMP fragmentation-needed replies to the client")
 	option.BindEnv(vp, option.EnablePMTUDiscovery)
 
@@ -1056,6 +1056,13 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 
 	flags.Bool(option.LBSourceRangeAllTypes, false, "Propagate loadbalancerSourceRanges to all corresponding service types")
 	option.BindEnv(vp, option.LBSourceRangeAllTypes)
+
+	flags.Bool(option.EnableEndpointLockdownOnPolicyOverflow, false, "When an endpoint's policy map overflows, shutdown all (ingress and egress) network traffic for that endpoint.")
+	option.BindEnv(vp, option.EnableEndpointLockdownOnPolicyOverflow)
+
+	flags.String(option.BootIDFilename, "/proc/sys/kernel/random/boot_id", "Path to filename of the boot ID")
+	flags.MarkHidden(option.BootIDFilename)
+	option.BindEnv(vp, option.BootIDFilename)
 
 	if err := vp.BindPFlags(flags); err != nil {
 		log.Fatalf("BindPFlags failed: %s", err)
@@ -1468,13 +1475,6 @@ func initEnv(vp *viper.Viper) {
 		}
 	}
 
-	if option.Config.BGPAnnouncePodCIDR &&
-		(option.Config.IPAM != ipamOption.IPAMClusterPool &&
-			option.Config.IPAM != ipamOption.IPAMKubernetes) {
-		log.Fatalf("BGP announcements for pod CIDRs is not supported with IPAM mode %q (only %q and %q are supported)",
-			option.Config.IPAM, ipamOption.IPAMClusterPool, ipamOption.IPAMKubernetes)
-	}
-
 	// Ensure that the user does not turn on this mode unless it's for an IPAM
 	// mode which support the bypass.
 	if option.Config.BypassIPAvailabilityUponRestore {
@@ -1564,52 +1564,51 @@ type daemonParams struct {
 
 	CfgResolver promise.Resolver[*option.DaemonConfig]
 
-	Lifecycle              cell.Lifecycle
-	Health                 cell.Health
-	Clientset              k8sClient.Clientset
-	Loader                 datapath.Loader
-	WGAgent                *wireguard.Agent
-	LocalNodeStore         *node.LocalNodeStore
-	Shutdowner             hive.Shutdowner
-	Resources              agentK8s.Resources
-	K8sWatcher             *watchers.K8sWatcher
-	K8sSvcCache            *k8s.ServiceCache
-	CacheStatus            k8sSynced.CacheStatus
-	K8sResourceSynced      *k8sSynced.Resources
-	K8sAPIGroups           *k8sSynced.APIGroups
-	NodeManager            nodeManager.NodeManager
-	NodeHandler            datapath.NodeHandler
-	NodeNeighbors          datapath.NodeNeighbors
-	NodeAddressing         datapath.NodeAddressing
-	EndpointManager        endpointmanager.EndpointManager
-	CertManager            certificatemanager.CertificateManager
-	SecretManager          certificatemanager.SecretManager
-	IdentityAllocator      identitycell.CachingIdentityAllocator
-	Policy                 policy.PolicyRepository
-	IPCache                *ipcache.IPCache
-	DirectoryPolicyWatcher policyDirectory.ResourcesWatcher
-	DirReadStatus          policyDirectory.DirectoryWatcherReadStatus
-	CNIConfigManager       cni.CNIConfigManager
-	SwaggerSpec            *server.Spec
-	HealthAPISpec          *healthApi.Spec
-	ServiceCache           *k8s.ServiceCache
-	ClusterMesh            *clustermesh.ClusterMesh
-	MonitorAgent           monitorAgent.Agent
-	L2Announcer            *l2announcer.L2Announcer
-	ServiceManager         service.ServiceManager
-	L7Proxy                *proxy.Proxy
-	EnvoyXdsServer         envoy.XDSServer
-	DB                     *statedb.DB
-	APILimiterSet          *rate.APILimiterSet
-	AuthManager            *auth.AuthManager
-	Settings               cellSettings
-	Devices                statedb.Table[*datapathTables.Device]
-	NodeAddrs              statedb.Table[datapathTables.NodeAddress]
-	DirectRoutingDevice    datapathTables.DirectRoutingDevice
+	Lifecycle           cell.Lifecycle
+	Health              cell.Health
+	Clientset           k8sClient.Clientset
+	Loader              datapath.Loader
+	WGAgent             *wireguard.Agent
+	LocalNodeStore      *node.LocalNodeStore
+	Shutdowner          hive.Shutdowner
+	Resources           agentK8s.Resources
+	K8sWatcher          *watchers.K8sWatcher
+	K8sSvcCache         *k8s.ServiceCache
+	CacheStatus         k8sSynced.CacheStatus
+	K8sResourceSynced   *k8sSynced.Resources
+	K8sAPIGroups        *k8sSynced.APIGroups
+	NodeManager         nodeManager.NodeManager
+	NodeHandler         datapath.NodeHandler
+	NodeNeighbors       datapath.NodeNeighbors
+	NodeAddressing      datapath.NodeAddressing
+	EndpointManager     endpointmanager.EndpointManager
+	CertManager         certificatemanager.CertificateManager
+	SecretManager       certificatemanager.SecretManager
+	IdentityAllocator   identitycell.CachingIdentityAllocator
+	Policy              policy.PolicyRepository
+	IPCache             *ipcache.IPCache
+	DirReadStatus       policyDirectory.DirectoryWatcherReadStatus
+	CNIConfigManager    cni.CNIConfigManager
+	SwaggerSpec         *server.Spec
+	HealthAPISpec       *healthApi.Spec
+	ServiceCache        *k8s.ServiceCache
+	ClusterMesh         *clustermesh.ClusterMesh
+	MonitorAgent        monitorAgent.Agent
+	L2Announcer         *l2announcer.L2Announcer
+	ServiceManager      service.ServiceManager
+	L7Proxy             *proxy.Proxy
+	EnvoyXdsServer      envoy.XDSServer
+	DB                  *statedb.DB
+	APILimiterSet       *rate.APILimiterSet
+	AuthManager         *auth.AuthManager
+	Settings            cellSettings
+	Devices             statedb.Table[*datapathTables.Device]
+	NodeAddrs           statedb.Table[datapathTables.NodeAddress]
+	DirectRoutingDevice datapathTables.DirectRoutingDevice
 	// Grab the GC object so that we can start the CT/NAT map garbage collection.
 	// This is currently necessary because these maps have not yet been modularized,
 	// and because it depends on parameters which are not provided through hive.
-	CTNATMapGC          gc.Enabler
+	CTNATMapGC          ctmap.GCRunner
 	StoreFactory        store.Factory
 	EndpointRegenerator *endpoint.Regenerator
 	ClusterInfo         cmtypes.ClusterInfo
@@ -1622,7 +1621,6 @@ type daemonParams struct {
 	SyncHostIPs         *syncHostIPs
 	NodeDiscovery       *nodediscovery.NodeDiscovery
 	CompilationLock     datapath.CompilationLock
-	MetalLBBgpSpeaker   speaker.MetalLBBgpSpeaker
 	ServiceResolver     *dial.ServiceResolver
 	IPAM                *ipam.IPAM
 	CRDSyncPromise      promise.Promise[k8sSynced.CRDSync]
@@ -1631,11 +1629,11 @@ type daemonParams struct {
 	IPTablesManager     datapath.IptablesManager
 	Hubble              hubblecell.HubbleIntegration
 	LRPManager          *redirectpolicy.Manager
+	MaglevConfig        maglev.Config
 }
 
-func newDaemonPromise(params daemonParams) (promise.Promise[*Daemon], promise.Promise[policyK8s.PolicyManager]) {
+func newDaemonPromise(params daemonParams) promise.Promise[*Daemon] {
 	daemonResolver, daemonPromise := promise.New[*Daemon]()
-	policyManagerResolver, policyManagerPromise := promise.New[policyK8s.PolicyManager]()
 
 	// daemonCtx is the daemon-wide context cancelled when stopping.
 	daemonCtx, cancelDaemonCtx := context.WithCancel(context.Background())
@@ -1650,7 +1648,6 @@ func newDaemonPromise(params daemonParams) (promise.Promise[*Daemon], promise.Pr
 				// Reject promises on error
 				if err != nil {
 					params.CfgResolver.Reject(err)
-					policyManagerResolver.Reject(err)
 					daemonResolver.Reject(err)
 				}
 			}()
@@ -1688,7 +1685,6 @@ func newDaemonPromise(params daemonParams) (promise.Promise[*Daemon], promise.Pr
 			// 'option.Config' is assumed to be stable at this point, execpt for
 			// 'option.Config.Opts' that are explicitly deemed to be runtime-changeable
 			params.CfgResolver.Resolve(option.Config)
-			policyManagerResolver.Resolve(daemon)
 
 			if option.Config.DryMode {
 				daemonResolver.Resolve(daemon)
@@ -1713,7 +1709,7 @@ func newDaemonPromise(params daemonParams) (promise.Promise[*Daemon], promise.Pr
 			return nil
 		},
 	})
-	return daemonPromise, policyManagerPromise
+	return daemonPromise
 }
 
 // startDaemon starts the old unmodular part of the cilium-agent.
@@ -1732,7 +1728,7 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 	}
 
 	// wait for directory watcher to ingest policy from files
-	<-params.DirReadStatus
+	params.DirReadStatus.Wait()
 
 	bootstrapStats.k8sInit.End(true)
 
@@ -1748,6 +1744,8 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 	bootstrapStats.enableConntrack.Start()
 	log.Info("Starting connection tracking garbage collector")
 	params.CTNATMapGC.Enable()
+	params.CTNATMapGC.Observe4().Observe(d.ctx, ctmap.NatMapNext4, func(err error) {})
+	params.CTNATMapGC.Observe6().Observe(d.ctx, ctmap.NatMapNext6, func(err error) {})
 	bootstrapStats.enableConntrack.End(true)
 
 	if params.WGAgent != nil {
@@ -1781,7 +1779,7 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 	} else {
 		log.Info("Creating host endpoint")
 		err := d.endpointManager.AddHostEndpoint(
-			d.ctx, d, d, d.ipcache, d.l7Proxy, d.identityAllocator)
+			d.ctx, d, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC)
 		if err != nil {
 			return fmt.Errorf("unable to create host endpoint: %w", err)
 		}
@@ -1797,7 +1795,7 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 			} else {
 				log.Info("Creating ingress endpoint")
 				err := d.endpointManager.AddIngressEndpoint(
-					d.ctx, d, d, d.ipcache, d.l7Proxy, d.identityAllocator)
+					d.ctx, d, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC)
 				if err != nil {
 					return fmt.Errorf("unable to create ingress endpoint: %w", err)
 				}
@@ -1869,7 +1867,9 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 	}
 	bootstrapStats.healthCheck.End(true)
 
-	d.startStatusCollector(cleaner)
+	if err := d.startStatusCollector(d.ctx, cleaner); err != nil {
+		return fmt.Errorf("failed to start status collector: %w", err)
+	}
 
 	d.startAgentHealthHTTPService()
 	if option.Config.KubeProxyReplacementHealthzBindAddr != "" {

@@ -72,6 +72,7 @@ type HeaderfileWriter struct {
 	log                *slog.Logger
 	nodeMap            nodemap.MapV2
 	nodeAddressing     datapath.NodeAddressing
+	maglev             *maglev.Maglev
 	nodeExtraDefines   dpdef.Map
 	nodeExtraDefineFns []dpdef.Fn
 	sysctl             sysctl.Sysctl
@@ -91,6 +92,7 @@ func NewHeaderfileWriter(p WriterParams) (datapath.ConfigWriter, error) {
 		nodeExtraDefineFns: p.NodeExtraDefineFns,
 		log:                p.Log,
 		sysctl:             p.Sysctl,
+		maglev:             p.Maglev,
 	}, nil
 }
 
@@ -463,7 +465,7 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 			}
 			if option.Config.NodePortMode == option.NodePortModeHybrid {
 				cDefinesMap["ENABLE_DSR_HYBRID"] = "1"
-			} else if option.Config.NodePortMode == option.NodePortModeAnnotation {
+			} else if option.Config.LoadBalancerModeAnnotation {
 				cDefinesMap["ENABLE_DSR_HYBRID"] = "1"
 				cDefinesMap["ENABLE_DSR_BYUSER"] = "1"
 			}
@@ -540,11 +542,20 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	)
 	cDefinesMap["LB_SELECTION_RANDOM"] = fmt.Sprintf("%d", selectionRandom)
 	cDefinesMap["LB_SELECTION_MAGLEV"] = fmt.Sprintf("%d", selectionMaglev)
+	if option.Config.LoadBalancerAlgorithmAnnotation {
+		cDefinesMap["LB_SELECTION_PER_SERVICE"] = "1"
+	}
 	if option.Config.NodePortAlg == option.NodePortAlgRandom {
 		cDefinesMap["LB_SELECTION"] = fmt.Sprintf("%d", selectionRandom)
 	} else if option.Config.NodePortAlg == option.NodePortAlgMaglev {
 		cDefinesMap["LB_SELECTION"] = fmt.Sprintf("%d", selectionMaglev)
-		cDefinesMap["LB_MAGLEV_LUT_SIZE"] = fmt.Sprintf("%d", option.Config.MaglevTableSize)
+	}
+
+	// define maglev tables when loadbalancer algorith is maglev or config can
+	// be set by the Service annotation
+	if option.Config.LoadBalancerAlgorithmAnnotation ||
+		option.Config.NodePortAlg == option.NodePortAlgMaglev {
+		cDefinesMap["LB_MAGLEV_LUT_SIZE"] = fmt.Sprintf("%d", h.maglev.Config.MaglevTableSize)
 		if option.Config.EnableIPv6 {
 			cDefinesMap["LB6_MAGLEV_MAP_OUTER"] = lbmap.MaglevOuter6MapName
 		}
@@ -552,8 +563,8 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 			cDefinesMap["LB4_MAGLEV_MAP_OUTER"] = lbmap.MaglevOuter4MapName
 		}
 	}
-	cDefinesMap["HASH_INIT4_SEED"] = fmt.Sprintf("%d", maglev.SeedJhash0)
-	cDefinesMap["HASH_INIT6_SEED"] = fmt.Sprintf("%d", maglev.SeedJhash1)
+	cDefinesMap["HASH_INIT4_SEED"] = fmt.Sprintf("%d", h.maglev.SeedJhash0)
+	cDefinesMap["HASH_INIT6_SEED"] = fmt.Sprintf("%d", h.maglev.SeedJhash1)
 
 	if option.Config.DirectRoutingDeviceRequired() {
 		drd := cfg.DirectRoutingDevice
@@ -789,6 +800,9 @@ func (h *HeaderfileWriter) WriteNodeConfig(w io.Writer, cfg *datapath.LocalNodeC
 	fmt.Fprint(fw, declareConfig("identity_length", identity.GetClusterIDShift(), "Identity length in bits"))
 	fmt.Fprint(fw, assignConfig("identity_length", identity.GetClusterIDShift()))
 
+	fmt.Fprint(fw, declareConfig("interface_ifindex", uint32(0), "ifindex of the interface the bpf program is attached to"))
+	cDefinesMap["THIS_INTERFACE_IFINDEX"] = "CONFIG(interface_ifindex)"
+
 	// Since golang maps are unordered, we sort the keys in the map
 	// to get a consistent written format to the writer. This maintains
 	// the consistency when we try to calculate hash for a datapath after
@@ -973,18 +987,6 @@ func (h *HeaderfileWriter) WriteNetdevConfig(w io.Writer, opts *option.IntOption
 // specified writer. This must be kept in sync with loader.ELFSubstitutions().
 func (h *HeaderfileWriter) writeStaticData(devices []string, fw io.Writer, e datapath.EndpointConfiguration) {
 	if e.IsHost() {
-		// Values defined here are for the host datapath attached to the
-		// host device and therefore won't be used. We however need to set
-		// non-zero values to prevent the compiler from optimizing them
-		// out, because we need to substitute them for host datapaths
-		// attached to native devices.
-		// When substituting symbols in the object file, we will replace
-		// these values with zero for the host device and with the actual
-		// values for the native devices.
-		fmt.Fprint(fw, "/* Fake values, replaced by 0 for host device and by actual values for native devices. */\n")
-		fmt.Fprint(fw, defineUint32("NATIVE_DEV_IFINDEX", 1))
-		fmt.Fprint(fw, "\n")
-
 		if option.Config.EnableBPFMasquerade {
 			if option.Config.EnableIPv4Masquerade {
 				// NodePort comment above applies to IPV4_MASQUERADE too
@@ -1030,7 +1032,6 @@ func (h *HeaderfileWriter) writeStaticData(devices []string, fw io.Writer, e dat
 	}
 
 	fmt.Fprint(fw, defineMAC("THIS_INTERFACE_MAC", e.GetNodeMAC()))
-	fmt.Fprint(fw, defineUint32("THIS_INTERFACE_IFINDEX", uint32(e.GetIfIndex())))
 	fmt.Fprint(fw, defineUint64("ENDPOINT_NETNS_COOKIE", uint64(e.GetEndpointNetNsCookie())))
 
 	secID := e.GetIdentityLocked().Uint32()

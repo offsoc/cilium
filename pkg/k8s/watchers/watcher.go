@@ -75,7 +75,7 @@ type nodeManager interface {
 }
 
 type policyManager interface {
-	TriggerPolicyUpdates(force bool, reason string)
+	TriggerPolicyUpdates(reason string)
 }
 
 type svcManager interface {
@@ -93,13 +93,6 @@ type redirectPolicyManager interface {
 	OnUpdatePod(pod *slim_corev1.Pod, needsReassign bool, ready bool)
 	OnDeletePod(pod *slim_corev1.Pod)
 	OnAddPod(pod *slim_corev1.Pod)
-}
-
-type bgpSpeakerManager interface {
-	OnUpdateService(svc *slim_corev1.Service) error
-	OnDeleteService(svc *slim_corev1.Service) error
-
-	OnUpdateEndpoints(eps *k8s.Endpoints) error
 }
 
 type cgroupManager interface {

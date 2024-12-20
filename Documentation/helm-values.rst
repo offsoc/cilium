@@ -143,7 +143,7 @@
    * - :spelling:ignore:`authentication.mutual.spire.install.initImage`
      - init container image of SPIRE agent and server
      - object
-     - ``{"digest":"sha256:768e5c6f5cb6db0794eec98dc7a967f40631746c32232b78a3105fb946f3ab83","override":null,"pullPolicy":"Always","repository":"docker.io/library/busybox","tag":"1.37.0","useDigest":true}``
+     - ``{"digest":"sha256:2919d0172f7524b2d8df9e50066a682669e6d170ac0f6a49676d54358fe970b5","override":null,"pullPolicy":"Always","repository":"docker.io/library/busybox","tag":"1.37.0","useDigest":true}``
    * - :spelling:ignore:`authentication.mutual.spire.install.namespace`
      - SPIRE namespace to install into
      - string
@@ -268,30 +268,22 @@
      - Enable bandwidth manager infrastructure (also prerequirement for BBR)
      - bool
      - ``false``
-   * - :spelling:ignore:`bgp`
-     - Configure BGP
-     - object
-     - ``{"announce":{"loadbalancerIP":false,"podCIDR":false},"enabled":false}``
-   * - :spelling:ignore:`bgp.announce.loadbalancerIP`
-     - Enable allocation and announcement of service LoadBalancer IPs
-     - bool
-     - ``false``
-   * - :spelling:ignore:`bgp.announce.podCIDR`
-     - Enable announcement of node pod CIDR
-     - bool
-     - ``false``
-   * - :spelling:ignore:`bgp.enabled`
-     - Enable BGP support inside Cilium; embeds a new ConfigMap for BGP inside cilium-agent and cilium-operator
-     - bool
-     - ``false``
    * - :spelling:ignore:`bgpControlPlane`
      - This feature set enables virtual BGP routers to be created via CiliumBGPPeeringPolicy CRDs.
      - object
-     - ``{"enabled":false,"secretsNamespace":{"create":false,"name":"kube-system"},"statusReport":{"enabled":true}}``
+     - ``{"enabled":false,"routerIDAllocation":{"mode":"default"},"secretsNamespace":{"create":false,"name":"kube-system"},"statusReport":{"enabled":true}}``
    * - :spelling:ignore:`bgpControlPlane.enabled`
      - Enables the BGP control plane.
      - bool
      - ``false``
+   * - :spelling:ignore:`bgpControlPlane.routerIDAllocation`
+     - BGP router-id allocation mode
+     - object
+     - ``{"mode":"default"}``
+   * - :spelling:ignore:`bgpControlPlane.routerIDAllocation.mode`
+     - BGP router-id allocation mode. In default mode, the router-id is derived from the IPv4 address if it is available, or else it is determined by the lower 32 bits of the MAC address.
+     - string
+     - ``"default"``
    * - :spelling:ignore:`bgpControlPlane.secretsNamespace`
      - SecretsNamespace is the namespace which BGP support will retrieve secrets from.
      - object
@@ -376,6 +368,10 @@
      - Configure whether direct routing mode should route traffic via host stack (true) or directly and more efficiently out of BPF (false) if the kernel supports it. The latter has the implication that it will also bypass netfilter in the host namespace.
      - bool
      - ``false``
+   * - :spelling:ignore:`bpf.lbAlgorithmAnnotation`
+     - Enable the option to define the load balancing algorithm on a per-service basis through service.cilium.io/lb-algorithm annotation.
+     - bool
+     - ``false``
    * - :spelling:ignore:`bpf.lbExternalClusterIP`
      - Allow cluster external access to ClusterIP services.
      - bool
@@ -384,6 +380,10 @@
      - Configure the maximum number of service entries in the load balancer maps.
      - int
      - ``65536``
+   * - :spelling:ignore:`bpf.lbModeAnnotation`
+     - Enable the option to define the load balancing mode (SNAT or DSR) on a per-service basis through service.cilium.io/forwarding-mode annotation.
+     - bool
+     - ``false``
    * - :spelling:ignore:`bpf.lbSourceRangeAllTypes`
      - Enable loadBalancerSourceRanges CIDR filtering for all service types, not just LoadBalancer services. The corresponding NodePort and ClusterIP (if enabled for cluster-external traffic) will also apply the CIDR filter.
      - bool
@@ -944,6 +944,10 @@
      - Remove the CNI configuration and binary files on agent shutdown. Enable this if you're removing Cilium from the cluster. Disable this to prevent the CNI configuration file from being removed during agent upgrade, which can cause nodes to go unmanageable.
      - bool
      - ``false``
+   * - :spelling:ignore:`commonLabels`
+     - commonLabels allows users to add common labels for all Cilium resources.
+     - object
+     - ``{}``
    * - :spelling:ignore:`conntrackGCInterval`
      - Configure how frequently garbage collection should occur for the datapath connection tracking table.
      - string
@@ -1023,7 +1027,7 @@
    * - :spelling:ignore:`dnsProxy.endpointMaxIpPerHostname`
      - Maximum number of IPs to maintain per FQDN name for each endpoint.
      - int
-     - ``50``
+     - ``1000``
    * - :spelling:ignore:`dnsProxy.idleConnectionGracePeriod`
      - Time during which idle but previously active connections with expired DNS lookups are still considered alive.
      - string
@@ -1176,6 +1180,10 @@
      - Enable connectivity health checking between virtual endpoints.
      - bool
      - ``true``
+   * - :spelling:ignore:`endpointLockdownOnMapOverflow`
+     - Enable endpoint lockdown on policy map overflow.
+     - bool
+     - ``false``
    * - :spelling:ignore:`endpointRoutes.enabled`
      - Enable use of per endpoint routes instead of routing via the cilium_host interface.
      - bool
@@ -1240,6 +1248,10 @@
      - Set Envoy'--base-id' to use when allocating shared memory regions. Only needs to be changed if multiple Envoy instances will run on the same node and may have conflicts. Supported values: 0 - 4294967295. Defaults to '0'
      - int
      - ``0``
+   * - :spelling:ignore:`envoy.bootstrapConfigMap`
+     - ADVANCED OPTION: Bring your own custom Envoy bootstrap ConfigMap. Provide the name of a ConfigMap with a ``bootstrap-config.json`` key. When specified, Envoy will use this ConfigMap instead of the default provided by the chart. WARNING: Use of this setting has the potential to prevent cilium-envoy from starting up, and can cause unexpected behavior (e.g. due to syntax error or semantically incorrect configuration). Before submitting an issue, please ensure you have disabled this feature, as support cannot be provided for custom Envoy bootstrap configs. @schema type: [null, string] @schema
+     - string
+     - ``nil``
    * - :spelling:ignore:`envoy.connectTimeoutSeconds`
      - Time in seconds after which a TCP connection attempt times out
      - int
@@ -1288,6 +1300,10 @@
      - TCP port for the health API.
      - int
      - ``9878``
+   * - :spelling:ignore:`envoy.httpRetryCount`
+     - Maximum number of retries for each HTTP request
+     - int
+     - ``3``
    * - :spelling:ignore:`envoy.idleTimeoutDurationSeconds`
      - Set Envoy upstream HTTP idle connection timeout seconds. Does not apply to connections with pending requests. Default 60s
      - int
@@ -1295,7 +1311,7 @@
    * - :spelling:ignore:`envoy.image`
      - Envoy container image.
      - object
-     - ``{"digest":"sha256:f7901213136b1a03d6e8143a22f1f1a14ce8f3209cefd5d8b3c7cc07af7543af","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.31.3-1731891150-9a53218a187b032b9b841e1f910fc879502e9f1f","useDigest":true}``
+     - ``{"digest":"sha256:85adb1b3a66182de9a1d24cc5b5240a71dd742cdc846af19589227ecf0053cfe","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.31.4-1734310891-3a8ccd54545785689e677d785b69025d1d4b33de","useDigest":true}``
    * - :spelling:ignore:`envoy.initialFetchTimeoutSeconds`
      - Time in seconds after which the initial fetch on an xDS stream is considered timed out
      - int
@@ -1324,6 +1340,10 @@
      - Path to a separate Envoy log file, if any. Defaults to /dev/stdout.
      - string
      - ``""``
+   * - :spelling:ignore:`envoy.maxConcurrentRetries`
+     - Maximum number of concurrent retries on Envoy clusters
+     - int
+     - ``128``
    * - :spelling:ignore:`envoy.maxConnectionDurationSeconds`
      - Set Envoy HTTP option max_connection_duration seconds. Default 0 (disable)
      - int
@@ -1588,6 +1608,10 @@
      - Enable Google Kubernetes Engine integration
      - bool
      - ``false``
+   * - :spelling:ignore:`healthCheckICMPFailureThreshold`
+     - Number of ICMP requests sent for each health check before marking a node or endpoint unreachable.
+     - int
+     - ``3``
    * - :spelling:ignore:`healthChecking`
      - Enable connectivity health checking.
      - bool
@@ -1675,11 +1699,23 @@
    * - :spelling:ignore:`hubble.metrics`
      - Hubble metrics configuration. See https://docs.cilium.io/en/stable/observability/metrics/#hubble-metrics for more comprehensive documentation about Hubble metrics.
      - object
-     - ``{"dashboards":{"annotations":{},"enabled":false,"label":"grafana_dashboard","labelValue":"1","namespace":null},"enableOpenMetrics":false,"enabled":null,"port":9965,"serviceAnnotations":{},"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"tlsConfig":{}},"tls":{"enabled":false,"server":{"cert":"","existingSecret":"","extraDnsNames":[],"extraIpAddresses":[],"key":"","mtls":{"enabled":false,"key":"ca.crt","name":null,"useSecret":false}}}}``
+     - ``{"dashboards":{"annotations":{},"enabled":false,"label":"grafana_dashboard","labelValue":"1","namespace":null},"dynamic":{"config":{"configMapName":"cilium-dynamic-metrics-config","content":[{"contextOptions":[],"excludeFilters":[],"includeFilters":[],"name":"all"}],"createConfigMap":true},"enabled":false},"enableOpenMetrics":false,"enabled":null,"port":9965,"serviceAnnotations":{},"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"tlsConfig":{}},"tls":{"enabled":false,"server":{"cert":"","existingSecret":"","extraDnsNames":[],"extraIpAddresses":[],"key":"","mtls":{"enabled":false,"key":"ca.crt","name":null,"useSecret":false}}}}``
    * - :spelling:ignore:`hubble.metrics.dashboards`
      - Grafana dashboards for hubble grafana can import dashboards based on the label and value ref: https://github.com/grafana/helm-charts/tree/main/charts/grafana#sidecar-for-dashboards
      - object
      - ``{"annotations":{},"enabled":false,"label":"grafana_dashboard","labelValue":"1","namespace":null}``
+   * - :spelling:ignore:`hubble.metrics.dynamic.config.configMapName`
+     - -- Name of configmap with configuration that may be altered to reconfigure metric handlers within a running agent.
+     - string
+     - ``"cilium-dynamic-metrics-config"``
+   * - :spelling:ignore:`hubble.metrics.dynamic.config.content`
+     - -- Exporters configuration in YAML format.
+     - list
+     - ``[{"contextOptions":[],"excludeFilters":[],"includeFilters":[],"name":"all"}]``
+   * - :spelling:ignore:`hubble.metrics.dynamic.config.createConfigMap`
+     - -- True if helm installer should create config map. Switch to false if you want to self maintain the file content.
+     - bool
+     - ``true``
    * - :spelling:ignore:`hubble.metrics.enableOpenMetrics`
      - Enables exporting hubble metrics in OpenMetrics format.
      - bool
@@ -1801,7 +1837,7 @@
      - object
      - ``{}``
    * - :spelling:ignore:`hubble.relay.dialTimeout`
-     - Dial timeout to connect to the local hubble instance to receive peer information (e.g. "30s").
+     - Dial timeout to connect to the local hubble instance to receive peer information (e.g. "30s").  This option has been deprecated and is a no-op.
      - string
      - ``nil``
    * - :spelling:ignore:`hubble.relay.enabled`
@@ -2384,10 +2420,18 @@
      - Maximum rate at which the CiliumNode custom resource is updated.
      - string
      - ``"15s"``
+   * - :spelling:ignore:`ipam.installUplinkRoutesForDelegatedIPAM`
+     - Install ingress/egress routes through uplink on host for Pods when working with delegated IPAM plugin.
+     - bool
+     - ``false``
    * - :spelling:ignore:`ipam.mode`
      - Configure IP Address Management mode. ref: https://docs.cilium.io/en/stable/network/concepts/ipam/
      - string
      - ``"cluster-pool"``
+   * - :spelling:ignore:`ipam.multiPoolPreAllocation`
+     - Pre-allocation settings for IPAM in Multi-Pool mode
+     - string
+     - ``""``
    * - :spelling:ignore:`ipam.operator.autoCreateCiliumPodIPPools`
      - IP pools to auto-create in multi-pool IPAM mode.
      - object
@@ -2851,7 +2895,7 @@
    * - :spelling:ignore:`operator.prometheus`
      - Enable prometheus metrics for cilium-operator on the configured port at /metrics
      - object
-     - ``{"enabled":true,"port":9963,"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":null}}``
+     - ``{"enabled":true,"metricsService":false,"port":9963,"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":null}}``
    * - :spelling:ignore:`operator.prometheus.serviceMonitor.annotations`
      - Annotations to add to ServiceMonitor cilium-operator
      - object
@@ -3075,7 +3119,7 @@
    * - :spelling:ignore:`prometheus`
      - Configure prometheus metrics on the configured port at /metrics
      - object
-     - ``{"controllerGroupMetrics":["write-cni-file","sync-host-ips","sync-lb-maps-with-k8s-services"],"enabled":false,"metrics":null,"port":9962,"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"trustCRDsExist":false}}``
+     - ``{"controllerGroupMetrics":["write-cni-file","sync-host-ips","sync-lb-maps-with-k8s-services"],"enabled":false,"metrics":null,"metricsService":false,"port":9962,"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"trustCRDsExist":false}}``
    * - :spelling:ignore:`prometheus.controllerGroupMetrics`
      - - Enable controller group metrics for monitoring specific Cilium subsystems. The list is a list of controller group names. The special values of "all" and "none" are supported. The set of controller group names is not guaranteed to be stable between Cilium versions.
      - list

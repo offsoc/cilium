@@ -67,7 +67,7 @@ func TestGetUniqueServiceFrontends(t *testing.T) {
 	}
 
 	db, nodeAddrs := newDB(t)
-	cache := NewServiceCache(db, nodeAddrs)
+	cache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 
 	cache.services = map[ServiceID]*Service{
 		svcID1: {
@@ -142,7 +142,6 @@ func TestGetUniqueServiceFrontends(t *testing.T) {
 		require.Equal(t, wild_match_ok, frontends.LooseMatch(*frontend))
 	}
 }
-
 func TestServiceCacheEndpoints(t *testing.T) {
 	endpoints := ParseEndpoints(&slim_corev1.Endpoints{
 		ObjectMeta: slim_metav1.ObjectMeta{
@@ -213,7 +212,7 @@ func testServiceCache(t *testing.T,
 	updateEndpointsCB, deleteEndpointsCB func(svcCache *ServiceCache, swgEps *lock.StoppableWaitGroup)) {
 
 	db, nodeAddrs := newDB(t)
-	svcCache := NewServiceCache(db, nodeAddrs)
+	svcCache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 
 	k8sSvc := &slim_corev1.Service{
 		ObjectMeta: slim_metav1.ObjectMeta{
@@ -250,7 +249,7 @@ func testServiceCache(t *testing.T,
 	// imported
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -277,7 +276,7 @@ func testServiceCache(t *testing.T,
 	svcCache.DeleteService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, DeleteService, event.Action)
 		require.Equal(t, svcID, event.ID)
 
@@ -292,7 +291,7 @@ func testServiceCache(t *testing.T,
 	svcCache.UpdateService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 
@@ -307,7 +306,7 @@ func testServiceCache(t *testing.T,
 	deleteEndpointsCB(svcCache, swgEps)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 
@@ -333,7 +332,7 @@ func testServiceCache(t *testing.T,
 	updateEndpointsCB(svcCache, swgEps)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -347,7 +346,7 @@ func testServiceCache(t *testing.T,
 	svcCache.DeleteService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, DeleteService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -378,7 +377,7 @@ func testServiceCache(t *testing.T,
 
 func TestForEachService(t *testing.T) {
 	db, nodeAddrs := newDB(t)
-	svcCache := NewServiceCache(db, nodeAddrs)
+	svcCache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 
 	k8sSvc1 := &slim_corev1.Service{
 		ObjectMeta: slim_metav1.ObjectMeta{
@@ -451,7 +450,7 @@ func TestForEachService(t *testing.T) {
 	svcID1, eps1 := svcCache.UpdateEndpoints(k8sEndpoints1, swg)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID1, event.ID)
 		require.Equal(t, eps1, event.Endpoints)
@@ -462,7 +461,7 @@ func TestForEachService(t *testing.T) {
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		println("waiting for events2")
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID2, event.ID)
 		require.Equal(t, eps2, event.Endpoints)
@@ -489,7 +488,7 @@ func TestServiceMutators(t *testing.T) {
 	var m1, m2 int
 
 	db, nodeAddrs := newDB(t)
-	svcCache := NewServiceCache(db, nodeAddrs)
+	svcCache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 
 	svcCache.ServiceMutators = append(svcCache.ServiceMutators,
 		func(svc *slim_corev1.Service, svcInfo *Service) { m1++ },
@@ -512,7 +511,7 @@ func TestServiceMutators(t *testing.T) {
 
 func TestExternalServiceMerging(t *testing.T) {
 	db, nodeAddrs := newDB(t)
-	svcCache := NewServiceCache(db, nodeAddrs)
+	svcCache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 
 	k8sSvc := &slim_corev1.Service{
 		ObjectMeta: slim_metav1.ObjectMeta{
@@ -564,7 +563,7 @@ func TestExternalServiceMerging(t *testing.T) {
 	// imported
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -617,7 +616,7 @@ func TestExternalServiceMerging(t *testing.T) {
 	// IncludeExternal is set (i.e., the service is marked as a global one in the remote cluster).
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 
@@ -653,7 +652,7 @@ func TestExternalServiceMerging(t *testing.T) {
 	// IncludeExternal is set (i.e., the service is marked as a global one in the remote cluster).
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 
@@ -693,7 +692,7 @@ func TestExternalServiceMerging(t *testing.T) {
 	// is set (i.e., the service is marked as a global one in the remote cluster).
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		require.EqualValues(t, &Backend{
@@ -764,7 +763,7 @@ func TestExternalServiceMerging(t *testing.T) {
 
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID2, event.ID)
 		return true
@@ -790,7 +789,7 @@ func TestExternalServiceMerging(t *testing.T) {
 	svcCache.MergeExternalServiceUpdate(cluster2svc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.EqualValues(t, &Backend{
 			Ports: serviceStore.PortConfiguration{
@@ -804,7 +803,7 @@ func TestExternalServiceMerging(t *testing.T) {
 	svcCache.MergeExternalServiceDelete(cluster2svc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Nil(t, event.Endpoints.Backends[cmtypes.MustParseAddrCluster("4.4.4.4")])
 		return true
@@ -814,7 +813,7 @@ func TestExternalServiceMerging(t *testing.T) {
 	svcCache.DeleteService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, DeleteService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -824,7 +823,7 @@ func TestExternalServiceMerging(t *testing.T) {
 	svcCache.UpdateService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		require.EqualValues(t, &Backend{
@@ -873,7 +872,7 @@ func TestExternalServiceDeletion(t *testing.T) {
 
 	swg := lock.NewStoppableWaitGroup()
 	db, nodeAddrs := newDB(t)
-	svcCache := NewServiceCache(db, nodeAddrs)
+	svcCache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 
 	// Store the service with the non-cluster-aware ID
 	svcCache.services[id1] = &svc
@@ -887,7 +886,7 @@ func TestExternalServiceDeletion(t *testing.T) {
 
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, DeleteService, event.Action)
 		require.Equal(t, id1, event.ID)
 		return true
@@ -907,7 +906,7 @@ func TestExternalServiceDeletion(t *testing.T) {
 
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, id1, event.ID)
 		return true
@@ -925,7 +924,7 @@ func TestExternalServiceDeletion(t *testing.T) {
 
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, DeleteService, event.Action)
 		require.Equal(t, id2, event.ID)
 		return true
@@ -934,7 +933,7 @@ func TestExternalServiceDeletion(t *testing.T) {
 
 func TestClusterServiceMerging(t *testing.T) {
 	db, nodeAddrs := newDB(t)
-	svcCache := NewServiceCache(db, nodeAddrs)
+	svcCache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 	swgSvcs := lock.NewStoppableWaitGroup()
 	swgEps := lock.NewStoppableWaitGroup()
 
@@ -981,7 +980,7 @@ func TestClusterServiceMerging(t *testing.T) {
 	// regardless of whether it is marked as global or shared (since the cluster name matches).
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		require.EqualValues(t, &Backend{
@@ -1002,7 +1001,7 @@ func TestClusterServiceMerging(t *testing.T) {
 
 func TestNonSharedService(t *testing.T) {
 	db, nodeAddrs := newDB(t)
-	svcCache := NewServiceCache(db, nodeAddrs)
+	svcCache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 
 	k8sSvc := &slim_corev1.Service{
 		ObjectMeta: slim_metav1.ObjectMeta{
@@ -1127,7 +1126,7 @@ func TestServiceCacheWith2EndpointSlice(t *testing.T) {
 	})
 
 	db, nodeAddrs := newDB(t)
-	svcCache := NewServiceCache(db, nodeAddrs)
+	svcCache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 
 	k8sSvc := &slim_corev1.Service{
 		ObjectMeta: slim_metav1.ObjectMeta{
@@ -1166,7 +1165,7 @@ func TestServiceCacheWith2EndpointSlice(t *testing.T) {
 	// imported for k8sEndpointSlice1
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1176,7 +1175,7 @@ func TestServiceCacheWith2EndpointSlice(t *testing.T) {
 	// imported for k8sEndpointSlice2
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1204,7 +1203,7 @@ func TestServiceCacheWith2EndpointSlice(t *testing.T) {
 	svcCache.DeleteService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, DeleteService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1214,7 +1213,7 @@ func TestServiceCacheWith2EndpointSlice(t *testing.T) {
 	svcCache.UpdateService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1224,7 +1223,7 @@ func TestServiceCacheWith2EndpointSlice(t *testing.T) {
 	svcCache.DeleteEndpoints(k8sEndpointSlice2.EndpointSliceID, swgEps)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1237,7 +1236,7 @@ func TestServiceCacheWith2EndpointSlice(t *testing.T) {
 	svcCache.DeleteEndpoints(k8sEndpointSlice1.EndpointSliceID, swgEps)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1251,7 +1250,7 @@ func TestServiceCacheWith2EndpointSlice(t *testing.T) {
 	svcCache.UpdateEndpoints(k8sEndpointSlice1, swgEps)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1265,7 +1264,7 @@ func TestServiceCacheWith2EndpointSlice(t *testing.T) {
 	svcCache.DeleteService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, DeleteService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1346,7 +1345,7 @@ func TestServiceCacheWith2EndpointSliceSameAddress(t *testing.T) {
 	})
 
 	db, nodeAddrs := newDB(t)
-	svcCache := NewServiceCache(db, nodeAddrs)
+	svcCache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 
 	k8sSvc := &slim_corev1.Service{
 		ObjectMeta: slim_metav1.ObjectMeta{
@@ -1384,7 +1383,7 @@ func TestServiceCacheWith2EndpointSliceSameAddress(t *testing.T) {
 	// imported for k8sEndpointSlice1
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1394,7 +1393,7 @@ func TestServiceCacheWith2EndpointSliceSameAddress(t *testing.T) {
 	// imported for k8sEndpointSlice2
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1422,7 +1421,7 @@ func TestServiceCacheWith2EndpointSliceSameAddress(t *testing.T) {
 	svcCache.DeleteService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, DeleteService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1432,7 +1431,7 @@ func TestServiceCacheWith2EndpointSliceSameAddress(t *testing.T) {
 	svcCache.UpdateService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1442,7 +1441,7 @@ func TestServiceCacheWith2EndpointSliceSameAddress(t *testing.T) {
 	svcCache.DeleteEndpoints(k8sEndpointSlice2.EndpointSliceID, swgEps)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1455,7 +1454,7 @@ func TestServiceCacheWith2EndpointSliceSameAddress(t *testing.T) {
 	svcCache.DeleteEndpoints(k8sEndpointSlice1.EndpointSliceID, swgEps)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1469,7 +1468,7 @@ func TestServiceCacheWith2EndpointSliceSameAddress(t *testing.T) {
 	svcCache.UpdateEndpoints(k8sEndpointSlice1, swgEps)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, UpdateService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1483,7 +1482,7 @@ func TestServiceCacheWith2EndpointSliceSameAddress(t *testing.T) {
 	svcCache.DeleteService(k8sSvc, swgSvcs)
 	require.NoError(t, testutils.WaitUntil(func() bool {
 		event := <-svcCache.Events
-		defer event.SWG.Done()
+		defer event.SWGDone()
 		require.Equal(t, DeleteService, event.Action)
 		require.Equal(t, svcID, event.ID)
 		return true
@@ -1562,7 +1561,7 @@ func TestServiceEndpointFiltering(t *testing.T) {
 	db, nodeAddrs := newDB(t)
 	svcCache := newServiceCache(hivetest.Lifecycle(t),
 		ServiceCacheConfig{EnableServiceTopology: true}, store,
-		db, nodeAddrs)
+		db, nodeAddrs, NewSVCMetricsNoop())
 
 	swg := lock.NewStoppableWaitGroup()
 
@@ -1636,7 +1635,7 @@ func BenchmarkCorrelateEndpoints(b *testing.B) {
 	const epsPerSlice = 100
 
 	db, nodeAddrs := newDB(b)
-	cache := NewServiceCache(db, nodeAddrs)
+	cache := NewServiceCache(db, nodeAddrs, NewSVCMetricsNoop())
 
 	var swg lock.StoppableWaitGroup
 	id := ServiceID{Name: "foo", Namespace: "bar"}

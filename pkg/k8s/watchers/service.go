@@ -11,11 +11,11 @@ import (
 	"sync/atomic"
 
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/stream"
 	"github.com/sirupsen/logrus"
 
 	agentK8s "github.com/cilium/cilium/daemon/k8s"
 	"github.com/cilium/cilium/pkg/annotation"
-	"github.com/cilium/cilium/pkg/bgp/speaker"
 	"github.com/cilium/cilium/pkg/cidr"
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/ip"
@@ -46,11 +46,10 @@ type k8sServiceWatcherParams struct {
 	K8sResourceSynced *k8sSynced.Resources
 	K8sAPIGroups      *k8sSynced.APIGroups
 
-	ServiceCache      *k8s.ServiceCache
-	ServiceManager    service.ServiceManager
-	LRPManager        *redirectpolicy.Manager
-	MetalLBBgpSpeaker speaker.MetalLBBgpSpeaker
-	LocalNodeStore    *node.LocalNodeStore
+	ServiceCache   *k8s.ServiceCache
+	ServiceManager service.ServiceManager
+	LRPManager     *redirectpolicy.Manager
+	LocalNodeStore *node.LocalNodeStore
 }
 
 func newK8sServiceWatcher(params k8sServiceWatcherParams) *K8sServiceWatcher {
@@ -62,7 +61,6 @@ func newK8sServiceWatcher(params k8sServiceWatcherParams) *K8sServiceWatcher {
 		k8sSvcCache:           params.ServiceCache,
 		svcManager:            params.ServiceManager,
 		redirectPolicyManager: params.LRPManager,
-		bgpSpeakerManager:     params.MetalLBBgpSpeaker,
 		localNodeStore:        params.LocalNodeStore,
 		stop:                  make(chan struct{}),
 	}
@@ -82,7 +80,6 @@ type K8sServiceWatcher struct {
 	k8sSvcCache           *k8s.ServiceCache
 	svcManager            svcManager
 	redirectPolicyManager redirectPolicyManager
-	bgpSpeakerManager     bgpSpeakerManager
 	localNodeStore        *node.LocalNodeStore
 
 	stop chan struct{}
@@ -147,7 +144,6 @@ func (k *K8sServiceWatcher) upsertK8sServiceV1(svc *slim_corev1.Service, swg *lo
 			k.redirectPolicyManager.OnAddService(svcID)
 		}
 	}
-	k.bgpSpeakerManager.OnUpdateService(svc)
 }
 
 func (k *K8sServiceWatcher) deleteK8sServiceV1(svc *slim_corev1.Service, swg *lock.StoppableWaitGroup) {
@@ -158,49 +154,93 @@ func (k *K8sServiceWatcher) deleteK8sServiceV1(svc *slim_corev1.Service, swg *lo
 			k.redirectPolicyManager.OnDeleteService(svcID)
 		}
 	}
-	k.bgpSpeakerManager.OnDeleteService(svc)
 }
 
 func (k *K8sServiceWatcher) k8sServiceHandler() {
-	eventHandler := func(event k8s.ServiceEvent) {
-		defer func(startTime time.Time) {
-			event.SWG.Done()
-			k.k8sServiceEventProcessed(event.Action.String(), startTime)
-		}(time.Now())
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 
-		svc := event.Service
-
-		scopedLog := log.WithFields(logrus.Fields{
-			logfields.K8sSvcName:   event.ID.Name,
-			logfields.K8sNamespace: event.ID.Namespace,
-		})
-
-		if logging.CanLogAt(scopedLog.Logger, logrus.DebugLevel) {
-			scopedLog.WithFields(logrus.Fields{
-				"action":        event.Action.String(),
-				"service":       event.Service.String(),
-				"old-service":   event.OldService.String(),
-				"endpoints":     event.Endpoints.String(),
-				"old-endpoints": event.OldEndpoints.String(),
-			}).Debug("Kubernetes service definition changed")
-		}
-
-		switch event.Action {
-		case k8s.UpdateService:
-			k.addK8sSVCs(event.ID, event.OldService, svc, event.Endpoints)
-		case k8s.DeleteService:
-			k.delK8sSVCs(event.ID, event.Service)
-		}
+	type event struct {
+		k8s.ServiceEvent
+		doneFuncs []func()
 	}
+
+	bufferEvent := func(buf map[k8s.ServiceID]event, ev k8s.ServiceEvent) map[k8s.ServiceID]event {
+		if buf == nil {
+			buf = map[k8s.ServiceID]event{}
+		}
+
+		event := event{ServiceEvent: ev, doneFuncs: []func(){ev.SWGDone}}
+		old, ok := buf[ev.ID]
+		if ok {
+			// Older event existed, reuse the "old" structures so that the event describes
+			// the full delta.
+			event.OldEndpoints = old.OldEndpoints
+			event.OldService = old.OldService
+			event.doneFuncs = append(old.doneFuncs, event.doneFuncs...)
+		}
+		buf[ev.ID] = event
+		return buf
+	}
+
+	// Collect events into a buffer to debounce repeated events for the same service.
+	// This has a big impact when there are many EndpointSlices for a single service as
+	// we'll collapse those into a single event and avoid the repeated service upserts.
+	events :=
+		stream.ToChannel(ctx,
+			stream.Buffer(
+				stream.FromChannel(k.k8sSvcCache.Events),
+				option.Config.K8sServiceDebounceBufferSize,
+				option.Config.K8sServiceDebounceWaitTime,
+				bufferEvent,
+			),
+		)
 	for {
 		select {
 		case <-k.stop:
-			return
-		case event, ok := <-k.k8sSvcCache.Events:
+			cancel()
+		case buf, ok := <-events:
 			if !ok {
 				return
 			}
-			eventHandler(event)
+			for _, ev := range buf {
+				k.processServiceEvent(ev.ServiceEvent)
+				for _, done := range ev.doneFuncs {
+					done()
+				}
+			}
+		}
+	}
+}
+
+func (k *K8sServiceWatcher) processServiceEvent(event k8s.ServiceEvent) {
+	defer func(startTime time.Time) {
+		k.k8sServiceEventProcessed(event.Action.String(), startTime)
+	}(time.Now())
+
+	scopedLog := log.WithFields(logrus.Fields{
+		logfields.K8sSvcName:   event.ID.Name,
+		logfields.K8sNamespace: event.ID.Namespace,
+	})
+
+	if logging.CanLogAt(scopedLog.Logger, logrus.DebugLevel) {
+		scopedLog.WithFields(logrus.Fields{
+			"action":        event.Action.String(),
+			"service":       event.Service.String(),
+			"old-service":   event.OldService.String(),
+			"endpoints":     event.Endpoints.String(),
+			"old-endpoints": event.OldEndpoints.String(),
+		}).Debug("Kubernetes service definition changed")
+	}
+
+	switch event.Action {
+	case k8s.UpdateService:
+		k.addK8sSVCs(event.ID, event.OldService, event.Service, event.Endpoints)
+	case k8s.DeleteService:
+		// If [event.OldService] is nil then no upsert event was ever processed
+		// and we have nothing to delete.
+		if event.OldService != nil {
+			k.delK8sSVCs(event.ID, event.OldService)
 		}
 	}
 }
@@ -430,12 +470,14 @@ func (k *K8sServiceWatcher) datapathSVCs(svc *k8s.Service, endpoints *k8s.Endpoi
 	// apply common service properties
 	for i := range svcs {
 		svcs[i].ForwardingMode = svc.ForwardingMode
+		svcs[i].LoadBalancerAlgorithm = svc.LoadBalancerAlgorithm
 		svcs[i].ExtTrafficPolicy = svc.ExtTrafficPolicy
 		svcs[i].IntTrafficPolicy = svc.IntTrafficPolicy
 		svcs[i].HealthCheckNodePort = svc.HealthCheckNodePort
 		svcs[i].SessionAffinity = svc.SessionAffinity
 		svcs[i].SessionAffinityTimeoutSec = svc.SessionAffinityTimeoutSec
 		svcs[i].Annotations = svc.Annotations
+		svcs[i].SourceRangesPolicy = svc.SourceRangesPolicy
 		if configureWithSourceRanges(svcs[i].Type) {
 			svcs[i].LoadBalancerSourceRanges = lbSrcRanges
 		}
@@ -565,7 +607,9 @@ func (k *K8sServiceWatcher) addK8sSVCs(svcID k8s.ServiceID, oldSvc, svc *k8s.Ser
 			SessionAffinityTimeoutSec: dpSvc.SessionAffinityTimeoutSec,
 			HealthCheckNodePort:       dpSvc.HealthCheckNodePort,
 			Annotations:               dpSvc.Annotations,
+			SourceRangesPolicy:        dpSvc.SourceRangesPolicy,
 			LoadBalancerSourceRanges:  dpSvc.LoadBalancerSourceRanges,
+			LoadBalancerAlgorithm:     dpSvc.LoadBalancerAlgorithm,
 			Name: loadbalancer.ServiceName{
 				Name:      svcID.Name,
 				Namespace: svcID.Namespace,

@@ -42,10 +42,13 @@ type cecManager struct {
 	backendSyncer  *envoyServiceBackendSyncer
 	resourceParser *cecResourceParser
 
-	envoyConfigTimeout time.Duration
+	envoyConfigTimeout   time.Duration
+	maxConcurrentRetries uint32
 
 	services  resource.Resource[*slim_corev1.Service]
 	endpoints resource.Resource[*k8s.Endpoints]
+
+	metricsManager CECMetrics
 }
 
 func newCiliumEnvoyConfigManager(logger logrus.FieldLogger,
@@ -55,23 +58,32 @@ func newCiliumEnvoyConfigManager(logger logrus.FieldLogger,
 	backendSyncer *envoyServiceBackendSyncer,
 	resourceParser *cecResourceParser,
 	envoyConfigTimeout time.Duration,
+	maxConcurrentRetries uint32,
 	services resource.Resource[*slim_corev1.Service],
 	endpoints resource.Resource[*k8s.Endpoints],
+	metricsManager CECMetrics,
 ) *cecManager {
 	return &cecManager{
-		logger:             logger,
-		policyUpdater:      policyUpdater,
-		serviceManager:     serviceManager,
-		xdsServer:          xdsServer,
-		backendSyncer:      backendSyncer,
-		resourceParser:     resourceParser,
-		envoyConfigTimeout: envoyConfigTimeout,
-		services:           services,
-		endpoints:          endpoints,
+		logger:               logger,
+		policyUpdater:        policyUpdater,
+		serviceManager:       serviceManager,
+		xdsServer:            xdsServer,
+		backendSyncer:        backendSyncer,
+		resourceParser:       resourceParser,
+		envoyConfigTimeout:   envoyConfigTimeout,
+		maxConcurrentRetries: maxConcurrentRetries,
+		services:             services,
+		endpoints:            endpoints,
+		metricsManager:       metricsManager,
 	}
 }
 
 func (r *cecManager) addCiliumEnvoyConfig(cecObjectMeta metav1.ObjectMeta, cecSpec *ciliumv2.CiliumEnvoyConfigSpec) error {
+	if cecObjectMeta.GetNamespace() == "" {
+		r.metricsManager.AddCCEC(cecSpec)
+	} else {
+		r.metricsManager.AddCEC(cecSpec)
+	}
 	resources, err := r.resourceParser.parseResources(
 		cecObjectMeta.GetNamespace(),
 		cecObjectMeta.GetName(),
@@ -100,7 +112,7 @@ func (r *cecManager) addCiliumEnvoyConfig(cecObjectMeta metav1.ObjectMeta, cecSp
 		// the bpf maps are not updated with the new proxy ports either. Move from the
 		// simple boolean to an enum that can more selectively skip regeneration steps (like
 		// we do for the datapath recompilations already?)
-		r.policyUpdater.TriggerPolicyUpdates(true, "Envoy Listeners added")
+		r.policyUpdater.TriggerPolicyUpdates("Envoy Listeners added")
 	}
 
 	return err
@@ -325,6 +337,16 @@ func (r *cecManager) updateCiliumEnvoyConfig(
 	oldCECObjectMeta metav1.ObjectMeta, oldCECSpec *ciliumv2.CiliumEnvoyConfigSpec,
 	newCECObjectMeta metav1.ObjectMeta, newCECSpec *ciliumv2.CiliumEnvoyConfigSpec,
 ) error {
+	if oldCECObjectMeta.GetNamespace() == "" {
+		r.metricsManager.DelCCEC(oldCECSpec)
+	} else {
+		r.metricsManager.DelCEC(oldCECSpec)
+	}
+	if newCECObjectMeta.GetNamespace() == "" {
+		r.metricsManager.AddCCEC(newCECSpec)
+	} else {
+		r.metricsManager.AddCEC(newCECSpec)
+	}
 	oldResources, err := r.resourceParser.parseResources(
 		oldCECObjectMeta.GetNamespace(),
 		oldCECObjectMeta.GetName(),
@@ -364,7 +386,7 @@ func (r *cecManager) updateCiliumEnvoyConfig(
 	}
 
 	if oldResources.ListenersAddedOrDeleted(&newResources) {
-		r.policyUpdater.TriggerPolicyUpdates(true, "Envoy Listeners added or deleted")
+		r.policyUpdater.TriggerPolicyUpdates("Envoy Listeners added or deleted")
 	}
 
 	return nil
@@ -434,6 +456,11 @@ func (r *cecManager) removeK8sServiceRedirects(resourceName service.L7LBResource
 }
 
 func (r *cecManager) deleteCiliumEnvoyConfig(cecObjectMeta metav1.ObjectMeta, cecSpec *ciliumv2.CiliumEnvoyConfigSpec) error {
+	if cecObjectMeta.GetNamespace() == "" {
+		r.metricsManager.DelCCEC(cecSpec)
+	} else {
+		r.metricsManager.DelCEC(cecSpec)
+	}
 	resources, err := r.resourceParser.parseResources(
 		cecObjectMeta.GetNamespace(),
 		cecObjectMeta.GetName(),
@@ -458,7 +485,7 @@ func (r *cecManager) deleteCiliumEnvoyConfig(cecObjectMeta metav1.ObjectMeta, ce
 	}
 
 	if len(resources.Listeners) > 0 {
-		r.policyUpdater.TriggerPolicyUpdates(true, "Envoy Listeners deleted")
+		r.policyUpdater.TriggerPolicyUpdates("Envoy Listeners deleted")
 	}
 
 	return nil

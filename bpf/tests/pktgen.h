@@ -216,7 +216,7 @@ void *pktgen__push_rawhdr(struct pktgen *builder, __u32 hdrsize, enum pkt_layer 
 	int layer_idx;
 
 	/* Request additional tailroom, and check that we got it. */
-	ctx_adjust_troom(ctx, builder->cur_off + hdrsize - ctx_full_len(ctx));
+	ctx_adjust_troom(ctx, (__s32)(builder->cur_off + hdrsize - ctx_full_len(ctx)));
 	if (ctx_data(ctx) + builder->cur_off + hdrsize > ctx_data_end(ctx))
 		return NULL;
 
@@ -560,7 +560,7 @@ void *pktgen__push_data_room(struct pktgen *builder, int len)
 	int layer_idx;
 
 	/* Request additional tailroom, and check that we got it. */
-	ctx_adjust_troom(ctx, builder->cur_off + len - ctx_full_len(ctx));
+	ctx_adjust_troom(ctx, (__s32)(builder->cur_off + len - ctx_full_len(ctx)));
 	if (ctx_data(ctx) + builder->cur_off + len > ctx_data_end(ctx))
 		return 0;
 
@@ -709,6 +709,38 @@ pktgen__push_ipv6_tcp_packet(struct pktgen *builder,
 	ipv6hdr__set_addrs(l3, saddr, daddr);
 
 	l4 = pktgen__push_default_tcphdr(builder);
+	if (!l4)
+		return NULL;
+
+	l4->source = sport;
+	l4->dest = dport;
+
+	return l4;
+}
+
+static __always_inline struct udphdr *
+pktgen__push_ipv6_udp_packet(struct pktgen *builder,
+			     __u8 *smac, __u8 *dmac,
+			     __u8 *saddr, __u8 *daddr,
+			     __be16 sport, __be16 dport)
+{
+	struct ipv6hdr *l3;
+	struct udphdr *l4;
+	struct ethhdr *l2;
+
+	l2 = pktgen__push_ethhdr(builder);
+	if (!l2)
+		return NULL;
+
+	ethhdr__set_macs(l2, smac, dmac);
+
+	l3 = pktgen__push_default_ipv6hdr(builder);
+	if (!l3)
+		return NULL;
+
+	ipv6hdr__set_addrs(l3, saddr, daddr);
+
+	l4 = pktgen__push_default_udphdr(builder);
 	if (!l4)
 		return NULL;
 

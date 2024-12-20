@@ -16,8 +16,6 @@ cilium-operator-azure [flags]
       --azure-subscription-id string                         Subscription ID to access Azure API
       --azure-use-primary-address                            Use Azure IP address from interface's primary IPConfigurations
       --azure-user-assigned-identity-id string               ID of the user assigned identity used to auth with the Azure API
-      --bgp-announce-lb-ip                                   Announces service IPs of type LoadBalancer via BGP
-      --bgp-config-path string                               Path to file containing the BGP configuration (default "/var/lib/cilium/bgp/config.yaml")
       --ces-max-ciliumendpoints-per-ces int                  Maximum number of CiliumEndpoints allowed in a CES (default 100)
       --ces-rate-limits string                               Configure rate limits for the CES controller. Accepts a list of rate limit configurations, must be a JSON formatted string. (default "[{\"nodes\":0,\"limit\":10,\"burst\":20}]")
       --ces-slice-mode string                                Slicing mode defines how CiliumEndpoints are grouped into CES: either batched by their Identity ("identity") or batched on a "First Come, First Served" basis ("fcfs") (default "identity")
@@ -63,6 +61,7 @@ cilium-operator-azure [flags]
       --enable-node-ipam                                     Enable Node IPAM
       --enable-node-port                                     Enable NodePort type services by Cilium
       --enable-node-selector-labels                          Enable use of node label based identity
+      --enable-policy string                                 Enable policy enforcement (default "default")
       --enable-policy-secrets-sync                           Enables fan-in TLS secrets sync from multiple namespaces to singular namespace (specified by tls-interception-secrets-namespace flag)
       --enforce-ingress-https                                Enforces https for host having matching TLS host in Ingress. Incoming traffic to http listener will return 308 http error code with respective location in header. (default true)
       --gateway-api-hostnetwork-enabled                      Exposes Gateway listeners on the host network.
@@ -99,6 +98,7 @@ cilium-operator-azure [flags]
       --k8s-service-proxy-name string                        Value of K8s service-proxy-name label for which Cilium handles the services (empty = all services without service.kubernetes.io/service-proxy-name label)
       --kube-proxy-replacement string                        Enable only selected features (will panic if any selected feature cannot be enabled) ("false"), or enable all features (will panic if any feature cannot be enabled) ("true") (default "false")
       --kvstore string                                       Key-value store type
+      --kvstore-lease-ttl duration                           Time-to-live for the KVstore lease. (default 15m0s)
       --kvstore-max-consecutive-quorum-errors uint           Max acceptable kvstore consecutive quorum errors before the operator assumes permanent failure (default 2)
       --kvstore-opt map                                      Key-value store options e.g. etcd.address=127.0.0.1:4001
       --leader-election-lease-duration duration              Duration that non-leader operator candidates will wait before forcing to acquire leadership (default 15s)

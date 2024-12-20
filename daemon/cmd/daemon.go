@@ -56,6 +56,7 @@ import (
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/maps/lbmap"
 	"github.com/cilium/cilium/pkg/maps/policymap"
@@ -184,7 +185,9 @@ type Daemon struct {
 	iptablesManager datapath.IptablesManager
 	hubble          hubblecell.HubbleIntegration
 
-	lrpManager *redirectpolicy.Manager
+	lrpManager   *redirectpolicy.Manager
+	ctMapGC      ctmap.GCRunner
+	maglevConfig maglev.Config
 }
 
 // GetPolicyRepository returns the policy repository of the daemon
@@ -398,6 +401,8 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 		iptablesManager:   params.IPTablesManager,
 		hubble:            params.Hubble,
 		lrpManager:        params.LRPManager,
+		ctMapGC:           params.CTNATMapGC,
+		maglevConfig:      params.MaglevConfig,
 	}
 
 	// initialize endpointRestoreComplete channel as soon as possible so that subsystems
@@ -677,10 +682,6 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 		}
 	}
 
-	if params.DirectoryPolicyWatcher != nil {
-		params.DirectoryPolicyWatcher.WatchDirectoryPolicyResources(d.ctx, &d)
-	}
-
 	// Some of the k8s watchers rely on option flags set above (specifically
 	// EnableBPFMasquerade), so we should only start them once the flag values
 	// are set.
@@ -903,5 +904,6 @@ func (d *Daemon) SendNotification(notification monitorAPI.AgentNotifyMessage) er
 }
 
 type endpointMetadataFetcher interface {
-	Fetch(nsName, podName string) (*slim_corev1.Namespace, *slim_corev1.Pod, error)
+	FetchNamespace(nsName string) (*slim_corev1.Namespace, error)
+	FetchPod(nsName, podName string) (*slim_corev1.Pod, error)
 }

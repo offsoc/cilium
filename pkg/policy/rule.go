@@ -107,7 +107,7 @@ func (epd *PerSelectorPolicy) appendL7WildcardRule(ctx *SearchContext) api.L7Rul
 // takesListenerPrecedenceOver returns true if the listener reference in 'l7Rules' takes precedence
 // over the listener reference in 'other'.
 func (l7Rules *PerSelectorPolicy) takesListenerPrecedenceOver(other *PerSelectorPolicy) bool {
-	var priority, otherPriority uint16
+	var priority, otherPriority uint8
 
 	// decrement by one to wrap the undefined value (0) to be the highest numerical
 	// value of the uint16, which is the lowest possible priority
@@ -631,6 +631,14 @@ func (r *rule) matchesSubject(securityIdentity *identity.Identity) bool {
 	}
 
 	return r.subjectSelector.Selects(versioned.Latest(), securityIdentity.ID)
+}
+
+func (r *rule) getSubjects() []identity.NumericIdentity {
+	if r.NodeSelector.LabelSelector != nil {
+		return []identity.NumericIdentity{identity.ReservedIdentityHost}
+	}
+
+	return r.subjectSelector.GetSelections(versioned.Latest())
 }
 
 // ****************** EGRESS POLICY ******************

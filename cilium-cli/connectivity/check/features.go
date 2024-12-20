@@ -4,6 +4,7 @@
 package check
 
 import (
+	"cmp"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/cilium-cli/defaults"
+	"github.com/cilium/cilium/cilium-cli/internal/helm"
 	"github.com/cilium/cilium/cilium-cli/k8s"
 	"github.com/cilium/cilium/cilium-cli/utils/features"
 	"github.com/cilium/cilium/pkg/option"
@@ -290,8 +292,9 @@ func (ct *ConnectivityTest) detectCiliumVersion(ctx context.Context) error {
 			return err
 		}
 	} else if minVersion, err := ct.DetectMinimumCiliumVersion(ctx); err != nil {
-		ct.Warnf("Unable to detect Cilium version, assuming %v for connectivity tests: %s", defaults.Version, err)
-		ct.CiliumVersion, err = semver.ParseTolerant(defaults.Version)
+		defaultVersion := helm.GetDefaultVersionString()
+		ct.Warnf("Unable to detect Cilium version, assuming %v for connectivity tests: %s", defaultVersion, err)
+		ct.CiliumVersion, err = semver.ParseTolerant(defaultVersion)
 		if err != nil {
 			return err
 		}
@@ -352,6 +355,8 @@ func (ct *ConnectivityTest) detectFeatures(ctx context.Context) error {
 			initialized = true
 		}
 	}
+
+	ct.ClusterName = cmp.Or(cm.Data["cluster-name"], "default")
 
 	return nil
 }

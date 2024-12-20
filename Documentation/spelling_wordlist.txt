@@ -73,6 +73,7 @@ Klusters
 KubeVersion
 Lando
 Leblond
+Lockdown
 Lund
 Lx
 Majkowski
@@ -184,6 +185,7 @@ battlestation
 bcc
 behaviour
 benchmarking
+besteffort
 bgp
 blackholing
 blockedConfigOverrides
@@ -236,6 +238,7 @@ cnp
 codebase
 codeowner
 codeowners
+commonLabels
 compat
 config
 configMap
@@ -319,6 +322,7 @@ endpointmanager
 enet
 enetc
 etcd
+etcdinit
 eth
 ethernet
 ethtool
@@ -501,6 +505,7 @@ loadbalancers
 loadbalancing
 loadinfo
 localhost
+lockdown
 lockless
 logfile
 lookups
@@ -610,6 +615,7 @@ pluggable
 pmdabcc
 png
 podCIDR
+podSelector
 podippool
 policyCIDRMatchMode
 policymap

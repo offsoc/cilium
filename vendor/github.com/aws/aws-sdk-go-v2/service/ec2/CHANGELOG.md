@@ -1,3 +1,58 @@
+# v1.198.1 (2024-12-19)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.198.0 (2024-12-16)
+
+* **Feature**: This release adds support for EBS local snapshots in AWS Dedicated Local Zones, which allows you to store snapshots of EBS volumes locally in Dedicated Local Zones.
+
+# v1.197.0 (2024-12-13)
+
+* **Feature**: This release adds GroupId to the response for DeleteSecurityGroup.
+
+# v1.196.0 (2024-12-09)
+
+* **Feature**: This release includes a new API for modifying instance network-performance-options after launch.
+
+# v1.195.0 (2024-12-02)
+
+* **Feature**: Adds support for declarative policies that allow you to enforce desired configuration across an AWS organization through configuring account attributes. Adds support for Allowed AMIs that allows you to limit the use of AMIs in AWS accounts. Adds support for connectivity over non-HTTP protocols.
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.194.0 (2024-11-26)
+
+* **Feature**: Adds support for Time-based Copy for EBS Snapshots and Cross Region PrivateLink. Time-based Copy ensures that EBS Snapshots are copied within and across AWS Regions in a specified timeframe. Cross Region PrivateLink enables customers to connect to VPC endpoint services hosted in other AWS Regions.
+
+# v1.193.0 (2024-11-21)
+
+* **Feature**: Adds support for requesting future-dated Capacity Reservations with a minimum commitment duration, enabling IPAM for organizational units within AWS Organizations, reserving EC2 Capacity Blocks that start in 30 minutes, and extending the end date of existing Capacity Blocks.
+
+# v1.192.0 (2024-11-20)
+
+* **Feature**: With this release, customers can express their desire to launch instances only in an ODCR or ODCR group rather than OnDemand capacity. Customers can express their baseline instances' CPU-performance in attribute-based Instance Requirements configuration by referencing an instance family.
+
+# v1.191.0 (2024-11-19)
+
+* **Feature**: This release adds VPC Block Public Access (VPC BPA), a new declarative control which blocks resources in VPCs and subnets that you own in a Region from reaching or being reached from the internet through internet gateways and egress-only internet gateways.
+
+# v1.190.0 (2024-11-18)
+
+* **Feature**: Adding request and response elements for managed resources.
+* **Dependency Update**: Update to smithy-go v1.22.1.
+* **Dependency Update**: Updated to the latest SDK module versions
+
+# v1.189.0 (2024-11-15.2)
+
+* **Feature**: Remove non-functional enum variants for FleetCapacityReservationUsageStrategy
+
+# v1.188.0 (2024-11-13)
+
+* **Feature**: This release adds the source AMI details in DescribeImages API
+
+# v1.187.1 (2024-11-06)
+
+* **Dependency Update**: Updated to the latest SDK module versions
+
 # v1.187.0 (2024-10-30)
 
 * **Feature**: This release adds two new capabilities to VPC Security Groups: Security Group VPC Associations and Shared Security Groups.

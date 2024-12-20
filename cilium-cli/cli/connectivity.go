@@ -129,6 +129,7 @@ func newCmdConnectivityTest(hooks api.Hooks) *cobra.Command {
 	cmd.Flags().BoolVarP(&params.Timestamp, "timestamp", "t", false, "Show timestamp in messages")
 	cmd.Flags().BoolVarP(&params.PauseOnFail, "pause-on-fail", "p", false, "Pause execution on test failure")
 	cmd.Flags().StringVar(&params.ExternalTarget, "external-target", "one.one.one.one.", "Domain name to use as external target in connectivity tests")
+	cmd.Flags().StringVar(&params.ExternalOtherTarget, "external-other-target", "cilium.io.", "Domain name to use as a second external target in connectivity tests")
 	cmd.Flags().StringVar(&params.ExternalTargetCANamespace, "external-target-ca-namespace", "", "Namespace of the CA secret for the external target. Used by client-egress-l7-tls test cases.")
 	cmd.Flags().StringVar(&params.ExternalTargetCAName, "external-target-ca-name", "cabundle", "Name of the CA secret for the external target. Used by client-egress-l7-tls test cases.")
 	cmd.Flags().StringVar(&params.ExternalCIDR, "external-cidr", "1.0.0.0/8", "CIDR to use as external target in connectivity tests")
@@ -162,6 +163,7 @@ func newCmdConnectivityTest(hooks api.Hooks) *cobra.Command {
 	cmd.Flags().DurationVar(&params.ConnectTimeout, "connect-timeout", defaults.ConnectTimeout, "Maximum time to allow initiation of the connection to take")
 	cmd.Flags().DurationVar(&params.RequestTimeout, "request-timeout", defaults.RequestTimeout, "Maximum time to allow a request to take")
 	cmd.Flags().BoolVar(&params.CurlInsecure, "curl-insecure", false, "Pass --insecure to curl")
+	cmd.Flags().UintVar(&params.CurlParallel, "curl-parallel", defaults.CurlParallel, "Number of parallel requests in curl commands (0 to disable)")
 
 	cmd.Flags().BoolVar(&params.CollectSysdumpOnFailure, "collect-sysdump-on-failure", false, "Collect sysdump after a test fails")
 
@@ -177,6 +179,9 @@ func newCmdConnectivityTest(hooks api.Hooks) *cobra.Command {
 	cmd.Flags().MarkHidden("expected-drop-reasons")
 	cmd.Flags().StringSliceVar(&params.ExpectedXFRMErrors, "expected-xfrm-errors", defaults.ExpectedXFRMErrors, "List of expected XFRM errors")
 	cmd.Flags().MarkHidden("expected-xfrm-errors")
+
+	cmd.Flags().StringSliceVar(&params.LogCheckLevels, "log-check-levels", defaults.LogCheckLevels, "Log levels to check for in log messages")
+	cmd.Flags().MarkHidden("log-check-levels")
 
 	cmd.Flags().BoolVar(&params.FlushCT, "flush-ct", false, "Flush conntrack of Cilium on each node")
 	cmd.Flags().MarkHidden("flush-ct")
@@ -219,6 +224,7 @@ func newCmdConnectivityPerf(hooks api.Hooks) *cobra.Command {
 	cmd.Flags().IntVar(&params.PerfParameters.Samples, "samples", 1, "Number of Performance samples to capture (how many times to run each test)")
 	cmd.Flags().BoolVar(&params.PerfParameters.HostNet, "host-net", true, "Test host network")
 	cmd.Flags().BoolVar(&params.PerfParameters.PodNet, "pod-net", true, "Test pod network")
+	cmd.Flags().BoolVar(&params.PerfParameters.NetQos, "net-qos", false, "Test pod network Quality of Service")
 
 	cmd.Flags().StringVar(&params.PerfParameters.Image, "performance-image", defaults.ConnectivityPerformanceImage, "Image path to use for performance")
 	cmd.Flags().StringVar(&params.PerfParameters.ReportDir, "report-dir", "", "Directory to save perf results in json format")

@@ -56,11 +56,11 @@ concurrency:
 
 env:
   # renovate: datasource=golang-version depName=go
-  go_version: 1.23.3
+  go_version: 1.23.4
   # renovate: datasource=docker depName=google/cloud-sdk
-  gcloud_version: 499.0.0
+  gcloud_version: 503.0.0
   # renovate: datasource=git-refs depName=https://github.com/cilium/scaffolding branch=main
-  cmapisrv_mock_ref: aef7e189051b219dc2f544957130adcfc7db22c7
+  cmapisrv_mock_ref: 528a6ef2aeb4563a23160ea9a820925d4f7944e3
 
   test_name: scale-clustermesh
   cluster_name: ${{ github.run_id }}-${{ github.run_attempt }}
@@ -89,6 +89,8 @@ jobs:
     runs-on: ubuntu-latest
     name: Install and Cluster Mesh Scale Test
     timeout-minutes: 60
+    env:
+      job_name: "Install and Cluster Mesh Scale Test"
     steps:
       - name: Checkout context ref (trusted)
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -124,12 +126,12 @@ jobs:
           done
 
       - name: Install Go
-        uses: actions/setup-go@41dfa10bad2bb2ae585af6ee5bb4d7d973ad74ed # v5.1.0
+        uses: actions/setup-go@3041bf56c941b39c61721a86cd11f3bb1338122a # v5.2.0
         with:
           go-version: ${{ env.go_version }}
 
       - name: Install Kops
-        uses: cilium/scale-tests-action/install-kops@d3ecfd83003f3e9c98ba125ca14933401d44918f # main
+        uses: cilium/scale-tests-action/install-kops@6fa546f61baa9b8d6db9ce885bed89876b82d2c7 # main
 
       - name: Setup gcloud credentials
         uses: google-github-actions/auth@6fc4af4b145ae7821d527454aa9bd537d1f2dc5f # v2.1.7
@@ -170,7 +172,7 @@ jobs:
 
       - name: Deploy cluster
         id: deploy-cluster
-        uses: cilium/scale-tests-action/create-cluster@d3ecfd83003f3e9c98ba125ca14933401d44918f # main
+        uses: cilium/scale-tests-action/create-cluster@6fa546f61baa9b8d6db9ce885bed89876b82d2c7 # main
         timeout-minutes: 30
         with:
           cluster_name: ${{ steps.vars.outputs.CLUSTER_NAME }}
@@ -184,7 +186,7 @@ jobs:
           kube_proxy_enabled: false
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@3286926bbf80fdd0103a372256459e577224f9f6 # v0.16.20
+        uses: cilium/cilium-cli@c52e8c38e6d6235bd8e6e961199a984275547d6f # v0.16.22
         with:
           skip-build: ${{ env.CILIUM_CLI_SKIP_BUILD }}
           image-repo: ${{ env.CILIUM_CLI_IMAGE_REPO }}
@@ -202,7 +204,7 @@ jobs:
           gcloud version
 
       - name: Setup firewall rules
-        uses: cilium/scale-tests-action/setup-firewall@d3ecfd83003f3e9c98ba125ca14933401d44918f # main
+        uses: cilium/scale-tests-action/setup-firewall@6fa546f61baa9b8d6db9ce885bed89876b82d2c7 # main
         with:
           cluster_name: ${{ steps.vars.outputs.CLUSTER_NAME }}
 
@@ -244,7 +246,7 @@ jobs:
       # This step must be run after installing Cilium, as it requires
       # system pods (e.g., coredns) to be running.
       - name: Wait for cluster to be ready
-        uses: cilium/scale-tests-action/validate-cluster@d3ecfd83003f3e9c98ba125ca14933401d44918f # main
+        uses: cilium/scale-tests-action/validate-cluster@6fa546f61baa9b8d6db9ce885bed89876b82d2c7 # main
         timeout-minutes: 20
         with:
           cluster_name: ${{ steps.vars.outputs.CLUSTER_NAME }}
@@ -398,14 +400,14 @@ jobs:
 
       - name: Cleanup cluster
         if: ${{ always() && steps.deploy-cluster.outcome != 'skipped' }}
-        uses: cilium/scale-tests-action/cleanup-cluster@d3ecfd83003f3e9c98ba125ca14933401d44918f # main
+        uses: cilium/scale-tests-action/cleanup-cluster@6fa546f61baa9b8d6db9ce885bed89876b82d2c7 # main
         with:
           cluster_name: ${{ steps.vars.outputs.CLUSTER_NAME }}
           kops_state: ${{ secrets.GCP_PERF_KOPS_STATE_STORE }}
 
       - name: Export results and sysdump to GS bucket
         if: ${{ always() && steps.run-cl2.outcome != 'skipped' && steps.run-cl2.outcome != 'cancelled' }}
-        uses: cilium/scale-tests-action/export-results@d3ecfd83003f3e9c98ba125ca14933401d44918f # main
+        uses: cilium/scale-tests-action/export-results@6fa546f61baa9b8d6db9ce885bed89876b82d2c7 # main
         with:
           test_name: ${{ env.test_name }}
           results_bucket: ${{ env.GCP_PERF_RESULTS_BUCKET }}

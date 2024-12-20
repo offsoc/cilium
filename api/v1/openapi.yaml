@@ -922,21 +922,6 @@ paths:
             format: binary
         '404':
           description: Map not found
-  "/metrics/":
-    get:
-      summary: Retrieve cilium metrics
-      tags:
-      - metrics
-      parameters: []
-      responses:
-        '200':
-          description: Success
-          schema:
-            type: array
-            items:
-              "$ref": "#/definitions/Metric"
-        '500':
-          description: Metrics cannot be retrieved
 
   "/fqdn/cache":
     get:
@@ -1403,6 +1388,11 @@ definitions:
       interface-index:
         description: Index of network device in host netns
         type: integer
+      parent-interface-index:
+        description: >-
+          Index of network device from which an IP was used as endpoint IP.
+          Only relevant for ENI environments.
+        type: integer
       container-interface-name:
         description: Name of network device in container netns
         type: string
@@ -1640,8 +1630,6 @@ definitions:
   EndpointPolicy:
     description: |-
       Policy information of an endpoint
-
-      +k8s:deepcopy-gen=true
     type: object
     properties:
       policy-revision:
@@ -1687,8 +1675,6 @@ definitions:
   PolicyRule:
     description: |-
       A policy rule including the rule labels it derives from
-
-      +k8s:deepcopy-gen=true
     properties:
       rule:
         description: The policy rule as json
@@ -1712,8 +1698,6 @@ definitions:
   L4Policy:
     description: |-
       L4 endpoint policy
-
-      +k8s:deepcopy-gen=true
     type: object
     properties:
       ingress:
@@ -1729,8 +1713,6 @@ definitions:
   CIDRPolicy:
     description: |-
       CIDR endpoint policy
-
-      +k8s:deepcopy-gen=true
     type: object
     properties:
       ingress:
@@ -2301,10 +2283,6 @@ definitions:
         type: object
         properties:
           nodePort:
-            description: |-
-
-
-              +k8s:deepcopy-gen=true
             type: object
             properties:
               enabled:
@@ -2315,7 +2293,6 @@ definitions:
                 - SNAT
                 - DSR
                 - Hybrid
-                - Annotation
               dsrMode:
                 type: string
                 enum:
@@ -2341,19 +2318,11 @@ definitions:
               lutSize:
                 type: integer
           hostPort:
-            description: |-
-
-
-              +k8s:deepcopy-gen=true
             type: object
             properties:
               enabled:
                 type: boolean
           externalIPs:
-            description: |-
-
-
-              +k8s:deepcopy-gen=true
             type: object
             properties:
               enabled:
@@ -2372,28 +2341,16 @@ definitions:
                 items:
                   type: string
           socketLB:
-            description: |-
-
-
-              +k8s:deepcopy-gen=true
             type: object
             properties:
               enabled:
                 type: boolean
           sessionAffinity:
-            description: |-
-
-
-              +k8s:deepcopy-gen=true
             type: object
             properties:
               enabled:
                 type: boolean
           gracefulTermination:
-            description: |-
-
-
-              +k8s:deepcopy-gen=true
             type: object
             properties:
               enabled:
@@ -2408,10 +2365,6 @@ definitions:
               enabled:
                 type: boolean
               service:
-                description: |-
-
-
-                  +k8s:deepcopy-gen=true
                 type: object
                 properties:
                   enabled:
@@ -2430,10 +2383,6 @@ definitions:
                     items:
                       type: string
           socketLBTracing:
-            description: |-
-
-
-              +k8s:deepcopy-gen=true
             type: object
             properties:
               enabled:
@@ -2441,6 +2390,10 @@ definitions:
           bpfSocketLBHostnsOnly:
             description: flag bpf-lb-sock-hostns-only
             type: boolean
+          annotations:
+            type: array
+            items:
+              type: string
   AllocationMap:
     description: |
       Map of allocated IPs
@@ -2721,6 +2674,11 @@ definitions:
       egress-multi-home-ip-rule-compat:
         description: Configured compatibility mode for --egress-multi-home-ip-rule-compat
         type: boolean
+      installUplinkRoutesForDelegatedIPAM:
+        description: |
+          Install ingress/egress routes through uplink on host for Pods when working with
+          delegated IPAM plugin.
+        type: boolean
       daemonConfigurationMap:
         description: Config map which contains all the active daemon configurations
         additionalProperties:
@@ -2907,8 +2865,6 @@ definitions:
   Srv6:
     description: |-
       Status of the SRv6
-
-      +k8s:deepcopy-gen=true
     type: object
     properties:
       enabled:
@@ -3295,8 +3251,6 @@ definitions:
   IdentityRange:
     description: |-
       Status of identity range of the cluster
-
-      +k8s:deepcopy-gen=true
     properties:
       min-identity:
         description: Minimum identity of the cluster
@@ -3372,8 +3326,6 @@ definitions:
   IPV6BigTCP:
     description: |-
       Status of IPv6 BIG TCP
-
-      +k8s:deepcopy-gen=true
     type: object
     properties:
       enabled:
@@ -3388,8 +3340,6 @@ definitions:
   IPV4BigTCP:
     description: |-
       Status of IPv4 BIG TCP
-
-      +k8s:deepcopy-gen=true
     type: object
     properties:
       enabled:
@@ -3465,8 +3415,6 @@ definitions:
   ClockSource:
     description: |-
       Status of BPF clock source
-
-      +k8s:deepcopy-gen=true
     type: object
     properties:
       mode:
@@ -3481,8 +3429,6 @@ definitions:
   Routing:
     description: |-
       Status of routing
-
-      +k8s:deepcopy-gen=true
     type: object
     properties:
       inter-host-routing-mode:
@@ -3815,8 +3761,6 @@ definitions:
   CNIChainingStatus:
     description: |-
       Status of CNI chaining
-
-      +k8s:deepcopy-gen=true
     properties:
       mode:
         type: string
@@ -3985,8 +3929,6 @@ definitions:
   BgpPeerFamilies:
     description: |-
       BGP AFI SAFI state of the peer
-
-      +k8s:deepcopy-gen=true
     properties:
       afi:
         description: BGP address family indicator
@@ -4006,8 +3948,6 @@ definitions:
   BgpGracefulRestart:
     description: |-
       BGP graceful restart parameters negotiated with the peer.
-
-      +k8s:deepcopy-gen=true
     properties:
       enabled:
         description: |-

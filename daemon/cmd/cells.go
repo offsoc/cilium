@@ -17,7 +17,6 @@ import (
 	"github.com/cilium/cilium/daemon/restapi"
 	"github.com/cilium/cilium/pkg/api"
 	"github.com/cilium/cilium/pkg/auth"
-	"github.com/cilium/cilium/pkg/bgp/speaker"
 	"github.com/cilium/cilium/pkg/bgpv1"
 	cgroup "github.com/cilium/cilium/pkg/cgroups/manager"
 	"github.com/cilium/cilium/pkg/ciliumenvoyconfig"
@@ -50,6 +49,7 @@ import (
 	"github.com/cilium/cilium/pkg/l2announcer"
 	loadbalancer_experimental "github.com/cilium/cilium/pkg/loadbalancer/experimental"
 	"github.com/cilium/cilium/pkg/logging/logfields"
+	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/maps/metricsmap"
 	natStats "github.com/cilium/cilium/pkg/maps/nat/stats"
 	"github.com/cilium/cilium/pkg/maps/ratelimitmap"
@@ -68,6 +68,7 @@ import (
 	"github.com/cilium/cilium/pkg/redirectpolicy"
 	"github.com/cilium/cilium/pkg/service"
 	"github.com/cilium/cilium/pkg/signal"
+	"github.com/cilium/cilium/pkg/source"
 )
 
 var (
@@ -196,6 +197,9 @@ var (
 		// daemonCell wraps the legacy daemon initialization and provides Promise[*Daemon].
 		daemonCell,
 
+		// Maglev table computtations
+		maglev.Cell,
+
 		// Experimental control-plane for configuring service load-balancing.
 		loadbalancer_experimental.Cell,
 
@@ -221,9 +225,6 @@ var (
 
 		// The BGP Control Plane which enables various BGP related interop.
 		bgpv1.Cell,
-
-		// The MetalLB BGP speaker enables support for MetalLB BGP.
-		speaker.Cell,
 
 		// Brokers datapath signals from signalmap
 		signal.Cell,
@@ -310,6 +311,9 @@ var (
 		// configuration to describe, in form of prometheus metrics, which
 		// features are enabled on the agent.
 		features.Cell,
+
+		// Determines priorities of data sources.
+		source.Cell,
 	)
 )
 

@@ -119,8 +119,10 @@ var (
 		"etcd.leaseTTL":          "30s",
 		"ipv4.enabled":           "true",
 		"ipv6.enabled":           "true",
-		// "extraEnv[0].name":              "KUBE_CACHE_MUTATION_DETECTOR",
-		// "extraEnv[0].value":             "true",
+		"extraEnv[0].name":       "KUBE_CACHE_MUTATION_DETECTOR",
+		"extraEnv[0].value":      "'true'",
+		"extraEnv[1].name":       "CILIUM_FEATURE_METRICS_WITH_DEFAULTS",
+		"extraEnv[1].value":      "'true'",
 
 		// We need CNP node status to know when a policy is being enforced
 		"ipv4NativeRoutingCIDR": IPv4NativeRoutingCIDR,
@@ -4335,9 +4337,12 @@ func (kub *Kubectl) HelmTemplate(chartDir, namespace, filename string, options m
 	optionsString := ""
 
 	for k, v := range options {
-		if v == "true" || v == "false" {
+		switch {
+		case v == "true" || v == "false":
 			optionsString += fmt.Sprintf(" --set %s=%s ", k, v)
-		} else {
+		case v == "'true'" || v == "'false'":
+			optionsString += fmt.Sprintf(" --set-string %s=%s ", k, v)
+		default:
 			optionsString += fmt.Sprintf(" --set '%s=%s' ", k, v)
 		}
 	}
@@ -4798,7 +4803,7 @@ func (kub *Kubectl) ensureKubectlVersion() error {
 		rcVersion = fmt.Sprintf("v%s.0", GetCurrentK8SEnv())
 	}
 	res = kub.Exec(
-		fmt.Sprintf("curl --output %s https://storage.googleapis.com/kubernetes-release/release/%s/bin/linux/amd64/kubectl && chmod +x %s",
+		fmt.Sprintf("curl -sSLo %s https://dl.k8s.io/release/%s/bin/linux/amd64/kubectl && chmod +x %s",
 			path, rcVersion, path))
 	if !res.WasSuccessful() {
 		return fmt.Errorf("failed to download kubectl")

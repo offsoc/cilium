@@ -17,6 +17,7 @@
   // This ensures that the gitAuthor and gitSignOff fields match
   "gitAuthor": "cilium-renovate[bot] <134692979+cilium-renovate[bot]@users.noreply.github.com>",
   "includePaths": [
+    ".github/actions/bpftrace/**",
     ".github/actions/kvstore/**",
     ".github/actions/ginkgo/**",
     ".github/actions/lvh-kind/**",
@@ -66,6 +67,7 @@
   "pruneStaleBranches": true,
   "baseBranches": [
     "main",
+    "v1.17",
     "v1.16",
     "v1.15",
     "v1.14",
@@ -188,6 +190,7 @@
       ],
       matchBaseBranches: [
         "main",
+        "v1.17",
         "v1.16",
         "v1.15",
         "v1.14",
@@ -203,6 +206,7 @@
         "go.sum"
       ],
       matchBaseBranches: [
+        "v1.17",
         "v1.16",
         "v1.15",
         "v1.14",
@@ -211,12 +215,6 @@
     {
       "enabled": false,
       "matchPackageNames": [
-        // All of these packages are maintained on a Cilium fork. Thus, we don't
-        // want to update them automatically.
-        "go.universe.tf/metallb",
-        "github.com/cilium/metallb",
-        // metallb is still using an old version of "github.com/mdlayher/arp"
-        "github.com/mdlayher/arp",
         "github.com/miekg/dns",
         "github.com/cilium/dns",
         "sigs.k8s.io/controller-tools",
@@ -230,11 +228,7 @@
         // https://github.com/google/go-licenses/issues/205
         "github.com/google/go-licenses",
         // We update this dependency manually together with conformance test changes
-        "sigs.k8s.io/gateway-api",
-        // The PR https://github.com/cilium/deepequal-gen/pull/7 contains breaking changes,
-        // which requires manual intervention.
-        // Remove this entry once the PR https://github.com/cilium/cilium/pull/35406 is merged.
-        "github.com/cilium/deepequal-gen"
+        "sigs.k8s.io/gateway-api"
       ],
       "matchPackagePatterns": [
         // We can't update these libraries until github.com/shoenig/go-m1cpu
@@ -274,6 +268,7 @@
         "minor",
       ],
       matchBaseBranches: [
+        "v1.17",
         "v1.16",
         "v1.15",
         "v1.14",
@@ -287,6 +282,17 @@
       "allowedVersions": "<3.5.5",
       "matchBaseBranches": [
         "v1.14",
+      ]
+    },
+    {
+      // Do not ping helm/kind since the last version (1.10.0) has a bug which
+      // prevents it from downloading kubectl in older versions.
+      "enabled": false,
+      "matchDepNames": [
+        "helm/kind-action"
+      ],
+      "matchUpdateTypes": [
+        "digest"
       ]
     },
     {
@@ -323,6 +329,7 @@
       ],
       "allowedVersions": "24.04",
       "matchBaseBranches": [
+        "v1.17",
         "main",
       ],
     },
@@ -342,6 +349,16 @@
         "docker.io/library/golang",
         "go"
       ],
+      "allowedVersions": "<1.24",
+      "matchBaseBranches": [
+        "v1.17",
+      ]
+    },
+    {
+      "matchPackageNames": [
+        "docker.io/library/golang",
+        "go"
+      ],
       "allowedVersions": "<1.23",
       "matchBaseBranches": [
         "v1.16",
@@ -355,6 +372,7 @@
       ],
       "allowedVersions": "<3.20",
       "matchBaseBranches": [
+        "v1.17",
         "v1.16",
         "v1.15"
       ]
@@ -374,6 +392,7 @@
       ],
       "allowedVersions": "<0.2.0",
       "matchBaseBranches": [
+        "v1.17",
         "v1.16",
         "v1.15",
         "v1.14",
@@ -414,6 +433,7 @@
       ],
       "matchBaseBranches": [
         "main",
+        "v1.17",
         "v1.16",
         "v1.15",
         "v1.14"
@@ -449,6 +469,7 @@
         "golangci/golangci-lint"
       ],
       "matchBaseBranches": [
+        "v1.17",
         "v1.16",
         "v1.15",
         "v1.14",
@@ -459,7 +480,7 @@
         "quay.io/lvh-images/complexity-test",
         "quay.io/lvh-images/kind"
       ],
-      "versioning": "regex:^((?<compatibility>[a-z0-9-]+)|((?<major>\\d+)\\.(?<minor>\\d+)))\\-(?<patch>\\d+)\\.(?<build>\\d+)(@(?<currentDigest>sha256:[a-f0-9]+))?$"
+      "versioning": "regex:^((?<compatibility>[a-z0-9-.]+)|((?<major>\\d+)\\.(?<minor>\\d+)))\\-(?<patch>\\d+)\\.(?<build>\\d+)(@(?<currentDigest>sha256:[a-f0-9]+))?$"
     },
     {
       "groupName": "stable lvh-images",
@@ -471,6 +492,7 @@
       ],
       "allowedVersions": "!/bpf-next-.*/",
       "matchBaseBranches": [
+        "v1.17",
         "v1.16",
         "v1.15",
         "v1.14",
@@ -595,6 +617,7 @@
       "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)-(?<revision>.*)$",
       "allowedVersions": "/^v1\\.31\\.([0-9]+)-([0-9]+)-.*$/",
       "matchBaseBranches": [
+        "v1.17",
         "main",
       ]
     },

@@ -56,8 +56,44 @@ const (
 type SVCForwardingMode string
 
 const (
-	SVCForwardingModeDSR  = SVCForwardingMode("dsr")
-	SVCForwardingModeSNAT = SVCForwardingMode("snat")
+	SVCForwardingModeUndef = SVCForwardingMode("undef")
+	SVCForwardingModeDSR   = SVCForwardingMode("dsr")
+	SVCForwardingModeSNAT  = SVCForwardingMode("snat")
+)
+
+func ToSVCForwardingMode(s string) SVCForwardingMode {
+	if s == option.NodePortModeDSR {
+		return SVCForwardingModeDSR
+	}
+	if s == option.NodePortModeSNAT {
+		return SVCForwardingModeSNAT
+	}
+	return SVCForwardingModeUndef
+}
+
+type SVCLoadBalancingAlgorithm uint8
+
+const (
+	SVCLoadBalancingAlgorithmUndef  = 0
+	SVCLoadBalancingAlgorithmRandom = 1
+	SVCLoadBalancingAlgorithmMaglev = 2
+)
+
+func ToSVCLoadBalancingAlgorithm(s string) SVCLoadBalancingAlgorithm {
+	if s == option.NodePortAlgMaglev {
+		return SVCLoadBalancingAlgorithmMaglev
+	}
+	if s == option.NodePortAlgRandom {
+		return SVCLoadBalancingAlgorithmRandom
+	}
+	return SVCLoadBalancingAlgorithmUndef
+}
+
+type SVCSourceRangesPolicy string
+
+const (
+	SVCSourceRangesPolicyAllow = SVCSourceRangesPolicy("allow")
+	SVCSourceRangesPolicyDeny  = SVCSourceRangesPolicy("deny")
 )
 
 // ServiceFlags is the datapath representation of the service flags that can be
@@ -81,6 +117,10 @@ const (
 	serviceFlagIntLocalScope   = 1 << 12
 	serviceFlagTwoScopes       = 1 << 13
 	serviceFlagQuarantined     = 1 << 14
+	// serviceFlagSrcRangesDeny is set on master
+	// svc entry, serviceFlagQuarantined is only
+	// set on backend svc entries.
+	serviceFlagSourceRangeDeny = 1 << 14
 	serviceFlagFwdModeDSR      = 1 << 15
 )
 
@@ -93,6 +133,7 @@ type SvcFlagParam struct {
 	SessionAffinity  bool
 	IsRoutable       bool
 	CheckSourceRange bool
+	SourceRangeDeny  bool
 	L7LoadBalancer   bool
 	LoopbackHostport bool
 	Quarantined      bool
@@ -136,6 +177,9 @@ func NewSvcFlag(p *SvcFlagParam) ServiceFlags {
 	}
 	if p.IsRoutable {
 		flags |= serviceFlagRoutable
+	}
+	if p.SourceRangeDeny {
+		flags |= serviceFlagSourceRangeDeny
 	}
 	if p.CheckSourceRange {
 		flags |= serviceFlagSourceRange
@@ -223,6 +267,7 @@ func (s ServiceFlags) SVCSlotQuarantined() bool {
 // String returns the string implementation of ServiceFlags.
 func (s ServiceFlags) String() string {
 	var str []string
+	seenDeny := false
 
 	str = append(str, string(s.SVCType()))
 	if s&serviceFlagExtLocalScope != 0 {
@@ -242,6 +287,10 @@ func (s ServiceFlags) String() string {
 	}
 	if s&serviceFlagSourceRange != 0 {
 		str = append(str, "check source-range")
+		if s&serviceFlagSourceRangeDeny != 0 {
+			seenDeny = true
+			str = append(str, "deny")
+		}
 	}
 	if s&serviceFlagNat46x64 != 0 {
 		str = append(str, "46x64")
@@ -252,7 +301,7 @@ func (s ServiceFlags) String() string {
 	if s&serviceFlagLoopback != 0 {
 		str = append(str, "loopback")
 	}
-	if s&serviceFlagQuarantined != 0 {
+	if !seenDeny && s&serviceFlagQuarantined != 0 {
 		str = append(str, "quarantined")
 	}
 	if s&serviceFlagFwdModeDSR != 0 {
@@ -477,10 +526,12 @@ type SVC struct {
 	ExtTrafficPolicy          SVCTrafficPolicy  // Service external traffic policy
 	IntTrafficPolicy          SVCTrafficPolicy  // Service internal traffic policy
 	NatPolicy                 SVCNatPolicy      // Service NAT 46/64 policy
+	SourceRangesPolicy        SVCSourceRangesPolicy
 	SessionAffinity           bool
 	SessionAffinityTimeoutSec uint32
-	HealthCheckNodePort       uint16      // Service health check node port
-	Name                      ServiceName // Fully qualified service name
+	HealthCheckNodePort       uint16                    // Service health check node port
+	Name                      ServiceName               // Fully qualified service name
+	LoadBalancerAlgorithm     SVCLoadBalancingAlgorithm // Service LB algorithm (random or maglev)
 	LoadBalancerSourceRanges  []*cidr.CIDR
 	L7LBProxyPort             uint16 // Non-zero for L7 LB services
 	LoopbackHostport          bool

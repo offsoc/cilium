@@ -37,8 +37,8 @@ export CILIUM_NODEINIT_DIGEST:=sha256:8d7b41c4ca45860254b3c19e20210462ef89479bb6
 
 # renovate: datasource=docker
 export CILIUM_ENVOY_REPO:=quay.io/cilium/cilium-envoy
-export CILIUM_ENVOY_VERSION:=v1.31.3-1731891150-9a53218a187b032b9b841e1f910fc879502e9f1f
-export CILIUM_ENVOY_DIGEST:=sha256:f7901213136b1a03d6e8143a22f1f1a14ce8f3209cefd5d8b3c7cc07af7543af
+export CILIUM_ENVOY_VERSION:=v1.31.4-1734310891-3a8ccd54545785689e677d785b69025d1d4b33de
+export CILIUM_ENVOY_DIGEST:=sha256:85adb1b3a66182de9a1d24cc5b5240a71dd742cdc846af19589227ecf0053cfe
 
 # renovate: datasource=docker
 export HUBBLE_UI_BACKEND_REPO:=quay.io/cilium/hubble-ui-backend
@@ -53,7 +53,7 @@ export HUBBLE_UI_FRONTEND_DIGEST:=sha256:e2e9313eb7caf64b0061d9da0efbdad59c6c461
 # renovate: datasource=docker
 export SPIRE_INIT_REPO:=docker.io/library/busybox
 export SPIRE_INIT_VERSION:=1.37.0
-export SPIRE_INIT_DIGEST:=sha256:768e5c6f5cb6db0794eec98dc7a967f40631746c32232b78a3105fb946f3ab83
+export SPIRE_INIT_DIGEST:=sha256:2919d0172f7524b2d8df9e50066a682669e6d170ac0f6a49676d54358fe970b5
 
 # renovate: datasource=docker
 export SPIRE_SERVER_REPO:=ghcr.io/spiffe/spire-server

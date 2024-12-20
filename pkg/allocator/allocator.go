@@ -273,7 +273,7 @@ type Backend interface {
 
 	// ListAndWatch begins synchronizing the local Backend instance with its
 	// remote.
-	ListAndWatch(ctx context.Context, handler CacheMutations, stopChan chan struct{})
+	ListAndWatch(ctx context.Context, handler CacheMutations)
 
 	// RunGC reaps stale or unused identities within the Backend and makes them
 	// available for reuse. It is used by the cilium-operator and is not invoked
@@ -289,9 +289,6 @@ type Backend interface {
 	// Note: not all Backend implementations rely on this, such as the kvstore
 	// backends, and may use leases to expire keys.
 	RunLocksGC(ctx context.Context, staleKeysPrevRound map[string]kvstore.Value) (map[string]kvstore.Value, error)
-
-	// Status returns a human-readable status of the Backend.
-	Status() (string, error)
 }
 
 // NewAllocator creates a new Allocator. Any type can be used as key as long as
@@ -1182,7 +1179,8 @@ func (rc *remoteCache) Synced() bool {
 	}
 
 	select {
-	case <-rc.cache.stopChan:
+	case <-rc.cache.ctx.Done():
+		// The cache has been stopped.
 		return false
 	default:
 		select {

@@ -15,9 +15,6 @@ import (
 	"time"
 
 	"github.com/cilium/hive/cell"
-
-	"github.com/cilium/cilium/operator/doublewrite"
-
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 	"github.com/spf13/viper"
@@ -31,6 +28,7 @@ import (
 	ciliumdbg "github.com/cilium/cilium/cilium-dbg/cmd"
 	"github.com/cilium/cilium/operator/api"
 	"github.com/cilium/cilium/operator/auth"
+	"github.com/cilium/cilium/operator/doublewrite"
 	"github.com/cilium/cilium/operator/endpointgc"
 	"github.com/cilium/cilium/operator/identitygc"
 	operatorK8s "github.com/cilium/cilium/operator/k8s"
@@ -69,6 +67,7 @@ import (
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
+	features "github.com/cilium/cilium/pkg/metrics/features/operator"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/pprof"
 	"github.com/cilium/cilium/pkg/version"
@@ -127,8 +126,7 @@ var (
 				// to add their metrics when it's set to true. Therefore, we leave the flag as global
 				// instead of declaring it as part of the metrics cell.
 				// This should be changed once the IPAM allocator is modularized.
-				EnableMetrics:    operatorCfg.EnableMetrics,
-				EnableGatewayAPI: operatorCfg.EnableGatewayAPI,
+				EnableMetrics: operatorCfg.EnableMetrics,
 			}
 		}),
 	)
@@ -186,6 +184,7 @@ var (
 		) ciliumidentity.SharedConfig {
 			return ciliumidentity.SharedConfig{
 				EnableCiliumEndpointSlice: daemonCfg.EnableCiliumEndpointSlice,
+				DisableNetworkPolicy:      !option.NetworkPolicyEnabled(daemonCfg),
 			}
 		}),
 
@@ -272,6 +271,11 @@ var (
 			// corresponding ClusterIP, without depending on CoreDNS. Leveraged by etcd
 			// and clustermesh.
 			dial.ServiceResolverCell,
+
+			// The feature Cell will retrieve information from all other cells /
+			// configuration to describe, in form of prometheus metrics, which
+			// features are enabled on the operator.
+			features.Cell,
 		),
 	)
 
@@ -606,12 +610,6 @@ func (legacy *legacyOnLeader) onStart(_ cell.HookContext) error {
 		}
 
 		nodeManager = nm
-	}
-
-	if operatorOption.Config.BGPAnnounceLBIP {
-		log.Info("Starting LB IP allocator")
-		operatorWatchers.StartBGPBetaLBIPAllocator(legacy.ctx, legacy.clientset, legacy.resources.Services,
-			watcherLogger)
 	}
 
 	if kvstoreEnabled() {

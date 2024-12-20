@@ -267,7 +267,7 @@ func (p *prober) getIPsByNode() map[string][]*net.IPAddr {
 	return nodes
 }
 
-func icmpPing(node string, ip string, ctx context.Context, resChan chan<- connectivityResult, wg *sync.WaitGroup, probeDeadline time.Duration) {
+func icmpPing(node string, ip string, ctx context.Context, resChan chan<- connectivityResult, wg *sync.WaitGroup, probeDeadline time.Duration, nReqs int) {
 	defer wg.Done()
 
 	result := &models.ConnectivityStatus{}
@@ -295,7 +295,13 @@ func icmpPing(node string, ip string, ctx context.Context, resChan chan<- connec
 	}
 
 	pinger.Timeout = probeDeadline
-	pinger.Count = 1
+	pinger.Count = nReqs
+	pinger.Interval = 100 * time.Millisecond
+	pinger.OnRecv = func(pkt *probing.Packet) {
+		// As we already received response,
+		// no need to send out more pings.
+		pinger.Stop()
+	}
 	pinger.OnFinish = func(stats *probing.Statistics) {
 		if stats.PacketsRecv > 0 && len(stats.Rtts) > 0 {
 			if debugLogsEnabled {
@@ -308,7 +314,7 @@ func icmpPing(node string, ip string, ctx context.Context, resChan chan<- connec
 		}
 	}
 	pinger.SetPrivileged(true)
-	err = pinger.Run()
+	err = pinger.RunWithContext(ctx)
 	if err != nil {
 		scopedLog.Debugf("Failed to run pinger for IP %s: %v", ip, err)
 		result.Status = err.Error()
@@ -433,7 +439,7 @@ func (p *prober) runProbe() {
 			} else {
 				wg.Add(2)
 				go httpProbe(name, ip.String(), ctx, httpResChan, &wg, p.server.Config.HTTPPathPort)
-				go icmpPing(name, ip.String(), ctx, icmpResChan, &wg, p.server.Config.ProbeDeadline)
+				go icmpPing(name, ip.String(), ctx, icmpResChan, &wg, p.server.Config.ProbeDeadline, p.server.Config.ICMPReqsCount)
 			}
 		}
 	}

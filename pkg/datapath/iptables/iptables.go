@@ -256,7 +256,8 @@ type Manager struct {
 	cfg       Config
 	sharedCfg SharedConfig
 
-	argsInit *lock.StoppableWaitGroup
+	argsInit  *lock.StoppableWaitGroup
+	startDone lock.DoneFunc
 
 	// anything that can trigger a reconciliation
 	reconcilerParams reconcilerParams
@@ -319,10 +320,10 @@ func newIptablesManager(p params) datapath.IptablesManager {
 	}
 
 	// init iptables/ip6tables wait arguments before using them in the reconciler or in the manager (e.g: GetProxyPorts)
-	iptMgr.argsInit.Add()
+	initDone := iptMgr.argsInit.Add()
 	p.Lifecycle.Append(cell.Hook{
 		OnStart: func(ctx cell.HookContext) error {
-			defer iptMgr.argsInit.Done()
+			defer initDone()
 			ip4tables.initArgs(ctx, int(p.Cfg.IPTablesLockTimeout/time.Second))
 			if p.SharedCfg.EnableIPv6 {
 				ip6tables.initArgs(ctx, int(p.Cfg.IPTablesLockTimeout/time.Second))
@@ -332,7 +333,7 @@ func newIptablesManager(p params) datapath.IptablesManager {
 	})
 
 	// init haveIp6tables argument before using it in a reconciliation loop
-	iptMgr.argsInit.Add()
+	iptMgr.startDone = iptMgr.argsInit.Add()
 	p.Lifecycle.Append(iptMgr)
 
 	p.JobGroup.Add(
@@ -361,7 +362,7 @@ func newIptablesManager(p params) datapath.IptablesManager {
 
 // Start initializes the iptables manager and checks for iptables kernel modules availability.
 func (m *Manager) Start(ctx cell.HookContext) error {
-	defer m.argsInit.Done()
+	defer m.startDone()
 
 	if os.Getenv("CILIUM_PREPEND_IPTABLES_CHAIN") != "" {
 		m.logger.Warning("CILIUM_PREPEND_IPTABLES_CHAIN env var has been deprecated. Please use 'CILIUM_PREPEND_IPTABLES_CHAINS' " +
@@ -1179,28 +1180,11 @@ func (m *Manager) installMasqueradeRules(
 	devices := nativeDevices
 
 	if m.sharedCfg.NodeIpsetNeeded {
-		// Exclude traffic to nodes from masquerade.
-		progArgs := []string{
-			"-t", "nat",
-			"-A", ciliumPostNatChain,
-		}
-
-		// If MasqueradeInterfaces is set, we need to mirror base condition of the
-		// "cilium masquerade non-cluster" rule below, as the allocRange might not
-		// be valid in such setups (e.g. in ENI mode).
-		if len(m.sharedCfg.MasqueradeInterfaces) > 0 {
-			progArgs = append(progArgs, "-o", strings.Join(m.sharedCfg.MasqueradeInterfaces, ","))
-		} else {
-			progArgs = append(progArgs, "-s", allocRange)
-		}
-
-		progArgs = append(progArgs,
-			"-m", "set", "--match-set", prog.getIpset(), "dst",
-			"-m", "comment", "--comment", "exclude traffic to cluster nodes from masquerade",
-			"-j", "ACCEPT",
-		)
-		if err := prog.runProg(progArgs); err != nil {
-			return err
+		cmds := nodeIpsetNATCmds(allocRange, prog.getIpset(), m.sharedCfg.MasqueradeInterfaces)
+		for _, cmd := range cmds {
+			if err := prog.runProg(cmd); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1314,30 +1298,12 @@ func (m *Manager) installMasqueradeRules(
 		//     range
 		// * Non-tunnel mode:
 		//   * May not be targeted to an IP in the cluster range
-		progArgs := []string{
-			"-t", "nat",
-			"-A", ciliumPostNatChain,
-			"!", "-d", snatDstExclusionCIDR,
-		}
-		if len(m.sharedCfg.MasqueradeInterfaces) > 0 {
-			progArgs = append(
-				progArgs,
-				"-o", strings.Join(m.sharedCfg.MasqueradeInterfaces, ","))
-		} else {
-			progArgs = append(
-				progArgs,
-				"-s", allocRange,
-				"!", "-o", "cilium_+")
-		}
-		progArgs = append(
-			progArgs,
-			"-m", "comment", "--comment", "cilium masquerade non-cluster",
-			"-j", "MASQUERADE")
-		if m.cfg.IPTablesRandomFully {
-			progArgs = append(progArgs, "--random-fully")
-		}
-		if err := prog.runProg(progArgs); err != nil {
-			return err
+		cmds := allEgressMasqueradeCmds(allocRange, snatDstExclusionCIDR, m.sharedCfg.MasqueradeInterfaces,
+			m.cfg.IPTablesRandomFully)
+		for _, cmd := range cmds {
+			if err := prog.runProg(cmd); err != nil {
+				return err
+			}
 		}
 	}
 
@@ -1805,4 +1771,70 @@ func (m *Manager) addCiliumENIRules() error {
 		"-i", "lxc+",
 		"-m", "comment", "--comment", "cilium: primary ENI",
 		"-j", "CONNMARK", "--restore-mark", "--nfmask", nfmask, "--ctmask", ctmask})
+}
+
+func nodeIpsetNATCmds(allocRange string, ipset string, masqueradeInterfaces []string) [][]string {
+	// Exclude traffic to nodes from masquerade.
+	preArgs := []string{
+		"-t", "nat",
+		"-A", ciliumPostNatChain,
+	}
+
+	postArgs := []string{
+		"-m", "set", "--match-set", ipset, "dst",
+		"-m", "comment", "--comment", "exclude traffic to cluster nodes from masquerade",
+		"-j", "ACCEPT",
+	}
+
+	if len(masqueradeInterfaces) == 0 {
+		cmd := append(preArgs, "-s", allocRange)
+		return [][]string{append(cmd, postArgs...)}
+	}
+
+	// If MasqueradeInterfaces is set, we need to mirror base condition of the
+	// "cilium masquerade non-cluster" rule below, as the allocRange might not
+	// be valid in such setups (e.g. in ENI mode).
+	cmds := make([][]string, 0, len(masqueradeInterfaces))
+	for _, inf := range masqueradeInterfaces {
+		cmd := append(preArgs, "-o", inf)
+		cmds = append(cmds, append(cmd, postArgs...))
+	}
+	return cmds
+}
+
+func allEgressMasqueradeCmds(allocRange string, snatDstExclusionCIDR string,
+	masqueradeInterfaces []string, iptablesRandomFully bool) [][]string {
+	preArgs := []string{
+		"-t", "nat",
+		"-A", ciliumPostNatChain,
+		"!", "-d", snatDstExclusionCIDR,
+	}
+
+	postArgs := []string{
+		"-m", "comment", "--comment", "cilium masquerade non-cluster",
+		"-j", "MASQUERADE",
+	}
+
+	if len(masqueradeInterfaces) == 0 {
+		cmd := append(preArgs,
+			"-s", allocRange,
+			"!", "-o", "cilium_+",
+		)
+		cmd = append(cmd, postArgs...)
+		if iptablesRandomFully {
+			cmd = append(cmd, "--random-fully")
+		}
+		return [][]string{cmd}
+	}
+
+	cmds := make([][]string, 0, len(masqueradeInterfaces))
+	for _, inf := range masqueradeInterfaces {
+		cmd := append(preArgs, "-o", inf)
+		cmd = append(cmd, postArgs...)
+		if iptablesRandomFully {
+			cmd = append(cmd, "--random-fully")
+		}
+		cmds = append(cmds, cmd)
+	}
+	return cmds
 }
