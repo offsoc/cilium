@@ -5,10 +5,17 @@
 #include <bpf/api.h>
 
 #include <node_config.h>
+#include <bpf/config/global.h>
 #include <netdev_config.h>
 #include "lib/mcast.h"
 
 #define IS_BPF_OVERLAY 1
+
+/* WORLD_IPV{4,6}_ID varies based on dualstack being enabled. Real values are
+ * written into node_config.h at runtime. */
+#define SECLABEL WORLD_ID
+#define SECLABEL_IPV4 WORLD_IPV4_ID
+#define SECLABEL_IPV6 WORLD_IPV6_ID
 
 /* Controls the inclusion of the CILIUM_CALL_HANDLE_ICMP6_NS section in the
  * bpf_lxc object file.
@@ -152,9 +159,8 @@ not_esp:
 	/* A packet entering the node from the tunnel and not going to a local
 	 * endpoint has to be going to the local host.
 	 */
-#ifdef HOST_IFINDEX
 	if (1) {
-		union macaddr host_mac = HOST_IFINDEX_MAC;
+		union macaddr host_mac = CILIUM_HOST_MAC;
 		union macaddr router_mac = THIS_INTERFACE_MAC;
 
 		ret = ipv6_l3(ctx, ETH_HLEN, (__u8 *)&router_mac.addr,
@@ -162,12 +168,9 @@ not_esp:
 		if (ret != CTX_ACT_OK)
 			return ret;
 
-		cilium_dbg_capture(ctx, DBG_CAPTURE_DELIVERY, HOST_IFINDEX);
-		return ctx_redirect(ctx, HOST_IFINDEX, 0);
+		cilium_dbg_capture(ctx, DBG_CAPTURE_DELIVERY, CILIUM_NET_IFINDEX);
+		return ctx_redirect(ctx, CILIUM_NET_IFINDEX, 0);
 	}
-#else
-	return CTX_ACT_OK;
-#endif
 }
 
 __section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV6_FROM_OVERLAY)
@@ -181,7 +184,7 @@ int tail_handle_ipv6(struct __ctx_buff *ctx)
 
 	if (IS_ERR(ret))
 		return send_drop_notify_error_ext(ctx, src_sec_identity, ret, ext_err,
-						  CTX_ACT_DROP, METRIC_INGRESS);
+						  METRIC_INGRESS);
 	return ret;
 }
 #endif /* ENABLE_IPV6 */
@@ -189,9 +192,8 @@ int tail_handle_ipv6(struct __ctx_buff *ctx)
 #ifdef ENABLE_IPV4
 static __always_inline int ipv4_host_delivery(struct __ctx_buff *ctx, struct iphdr *ip4)
 {
-#ifdef HOST_IFINDEX
 	if (1) {
-		union macaddr host_mac = HOST_IFINDEX_MAC;
+		union macaddr host_mac = CILIUM_HOST_MAC;
 		union macaddr router_mac = THIS_INTERFACE_MAC;
 		int ret;
 
@@ -200,12 +202,9 @@ static __always_inline int ipv4_host_delivery(struct __ctx_buff *ctx, struct iph
 		if (ret != CTX_ACT_OK)
 			return ret;
 
-		cilium_dbg_capture(ctx, DBG_CAPTURE_DELIVERY, HOST_IFINDEX);
-		return ctx_redirect(ctx, HOST_IFINDEX, 0);
+		cilium_dbg_capture(ctx, DBG_CAPTURE_DELIVERY, CILIUM_NET_IFINDEX);
+		return ctx_redirect(ctx, CILIUM_NET_IFINDEX, 0);
 	}
-#else
-	return CTX_ACT_OK;
-#endif
 }
 
 #if defined(ENABLE_CLUSTER_AWARE_ADDRESSING) && defined(ENABLE_INTER_CLUSTER_SNAT)
@@ -274,7 +273,7 @@ int tail_handle_inter_cluster_revsnat(struct __ctx_buff *ctx)
 	ret = handle_inter_cluster_revsnat(ctx, src_sec_identity, &ext_err);
 	if (IS_ERR(ret))
 		return send_drop_notify_error_ext(ctx, src_sec_identity, ret, ext_err,
-						  CTX_ACT_DROP, METRIC_INGRESS);
+						  METRIC_INGRESS);
 	return ret;
 }
 #endif
@@ -488,7 +487,7 @@ int tail_handle_ipv4(struct __ctx_buff *ctx)
 	ret = handle_ipv4(ctx, &src_sec_identity, &ext_err);
 	if (IS_ERR(ret))
 		return send_drop_notify_error_ext(ctx, src_sec_identity, ret, ext_err,
-						  CTX_ACT_DROP, METRIC_INGRESS);
+						  METRIC_INGRESS);
 	return ret;
 }
 
@@ -516,8 +515,7 @@ int tail_handle_arp(struct __ctx_buff *ctx)
 
 	key_size = TUNNEL_KEY_WITHOUT_SRC_IP;
 	if (unlikely(ctx_get_tunnel_key(ctx, &key, key_size, 0) < 0))
-		return send_drop_notify_error(ctx, UNKNOWN_ID, DROP_NO_TUNNEL_KEY, CTX_ACT_DROP,
-										METRIC_INGRESS);
+		return send_drop_notify_error(ctx, UNKNOWN_ID, DROP_NO_TUNNEL_KEY, METRIC_INGRESS);
 
 	if (!arp_validate(ctx, &mac, &smac, &sip, &tip) || !__lookup_ip4_endpoint(tip))
 		goto pass_to_stack;
@@ -528,9 +526,9 @@ int tail_handle_arp(struct __ctx_buff *ctx)
 
 	ret = arp_prepare_response(ctx, &mac, tip, &smac, sip);
 	if (unlikely(ret != 0))
-		return send_drop_notify_error(ctx, UNKNOWN_ID, ret, CTX_ACT_DROP, METRIC_EGRESS);
+		return send_drop_notify_error(ctx, UNKNOWN_ID, ret, METRIC_EGRESS);
 	if (info->tunnel_endpoint) {
-		ret = __encap_and_redirect_with_nodeid(ctx, UNKNOWN_ID, info->tunnel_endpoint,
+		ret = __encap_and_redirect_with_nodeid(ctx, info->tunnel_endpoint,
 						       LOCAL_NODE_ID, WORLD_IPV4_ID,
 						       WORLD_IPV4_ID, &trace);
 		if (IS_ERR(ret))
@@ -541,7 +539,7 @@ int tail_handle_arp(struct __ctx_buff *ctx)
 
 	ret = DROP_UNKNOWN_L3;
 drop_err:
-	return send_drop_notify_error(ctx, UNKNOWN_ID, ret, CTX_ACT_DROP, METRIC_EGRESS);
+	return send_drop_notify_error(ctx, UNKNOWN_ID, ret, METRIC_EGRESS);
 
 pass_to_stack:
 	send_trace_notify(ctx, TRACE_TO_STACK, UNKNOWN_ID, UNKNOWN_ID,
@@ -596,10 +594,7 @@ int cil_from_overlay(struct __ctx_buff *ctx)
 	__u16 proto;
 	int ret;
 
-#ifndef ENABLE_HIGH_SCALE_IPCACHE
-	/* preserve skb->cb for hs-ipcache, from-netdev is passing info */
 	bpf_clear_meta(ctx);
-#endif
 	ctx_skip_nodeport_clear(ctx);
 
 	if (!validate_ethertype(ctx, &proto)) {
@@ -640,18 +635,12 @@ int cil_from_overlay(struct __ctx_buff *ctx)
 		/* If packets are decrypted the key has already been pushed into metadata. */
 		if (!decrypted) {
 			struct bpf_tunnel_key key = {};
-
- #ifdef ENABLE_HIGH_SCALE_IPCACHE
-			/* already set by decapsulate_overlay(): */
-			key.tunnel_id = ctx_load_meta(ctx, CB_SRC_LABEL);
- #else
 			__u32 key_size = TUNNEL_KEY_WITHOUT_SRC_IP;
 
 			if (unlikely(ctx_get_tunnel_key(ctx, &key, key_size, 0) < 0)) {
 				ret = DROP_NO_TUNNEL_KEY;
 				goto out;
 			}
- #endif /* ENABLE_HIGH_SCALE_IPCACHE */
 			cilium_dbg(ctx, DBG_DECAP, key.tunnel_id, key.tunnel_label);
 
 			src_sec_identity = get_id_from_tunnel_id(key.tunnel_id, proto);
@@ -705,29 +694,6 @@ int cil_from_overlay(struct __ctx_buff *ctx)
 
 	case bpf_htons(ETH_P_IP):
 #ifdef ENABLE_IPV4
-# ifdef ENABLE_HIGH_SCALE_IPCACHE
-#  if defined(ENABLE_DSR) && DSR_ENCAP_MODE == DSR_ENCAP_GENEVE
-		if (ctx_load_meta(ctx, CB_HSIPC_ADDR_V4)) {
-			struct geneve_dsr_opt4 dsr_opt;
-			struct bpf_tunnel_key key = {};
-
-			set_geneve_dsr_opt4((__be16)ctx_load_meta(ctx, CB_HSIPC_PORT),
-					    ctx_load_meta(ctx, CB_HSIPC_ADDR_V4),
-					    &dsr_opt);
-
-			/* Needed to create the metadata_dst for storing tunnel opts: */
-			if (ctx_set_tunnel_key(ctx, &key, sizeof(key), BPF_F_ZERO_CSUM_TX) < 0) {
-				ret = DROP_WRITE_ERROR;
-				goto out;
-			}
-
-			if (ctx_set_tunnel_opt(ctx, &dsr_opt, sizeof(dsr_opt)) < 0) {
-				ret = DROP_WRITE_ERROR;
-				goto out;
-			}
-		}
-#  endif
-# endif
 		ret = tail_call_internal(ctx, CILIUM_CALL_IPV4_FROM_OVERLAY, &ext_err);
 #else
 		ret = DROP_UNKNOWN_L3;
@@ -747,8 +713,7 @@ int cil_from_overlay(struct __ctx_buff *ctx)
 out:
 	if (IS_ERR(ret))
 		return send_drop_notify_error_ext(ctx, src_sec_identity, ret,
-						  ext_err, CTX_ACT_DROP,
-						  METRIC_INGRESS);
+						  ext_err, METRIC_INGRESS);
 	return ret;
 }
 
@@ -779,9 +744,8 @@ int cil_to_overlay(struct __ctx_buff *ctx)
 	 */
 	ret = edt_sched_departure(ctx, proto);
 	/* No send_drop_notify_error() here given we're rate-limiting. */
-	if (ret == CTX_ACT_DROP) {
-		update_metrics(ctx_full_len(ctx), METRIC_EGRESS,
-			       -DROP_EDT_HORIZON);
+	if (ret < 0) {
+		update_metrics(ctx_full_len(ctx), METRIC_EGRESS, (__u8)-ret);
 		return CTX_ACT_DROP;
 	}
 #endif
@@ -809,12 +773,12 @@ int cil_to_overlay(struct __ctx_buff *ctx)
 		goto out;
 	}
 
-	ret = handle_nat_fwd(ctx, cluster_id, proto, false, &trace, &ext_err);
+	ret = handle_nat_fwd(ctx, cluster_id, src_sec_identity, proto, false, &trace, &ext_err);
 out:
 #endif
 	if (IS_ERR(ret))
 		return send_drop_notify_error_ext(ctx, src_sec_identity, ret, ext_err,
-						  CTX_ACT_DROP, METRIC_EGRESS);
+						  METRIC_EGRESS);
 	return ret;
 }
 

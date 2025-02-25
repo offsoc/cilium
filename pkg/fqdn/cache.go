@@ -38,7 +38,7 @@ type cacheEntry struct {
 	// LookupTime is when the data begins being valid
 	LookupTime time.Time `json:"lookup-time,omitempty"`
 
-	// ExpirationTime is a calcutated time when the DNS data stops being valid.
+	// ExpirationTime is a calculated time when the DNS data stops being valid.
 	// It is simply LookupTime + TTL
 	ExpirationTime time.Time `json:"expiration-time,omitempty"`
 
@@ -135,8 +135,8 @@ type DNSCache struct {
 	// perHostLimit is the number of maximum number of IP per host.
 	perHostLimit int
 
-	// minTTL is the minimun TTL value that a cache entry can have, if the TTL
-	// sent in the Update is lower, the TTL will be owerwritten to this value.
+	// minTTL is the minimum TTL value that a cache entry can have, if the TTL
+	// sent in the Update is lower, the TTL will be overwritten to this value.
 	// Due is only read-only is not protected by the mutex.
 	minTTL int
 }
@@ -457,7 +457,7 @@ func (c *DNSCache) lookupByRegexpByTime(now time.Time, re *regexp.Regexp) (match
 
 // LookupIP returns all DNS names in entries that include that IP. The cache
 // maintains the latest-expiring entry per-name per-IP. This means that multiple
-// names referrring to the same IP will expire from the cache at different times,
+// names referring to the same IP will expire from the cache at different times,
 // and only 1 entry for each name-IP pair is internally retained.
 func (c *DNSCache) LookupIP(ip netip.Addr) (names []string) {
 	c.RLock()
@@ -484,8 +484,8 @@ func (c *DNSCache) lookupIPByTime(now time.Time, ip netip.Addr) (names []string)
 	return names
 }
 
-// entryExistsLocked returns true if this (name, IP) pair is known to the cache.
-func (c *DNSCache) entryExistsLocked(name string, ip netip.Addr) bool {
+// EntryExistsLocked returns true if this (name, IP) pair is known to the cache.
+func (c *DNSCache) EntryExistsLocked(name string, ip netip.Addr) bool {
 	names, exists := c.reverse[ip]
 	if !exists {
 		return false
@@ -716,7 +716,7 @@ func (c *DNSCache) MarshalJSON() ([]byte, error) {
 }
 
 // UnmarshalJSON rebuilds a DNSCache from serialized JSON.
-// Note: This is destructive to any currect data. Use UpdateFromCache for bulk
+// Note: This is destructive to any correct data. Use UpdateFromCache for bulk
 // updates.
 func (c *DNSCache) UnmarshalJSON(raw []byte) error {
 	lookups := make([]*cacheEntry, 0)
@@ -801,7 +801,7 @@ type DNSZombieMappings struct {
 	lock.Mutex
 	deletes        map[netip.Addr]*DNSZombieMapping
 	lastCTGCUpdate time.Time
-	nextCTGCUpdate time.Time // estimated
+	NextCTGCUpdate time.Time // estimated
 	// ctGCRevision is a serial number tracking the number of conntrack
 	// garbage collection runs. It is used to ensure that entries
 	// are not reaped until CT GC has run at least twice.
@@ -963,7 +963,7 @@ func sortZombieMappingSlice(alive []*DNSZombieMapping) {
 }
 
 // GC returns alive and dead DNSZombieMapping entries. This removes dead
-// zombies interally, and repeated calls will return different data.
+// zombies internally, and repeated calls will return different data.
 // Zombies are alive if they have been marked alive (with MarkAlive). When
 // SetCTGCTime is called and an zombie not marked alive, it becomes dead.
 // Calling Upsert on a dead zombie will make it alive again.
@@ -1079,7 +1079,7 @@ func (zombies *DNSZombieMappings) MarkAlive(now time.Time, ip netip.Addr) {
 func (zombies *DNSZombieMappings) SetCTGCTime(ctGCStart, estNext time.Time) {
 	zombies.Lock()
 	zombies.lastCTGCUpdate = ctGCStart
-	zombies.nextCTGCUpdate = estNext
+	zombies.NextCTGCUpdate = estNext
 	zombies.ctGCRevision++
 	zombies.Unlock()
 }
@@ -1215,7 +1215,7 @@ func (zombies *DNSZombieMappings) MarshalJSON() ([]byte, error) {
 // UnmarshalJSON rebuilds a DNSZombieMappings from serialized JSON. It resets
 // the AliveAt timestamps, requiring a CT GC cycle to occur before any zombies
 // are deleted (by not being marked alive).
-// Note: This is destructive to any currect data
+// Note: This is destructive to any correct data
 func (zombies *DNSZombieMappings) UnmarshalJSON(raw []byte) error {
 	zombies.Lock()
 	defer zombies.Unlock()

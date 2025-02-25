@@ -17,6 +17,7 @@
 #include "lib/identity.h"
 #include "lib/metrics.h"
 #include "lib/nat_46x64.h"
+#include "lib/sock.h"
 #include "lib/trace_sock.h"
 
 #define SYS_REJECT	0
@@ -454,10 +455,14 @@ static __always_inline int __sock4_post_bind(struct bpf_sock *ctx,
 	/* If the sockaddr of this socket overlaps with a NodePort,
 	 * LoadBalancer or ExternalIP service. We must reject this
 	 * bind() call to avoid accidentally hijacking its traffic.
+	 *
+	 * The one exception is for L7 services going via Envoy so
+	 * the latter can bind in hostns on the same VIP:port.
 	 */
 	if (svc && (lb4_svc_is_nodeport(svc) ||
 		    lb4_svc_is_external_ip(svc) ||
-		    lb4_svc_is_loadbalancer(svc)))
+		    lb4_svc_is_loadbalancer(svc)) &&
+	    !lb4_svc_is_l7loadbalancer(svc))
 		return -EADDRINUSE;
 
 	return 0;
@@ -847,7 +852,8 @@ static __always_inline int __sock6_post_bind(struct bpf_sock *ctx)
 
 	if (svc && (lb6_svc_is_nodeport(svc) ||
 		    lb6_svc_is_external_ip(svc) ||
-		    lb6_svc_is_loadbalancer(svc)))
+		    lb6_svc_is_loadbalancer(svc)) &&
+	    !lb6_svc_is_l7loadbalancer(svc))
 		return -EADDRINUSE;
 
 	return 0;

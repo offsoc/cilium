@@ -16,6 +16,7 @@
 #include "mono.h"
 #include "config.h"
 #include "tunnel.h"
+#include "notify.h"
 
 #include "source_info.h"
 
@@ -33,13 +34,6 @@
 
 #ifndef EVENT_SOURCE
 #define EVENT_SOURCE 0
-#endif
-
-#ifndef THIS_MTU
-/* If not available, fall back to generically detected MTU instead of more
- * fine-grained per-device MTU.
- */
-# define THIS_MTU MTU
 #endif
 
 #ifdef PREALLOCATE_MAPS
@@ -90,8 +84,8 @@ enum {
 #define CILIUM_CALL_IPV4_FROM_LXC		7
 #define CILIUM_CALL_IPV4_FROM_NETDEV		CILIUM_CALL_IPV4_FROM_LXC
 #define CILIUM_CALL_IPV4_FROM_OVERLAY		CILIUM_CALL_IPV4_FROM_LXC
-#define CILIUM_CALL_IPV46_RFC8215		8
-#define CILIUM_CALL_IPV64_RFC8215		9
+#define CILIUM_CALL_IPV46_RFC6052		8
+#define CILIUM_CALL_IPV64_RFC6052		9
 #define CILIUM_CALL_IPV6_FROM_LXC		10
 #define CILIUM_CALL_IPV6_FROM_NETDEV		CILIUM_CALL_IPV6_FROM_LXC
 #define CILIUM_CALL_IPV6_FROM_OVERLAY		CILIUM_CALL_IPV6_FROM_LXC
@@ -342,14 +336,22 @@ struct endpoint_info {
 	__u32		pad[2];
 };
 
+#define DIRECTION_EGRESS 0
+#define DIRECTION_INGRESS 1
+
 struct edt_id {
-	__u64		id;
+	__u32		id;
+	__u8		direction;
+	__u8		pad[3];
 };
 
 struct edt_info {
 	__u64		bps;
 	__u64		t_last;
-	__u64		t_horizon_drop;
+	union {
+		__u64	t_horizon_drop;
+		__u64	tokens;
+	};
 	__u32		prio;
 	__u32		pad_32;
 	__u64		pad[3];
@@ -541,47 +543,6 @@ enum {
 	CAPTURE_EGRESS = 2,
 };
 
-enum {
-	CILIUM_NOTIFY_UNSPEC,
-	CILIUM_NOTIFY_DROP,
-	CILIUM_NOTIFY_DBG_MSG,
-	CILIUM_NOTIFY_DBG_CAPTURE,
-	CILIUM_NOTIFY_TRACE,
-	CILIUM_NOTIFY_POLICY_VERDICT,
-	CILIUM_NOTIFY_CAPTURE,
-	CILIUM_NOTIFY_TRACE_SOCK,
-};
-
-#define NOTIFY_COMMON_HDR \
-	__u8		type;		\
-	__u8		subtype;	\
-	__u16		source;		\
-	__u32		hash;
-
-#define NOTIFY_CAPTURE_HDR \
-	NOTIFY_COMMON_HDR						\
-	__u32		len_orig;	/* Length of original packet */	\
-	__u16		len_cap;	/* Length of captured bytes */	\
-	__u16		version;	/* Capture header version */
-
-#define __notify_common_hdr(t, s)	\
-	.type		= (t),		\
-	.subtype	= (s),		\
-	.source		= EVENT_SOURCE,	\
-	.hash		= get_hash(ctx)   /* Avoids hash recalculation, assumes hash has been already calculated */
-
-#define __notify_pktcap_hdr(o, c, v)	\
-	.len_orig	= (o),		\
-	.len_cap	= (c),		\
-	.version	= (v)
-
-/* Base capture notifications version.
- * Must be incremented when the format of NOTIFY_CAPTURE_HDR changes.
- *
- * Individual notify messages may evolve independently, specifying their own versions.
- */
-#define NOTIFY_CAPTURE_VER 1
-
 #ifndef TRACE_PAYLOAD_LEN
 #define TRACE_PAYLOAD_LEN 128ULL
 #endif
@@ -615,8 +576,8 @@ enum {
 #define DROP_MISSED_TAIL_CALL	-140
 #define DROP_WRITE_ERROR	-141
 #define DROP_UNKNOWN_L4		-142
-#define DROP_UNKNOWN_ICMP_CODE	-143
-#define DROP_UNKNOWN_ICMP_TYPE	-144
+#define DROP_UNKNOWN_ICMP4_CODE	-143
+#define DROP_UNKNOWN_ICMP4_TYPE	-144
 #define DROP_UNKNOWN_ICMP6_CODE	-145
 #define DROP_UNKNOWN_ICMP6_TYPE	-146
 #define DROP_NO_TUNNEL_KEY	-147
@@ -699,6 +660,8 @@ enum {
 #define REASON_FRAG_PACKET		9
 #define REASON_FRAG_PACKET_UPDATE	10
 #define REASON_MISSED_CUSTOM_CALL	11
+#define REASON_DECRYPTING			12
+#define REASON_ENCRYPTING			13
 
 /* Lookup scope for externalTrafficPolicy=Local */
 #define LB_LOOKUP_SCOPE_EXT	0
@@ -851,14 +814,11 @@ enum {
 #define	CB_IPCACHE_SRC_LABEL	CB_1		/* Alias, non-overlapping */
 #define	CB_SRV6_SID_2		CB_1		/* Alias, non-overlapping */
 #define	CB_CLUSTER_ID_EGRESS	CB_1		/* Alias, non-overlapping */
-#define	CB_HSIPC_ADDR_V4	CB_1		/* Alias, non-overlapping */
 #define	CB_TRACED		CB_1		/* Alias, non-overlapping */
 	CB_2,
 #define	CB_ADDR_V6_2		CB_2		/* Alias, non-overlapping */
 #define CB_SRV6_SID_3		CB_2		/* Alias, non-overlapping */
 #define	CB_CLUSTER_ID_INGRESS	CB_2		/* Alias, non-overlapping */
-#define CB_HSIPC_PORT		CB_2		/* Alias, non-overlapping */
-#define CB_DSR_SRC_LABEL	CB_2		/* Alias, non-overlapping */
 #define CB_NAT_FLAGS		CB_2		/* Alias, non-overlapping */
 	CB_3,
 #define	CB_ADDR_V6_3		CB_3		/* Alias, non-overlapping */

@@ -35,6 +35,7 @@ import (
 	"github.com/cilium/cilium/pkg/endpointcleanup"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/envoy"
+	"github.com/cilium/cilium/pkg/fqdn/namemanager"
 	"github.com/cilium/cilium/pkg/gops"
 	hubble "github.com/cilium/cilium/pkg/hubble/cell"
 	identity "github.com/cilium/cilium/pkg/identity/cache/cell"
@@ -93,7 +94,7 @@ var (
 		cell.Config(pprofConfig),
 
 		// Runs the gops agent, a tool to diagnose Go processes.
-		gops.Cell(defaults.GopsPortAgent),
+		gops.Cell(defaults.EnableGops, defaults.GopsPortAgent),
 
 		// Provides Clientset, API for accessing Kubernetes objects.
 		k8sClient.Cell,
@@ -166,6 +167,9 @@ var (
 		// Shared resources provide access to k8s resources as event streams or as
 		// read-only stores.
 		agentK8s.ResourcesCell,
+
+		// StateDB tables for Kubernetes objects.
+		agentK8s.TablesCell,
 
 		// Shared synchronization structures for waiting on K8s resources to
 		// be synced
@@ -314,6 +318,9 @@ var (
 
 		// Determines priorities of data sources.
 		source.Cell,
+
+		// The FQDN NameManager stores DNS mappings.
+		namemanager.Cell,
 	)
 )
 

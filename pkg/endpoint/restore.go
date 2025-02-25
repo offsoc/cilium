@@ -23,6 +23,7 @@ import (
 	"github.com/cilium/cilium/api/v1/models"
 	"github.com/cilium/cilium/pkg/common"
 	"github.com/cilium/cilium/pkg/controller"
+	"github.com/cilium/cilium/pkg/datapath/linux/safenetlink"
 	dptypes "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/fqdn"
@@ -78,7 +79,7 @@ func ReadEPsFromDirNames(ctx context.Context, owner regeneration.Owner, policyGe
 			continue
 		}
 
-		ep, err := parseEndpoint(ctx, owner, policyGetter, namedPortsGetter, state)
+		ep, err := parseEndpoint(owner, policyGetter, namedPortsGetter, state)
 		if err != nil {
 			scopedLog.WithError(err).Warn("Unable to parse the C header file")
 			continue
@@ -192,6 +193,10 @@ func partitionEPDirNamesByRestoreStatus(eptsDirNames []string) (complete []strin
 // Returns an error if any operation fails while trying to perform the above
 // operations.
 func (e *Endpoint) RegenerateAfterRestore(regenerator *Regenerator, bwm dptypes.BandwidthManager, resolveMetadata MetadataResolverCB) error {
+	if err := e.restoreHostIfindex(); err != nil {
+		return err
+	}
+
 	if err := e.restoreIdentity(regenerator); err != nil {
 		return err
 	}
@@ -212,6 +217,26 @@ func (e *Endpoint) RegenerateAfterRestore(regenerator *Regenerator, bwm dptypes.
 	}
 
 	scopedLog.WithField(logfields.IPAddr, []string{e.GetIPv4Address(), e.GetIPv6Address()}).Info("Restored endpoint")
+	return nil
+}
+
+// restoreHostIfindex looks up the host interface's ifindex using netlink and
+// populates the value in the Endpoint. This used to be left at zero for
+// whatever reason, so the zero ifindex got persisted to disk.
+//
+// Try to populate the ifindex field using netlink so we can rely on it to
+// generate the host's endpoint configuration.
+func (e *Endpoint) restoreHostIfindex() error {
+	if !e.isHost || e.ifIndex != 0 {
+		return nil
+	}
+
+	l, err := safenetlink.LinkByName(e.ifName)
+	if err != nil {
+		return fmt.Errorf("get host interface: %w", err)
+	}
+	e.ifIndex = l.Attrs().Index
+
 	return nil
 }
 
@@ -560,6 +585,7 @@ func (ep *Endpoint) MarshalJSON() ([]byte, error) {
 func (ep *Endpoint) fromSerializedEndpoint(r *serializableEndpoint) {
 	ep.ID = r.ID
 	ep.createdAt = time.Now()
+	ep.InitialEnvoyPolicyComputed = make(chan struct{})
 	ep.containerName.Store(&r.ContainerName)
 	ep.containerID.Store(&r.ContainerID)
 	ep.dockerNetworkID = r.DockerNetworkID

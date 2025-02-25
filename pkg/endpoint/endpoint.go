@@ -28,7 +28,6 @@ import (
 	"github.com/cilium/cilium/pkg/completion"
 	"github.com/cilium/cilium/pkg/container/versioned"
 	"github.com/cilium/cilium/pkg/controller"
-	"github.com/cilium/cilium/pkg/datapath/link"
 	"github.com/cilium/cilium/pkg/datapath/linux/bandwidth"
 	linuxrouting "github.com/cilium/cilium/pkg/datapath/linux/routing"
 	"github.com/cilium/cilium/pkg/datapath/linux/safenetlink"
@@ -160,6 +159,8 @@ type Endpoint struct {
 	// recalculated on endpoint restore.
 	createdAt time.Time
 
+	InitialEnvoyPolicyComputed chan struct{}
+
 	// mutex protects write operations to this endpoint structure
 	mutex lock.RWMutex
 
@@ -216,6 +217,9 @@ type Endpoint struct {
 
 	// bps is the egress rate of the endpoint
 	bps uint64
+
+	// ingressBps is the ingress rate of the endpoint
+	ingressBps uint64
 
 	// mac is the MAC address of the endpoint
 	// Constant after endpoint creation / restoration.
@@ -598,6 +602,8 @@ func createEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, nam
 		forcePolicyCompute: true,
 	}
 
+	ep.InitialEnvoyPolicyComputed = make(chan struct{})
+
 	ctx, cancel := context.WithCancel(context.Background())
 	ep.aliveCancel = cancel
 	ep.aliveCtx = ctx
@@ -661,15 +667,16 @@ func CreateIngressEndpoint(owner regeneration.Owner, policyGetter policyRepoGett
 
 // CreateHostEndpoint creates the endpoint corresponding to the host.
 func CreateHostEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner) (*Endpoint, error) {
-	mac, err := link.GetHardwareAddr(defaults.HostDevice)
+	iface, err := safenetlink.LinkByName(defaults.HostDevice)
 	if err != nil {
 		return nil, err
 	}
 
 	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, ctMapGC, 0, defaults.HostDevice)
 	ep.isHost = true
-	ep.mac = mac
-	ep.nodeMAC = mac
+	ep.mac = mac.MAC(iface.Attrs().HardwareAddr)
+	ep.nodeMAC = mac.MAC(iface.Attrs().HardwareAddr)
+	ep.ifIndex = iface.Attrs().Index
 	ep.DatapathConfiguration = NewDatapathConfiguration()
 
 	ep.setState(StateWaitingForIdentity, "Endpoint creation")
@@ -774,12 +781,6 @@ func (e *Endpoint) ConntrackNameLocked() string {
 // StringID returns the endpoint's ID in a string.
 func (e *Endpoint) StringID() string {
 	return strconv.Itoa(int(e.ID))
-}
-
-// GetIdentityLocked is identical to GetIdentity() but assumes that a.mutex is
-// already held. This function is obsolete and should no longer be used.
-func (e *Endpoint) GetIdentityLocked() identity.NumericIdentity {
-	return e.getIdentity()
 }
 
 // GetIdentity returns the numeric security identity of the endpoint
@@ -920,7 +921,7 @@ func FilterEPDir(dirFiles []os.DirEntry) []string {
 //
 // Note that the parse'd endpoint's identity is only partially restored. The
 // caller must call `SetIdentity()` to make the returned endpoint's identity useful.
-func parseEndpoint(ctx context.Context, owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, epJSON []byte) (*Endpoint, error) {
+func parseEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, epJSON []byte) (*Endpoint, error) {
 	ep := Endpoint{
 		owner:            owner,
 		namedPortsGetter: namedPortsGetter,
@@ -943,9 +944,7 @@ func parseEndpoint(ctx context.Context, owner regeneration.Owner, policyGetter p
 	ep.controllers = controller.NewManager()
 	ep.regenFailedChan = make(chan struct{}, 1)
 
-	ctx, cancel := context.WithCancel(ctx)
-	ep.aliveCancel = cancel
-	ep.aliveCtx = ctx
+	ep.aliveCtx, ep.aliveCancel = context.WithCancel(context.Background())
 
 	// If host label is present, it's the host endpoint.
 	ep.isHost = ep.HasLabels(labels.LabelHost)
@@ -1219,6 +1218,9 @@ func (e *Endpoint) leaveLocked(conf DeleteConfig) []error {
 	errs := []error{}
 
 	// Remove policy references from shared policy structures
+	// Endpoint with desiredPolicy computed can get deleted while queueing for regeneration,
+	// must mark the policy as 'Ready' so that Detach does not complain about it.
+	e.desiredPolicy.Ready()
 	e.desiredPolicy.Detach()
 	// Passing a new map of nil will purge all redirects
 	e.removeOldRedirects(nil, e.desiredPolicy.Redirects)
@@ -1781,6 +1783,7 @@ func (e *Endpoint) metadataResolver(ctx context.Context,
 	}())
 	e.UpdateBandwidthPolicy(bwm,
 		pod.Annotations[bandwidth.EgressBandwidth],
+		pod.Annotations[bandwidth.IngressBandwidth],
 		pod.Annotations[bandwidth.Priority],
 	)
 

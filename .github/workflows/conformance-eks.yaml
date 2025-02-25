@@ -61,9 +61,9 @@ concurrency:
 env:
   clusterName: ${{ github.repository_owner }}-${{ github.event.repository.name }}-${{ github.run_id }}-${{ github.run_attempt }}
   # renovate: datasource=github-releases depName=eksctl-io/eksctl
-  eksctl_version: v0.199.0
+  eksctl_version: v0.203.0
   # renovate: datasource=github-releases depName=kubernetes/kubernetes
-  kubectl_version: v1.32.0
+  kubectl_version: v1.32.1
 
 jobs:
   echo-inputs:
@@ -77,7 +77,7 @@ jobs:
 
   commit-status-start:
     name: Commit Status Start
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Set initial commit status
         uses: myrotvorets/set-commit-status-action@3730c0a348a2ace3c110851bed53331bc6406e9f # v2.0.1
@@ -86,7 +86,7 @@ jobs:
 
   generate-matrix:
     name: Generate Matrix
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       matrix: ${{ steps.set-matrix.outputs.matrix }}
       empty: ${{ steps.set-matrix.outputs.empty }}
@@ -121,15 +121,18 @@ jobs:
           echo "Generated matrix:"
           cat /tmp/matrix.json
 
-      # We use latest eksctl just to fetch recent supported versions.
-      # We don't use that eksctl to create cluster.
-      # Eksctl has hardcoded list of supported versions in the binary.
-      # This is hack until https://github.com/aws/containers-roadmap/issues/982 is resolved.
-      - name: Install eksctl CLI
+      - name: Set up AWS CLI credentials
+        uses: aws-actions/configure-aws-credentials@4fc4975a852c8cd99761e2de1f4ba73402e44dd9 # v4.0.3
+        with:
+          role-to-assume: ${{ secrets.AWS_PR_ASSUME_ROLE }}
+          aws-region: us-west-1
+
+      - name: Run aws configure
         run: |
-          curl -LO "https://github.com/eksctl-io/eksctl/releases/latest/download/eksctl_$(uname -s)_amd64.tar.gz"
-          sudo tar xzvfC eksctl_$(uname -s)_amd64.tar.gz /usr/bin
-          rm eksctl_$(uname -s)_amd64.tar.gz
+          aws configure set aws_access_key_id ${{ env.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ env.AWS_SECRET_ACCESS_KEY }}
+          aws configure set aws_session_token ${{ env.AWS_SESSION_TOKEN }}
+          aws configure set default.region ${{ env.AWS_REGION }}
 
       - name: Filter Matrix
         id: set-matrix
@@ -137,7 +140,7 @@ jobs:
           cp /tmp/matrix.json /tmp/result.json
           jq -c '.include[]' /tmp/matrix.json | while read i; do
             VERSION=$(echo $i | jq -r '.version')
-            eksctl version -o json | jq -r '.EKSServerSupportedVersions[]' > /tmp/output
+            aws eks describe-cluster-versions | jq -r '.clusterVersions[].clusterVersion' > /tmp/output
             if grep -q -F $VERSION /tmp/output; then
               echo "Version $VERSION is supported"
             else
@@ -155,7 +158,7 @@ jobs:
     name: Installation and Connectivity Test
     needs: generate-matrix
     if: ${{ needs.generate-matrix.outputs.empty == 'false' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
     env:
       job_name: "Installation and Connectivity Test"
@@ -234,7 +237,7 @@ jobs:
           rm eksctl_$(uname -s)_amd64.tar.gz
 
       - name: Set up AWS CLI credentials
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        uses: aws-actions/configure-aws-credentials@4fc4975a852c8cd99761e2de1f4ba73402e44dd9 # v4.0.3
         with:
           role-to-assume: ${{ secrets.AWS_PR_ASSUME_ROLE }}
           aws-region: ${{ matrix.region }}
@@ -253,10 +256,10 @@ jobs:
           region: ${{ matrix.region }}
           owner: "${{ steps.vars.outputs.owner }}"
           version: ${{ matrix.version }}
-          spot: false
+          addons: "coredns kube-proxy"
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@c52e8c38e6d6235bd8e6e961199a984275547d6f # v0.16.22
+        uses: cilium/cilium-cli@1432ef0e4e0cd766f5c1ee0544759d7a31cd32b2 # v0.17.0
         with:
           skip-build: ${{ env.CILIUM_CLI_SKIP_BUILD }}
           image-repo: ${{ env.CILIUM_CLI_IMAGE_REPO }}
@@ -277,37 +280,6 @@ jobs:
             until docker manifest inspect quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/$image:${{ steps.vars.outputs.sha }} &> /dev/null; do sleep 45s; done
           done
 
-      - name: Make sure images available from cluster
-        run: |
-          kubectl create -f - <<EOF
-          apiVersion: batch/v1
-          kind: Job
-          metadata:
-            name: wait-for-images
-          spec:
-            completions: 1
-            backoffLimit: 3
-            template:
-              spec:
-                containers:
-                - name: wait-for-images
-                  image: quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/cilium-ci:${{ steps.vars.outputs.sha }}
-                  command: ["true"]
-                tolerations:
-                - key: "node.cilium.io/agent-not-ready"
-                  operator: "Equal"
-                  value: "true"
-                  effect: "NoExecute"
-                restartPolicy: Never
-          EOF
-
-          kubectl wait --for=condition=complete --timeout=10m job/wait-for-images
-
-      # This is a workaround for flake #16938.
-      - name: Remove AWS-CNI
-        run: |
-          kubectl -n kube-system delete daemonset aws-node
-
       # Warning: since this is a privileged workflow, subsequent workflow job
       # steps must take care not to execute untrusted code.
       - name: Checkout pull request branch (NOT TRUSTED)
@@ -324,9 +296,18 @@ jobs:
         run: |
           cilium install ${{ steps.vars.outputs.cilium_install_defaults }}
 
+      - name: Create EKS nodegroups
+        uses: ./.github/actions/setup-eks-nodegroup
+        with:
+          cluster_name: ${{ env.clusterName }}
+          region: ${{ matrix.region }}
+          owner: "${{ steps.vars.outputs.owner }}"
+          version: ${{ matrix.version }}
+          spot: false
+
       - name: Wait for Cilium to be ready
         run: |
-          cilium status --wait --wait-duration=10m
+          cilium status --wait --interactive=false --wait-duration=10m
           kubectl get pods -n kube-system
 
       - name: Check that AWS leftover iptables chains have been removed
@@ -347,6 +328,7 @@ jobs:
       - name: Run connectivity test (${{ join(matrix.*, ', ') }})
         run: |
           cilium connectivity test ${{ steps.vars.outputs.connectivity_test_defaults }} \
+            --log-code-owners \
           --junit-file "cilium-junits/${{ env.job_name }} (${{ join(matrix.*, ', ') }}) - 1.xml" \
           --junit-property github_job_step="Run connectivity test (${{ join(matrix.*, ', ') }})"
 
@@ -386,21 +368,21 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ !success() }}
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: cilium-sysdumps-${{ matrix.version }}
           path: cilium-sysdump-*.zip
 
       - name: Upload JUnits [junit]
         if: ${{ always() }}
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: cilium-junits-${{ matrix.version }}
           path: cilium-junits/*.xml
 
       - name: Upload features tested
         if: ${{ always() }}
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: features-tested-${{ matrix.version }}
           path: ${{ env.job_name }}*.json
@@ -414,7 +396,7 @@ jobs:
   merge-upload:
     if: ${{ always() && needs.installation-and-connectivity.result != 'skipped' }}
     name: Merge and Upload Artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: installation-and-connectivity
     steps:
       - name: Checkout context ref (trusted)
@@ -445,7 +427,7 @@ jobs:
     if: ${{ always() }}
     name: Commit Status Final
     needs: installation-and-connectivity
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Set final commit status
         if: ${{ needs.installation-and-connectivity.result != 'skipped' }}
@@ -467,7 +449,7 @@ jobs:
     if: ${{ always() && needs.generate-matrix.outputs.empty == 'false' }}
     continue-on-error: true
     needs: [generate-matrix, installation-and-connectivity]
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -481,7 +463,7 @@ jobs:
           rm eksctl_$(uname -s)_amd64.tar.gz
 
       - name: Set up AWS CLI credentials
-        uses: aws-actions/configure-aws-credentials@e3dd6a429d7300a6a4c196c26e071d42e0343502 # v4.0.2
+        uses: aws-actions/configure-aws-credentials@4fc4975a852c8cd99761e2de1f4ba73402e44dd9 # v4.0.3
         with:
           role-to-assume: ${{ secrets.AWS_PR_ASSUME_ROLE }}
           aws-region: ${{ matrix.region }}

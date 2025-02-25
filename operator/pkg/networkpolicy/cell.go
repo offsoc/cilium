@@ -19,6 +19,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
+	"github.com/cilium/cilium/pkg/fqdn/re"
 	cilium_api_v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	k8s_client "github.com/cilium/cilium/pkg/k8s/client"
 	"github.com/cilium/cilium/pkg/k8s/resource"
@@ -78,6 +79,13 @@ func registerPolicyValidator(params PolicyParams) {
 		return
 	}
 
+	// LRU size of 1 since we are only doing one-off validation of policies and
+	// the FQDN regexes are not referenced again.
+	if err := re.InitRegexCompileLRU(1); err != nil {
+		params.Logger.Error("CNP / CCNP validator can't run due to failure in initializing regex LRU cache.", logfields.Error, err)
+		return
+	}
+
 	pv := &policyValidator{
 		params: &params,
 	}
@@ -122,7 +130,7 @@ func (pv *policyValidator) handleCNPEvent(ctx context.Context, event resource.Ev
 	}
 
 	if errs != nil {
-		log.Debug("Detected invalid CNP, setting condition", logfields.Error, errs)
+		log.Error("Detected invalid CNP, setting condition", logfields.Error, errs)
 	} else {
 		log.Debug("CNP now valid, setting condition")
 	}

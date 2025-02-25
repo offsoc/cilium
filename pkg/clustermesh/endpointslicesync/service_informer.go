@@ -77,11 +77,11 @@ func doesServiceSyncEndpointSlice(svc *slim_corev1.Service) bool {
 	return strings.ToLower(value) == "true"
 }
 
-func (i *meshServiceInformer) refreshAllCluster(svc *slim_corev1.Service) error {
+func (i *meshServiceInformer) refreshAllCluster(svc *slim_corev1.Service) {
 	if i.handler == nil {
 		// We don't really need to return an error here as this means that the EndpointSlice controller
 		// has not started yet and the controller will resync the initial state anyway
-		return nil
+		return
 	}
 
 	if globalSvc := i.globalServiceCache.GetGlobalService(types.NamespacedName{Name: svc.Name, Namespace: svc.Namespace}); globalSvc != nil {
@@ -93,8 +93,6 @@ func (i *meshServiceInformer) refreshAllCluster(svc *slim_corev1.Service) error 
 			}
 		}
 	}
-
-	return nil
 }
 
 func newMeshServiceInformer(
@@ -113,8 +111,10 @@ func newMeshServiceInformer(
 }
 
 // toKubeServicePort use the clusterSvc to get a list of ServicePort to build
-// the kubernetes (non slim) Service. Note that we cannot use the slim Service to get this
-// as the slim Service trims the TargetPort which we needs inside the EndpointSliceReconciler
+// the kubernetes (non slim) Service. Note that we intentionally not use the local
+// Service to build the port list so that we don't change the remote Cluster Service port
+// list. Also targetPort might be targeting a named port and we currently don't
+// sync the container ports names.
 func toKubeServicePort(clusterSvc *store.ClusterService) []v1.ServicePort {
 	// Merge all the port config into one to get all the possible ports
 	globalPortConfig := store.PortConfiguration{}
@@ -278,17 +278,16 @@ func (i *meshServiceInformer) Start(ctx context.Context) error {
 
 	go func() {
 		for event := range i.services.Events(ctx) {
-			var err error
 			switch event.Kind {
 			case resource.Sync:
 				i.logger.Debug("Local services are synced")
 				i.servicesSynced.Store(true)
 			case resource.Upsert:
-				err = i.refreshAllCluster(event.Object)
+				i.refreshAllCluster(event.Object)
 			case resource.Delete:
-				err = i.refreshAllCluster(event.Object)
+				i.refreshAllCluster(event.Object)
 			}
-			event.Done(err)
+			event.Done(nil)
 		}
 	}()
 	return nil
@@ -297,9 +296,11 @@ func (i *meshServiceInformer) Start(ctx context.Context) error {
 func (i *meshServiceInformer) Services(namespace string) listersv1.ServiceNamespaceLister {
 	return &meshServiceLister{informer: i, namespace: namespace}
 }
+
 func (i *meshServiceInformer) Informer() cache.SharedIndexInformer {
 	return i
 }
+
 func (i *meshServiceInformer) Lister() listersv1.ServiceLister {
 	return i
 }

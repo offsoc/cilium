@@ -27,13 +27,13 @@ var Cell = cell.Module(
 	cell.Config(kvstoremesh.DefaultConfig),
 
 	cell.Config(cmtypes.DefaultClusterInfo),
-	cell.Invoke(registerClusterInfoValidator),
+	cell.Invoke(cmtypes.RegisterClusterInfoValidator),
 
 	pprof.Cell,
 	cell.Config(pprofConfig),
 	controller.Cell,
 
-	gops.Cell(defaults.GopsPortKVStoreMesh),
+	gops.Cell(defaults.EnableGops, defaults.GopsPortKVStoreMesh),
 	cmmetrics.Cell,
 
 	HealthAPIEndpointsCell,

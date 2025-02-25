@@ -1,13 +1,14 @@
 // SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
 /* Copyright Authors of Cilium */
 
-#include "bpf/types_mapper.h"
 #include <bpf/ctx/skb.h>
 #include <bpf/api.h>
 #include <linux/in.h>
 
-#include <ep_config.h>
 #include <node_config.h>
+#include <bpf/config/global.h>
+#include <bpf/config/endpoint.h>
+#include <bpf/config/lxc.h>
 
 #include <linux/icmpv6.h>
 
@@ -257,7 +258,7 @@ static __always_inline int drop_for_direction(struct __ctx_buff *ctx,
 	}
 
 	return send_drop_notify_ext(ctx, src_label, dst, dst_id, reason,
-				    ext_err, CTX_ACT_DROP, m_dir);
+				    ext_err, m_dir);
 }
 #endif /* ENABLE_IPV4 || ENABLE_IPV6 */
 
@@ -446,7 +447,7 @@ static __always_inline int handle_ipv6_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		.reason = TRACE_REASON_UNKNOWN,
 		.monitor = 0,
 	};
-	__u32 __maybe_unused tunnel_endpoint = 0;
+	__u32 tunnel_endpoint = 0;
 	__u8 __maybe_unused encrypt_key = 0;
 	bool __maybe_unused skip_tunnel = false;
 	enum ct_status ct_status;
@@ -669,12 +670,9 @@ ct_recreate6:
 		if (ep) {
 #if defined(ENABLE_HOST_ROUTING) || defined(ENABLE_ROUTING)
 			if (ep->flags & ENDPOINT_MASK_HOST_DELIVERY) {
-				if (is_defined(ENABLE_ROUTING)) {
-# ifdef HOST_IFINDEX
+				if (is_defined(ENABLE_ROUTING))
 					goto to_host;
-# endif
-					return DROP_HOST_UNREACHABLE;
-				}
+
 				goto pass_to_stack;
 			}
 #endif /* ENABLE_HOST_ROUTING || ENABLE_ROUTING */
@@ -748,8 +746,8 @@ to_host:
 	if (is_defined(ENABLE_HOST_FIREWALL) && *dst_sec_identity == HOST_ID) {
 		send_trace_notify(ctx, TRACE_TO_HOST, SECLABEL_IPV6, HOST_ID,
 				  TRACE_EP_ID_UNKNOWN,
-				  HOST_IFINDEX, trace.reason, trace.monitor);
-		return ctx_redirect(ctx, HOST_IFINDEX, BPF_F_INGRESS);
+				  CILIUM_NET_IFINDEX, trace.reason, trace.monitor);
+		return ctx_redirect(ctx, CILIUM_NET_IFINDEX, BPF_F_INGRESS);
 	}
 #endif
 
@@ -804,7 +802,7 @@ int tail_handle_ipv6_cont(struct __ctx_buff *ctx)
 	if (IS_ERR(ret))
 		return send_drop_notify_ext(ctx, SECLABEL_IPV6, dst_sec_identity,
 					    TRACE_EP_ID_UNKNOWN, ret, ext_err,
-					    CTX_ACT_DROP, METRIC_EGRESS);
+					    METRIC_EGRESS);
 
 #ifdef ENABLE_CUSTOM_CALLS
 	if (!encode_custom_prog_meta(ctx, ret, dst_sec_identity)) {
@@ -823,7 +821,7 @@ TAIL_CT_LOOKUP6(CILIUM_CALL_IPV6_CT_EGRESS, tail_ipv6_ct_egress, CT_EGRESS,
 		CILIUM_CALL_IPV6_FROM_LXC_CONT, tail_handle_ipv6_cont)
 
 static __always_inline int __tail_handle_ipv6(struct __ctx_buff *ctx,
-					      __s8 *ext_err __maybe_unused)
+					      __s8 *ext_err)
 {
 	void *data, *data_end;
 	struct ipv6hdr *ip6;
@@ -857,7 +855,7 @@ int tail_handle_ipv6(struct __ctx_buff *ctx)
 
 	if (IS_ERR(ret))
 		return send_drop_notify_error_ext(ctx, SECLABEL_IPV6, ret, ext_err,
-						  CTX_ACT_DROP, METRIC_EGRESS);
+						  METRIC_EGRESS);
 	return ret;
 }
 #endif /* ENABLE_IPV6 */
@@ -890,7 +888,7 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		.reason = TRACE_REASON_UNKNOWN,
 		.monitor = 0,
 	};
-	__u32 __maybe_unused tunnel_endpoint = 0, zero = 0;
+	__u32 tunnel_endpoint = 0, zero = 0;
 	__u8 __maybe_unused encrypt_key = 0;
 	bool __maybe_unused skip_tunnel = false;
 	bool hairpin_flow = false; /* endpoint wants to access itself via service IP */
@@ -1179,12 +1177,9 @@ ct_recreate4:
 		if (ep) {
 #if defined(ENABLE_HOST_ROUTING) || defined(ENABLE_ROUTING)
 			if (ep->flags & ENDPOINT_MASK_HOST_DELIVERY) {
-				if (is_defined(ENABLE_ROUTING)) {
-# ifdef HOST_IFINDEX
+				if (is_defined(ENABLE_ROUTING))
 					goto to_host;
-# endif
-					return DROP_HOST_UNREACHABLE;
-				}
+
 				goto pass_to_stack;
 			}
 #endif /* ENABLE_HOST_ROUTING || ENABLE_ROUTING */
@@ -1215,7 +1210,7 @@ ct_recreate4:
 		if (vtep->vtep_mac && vtep->tunnel_endpoint) {
 			if (eth_store_daddr(ctx, (__u8 *)&vtep->vtep_mac, 0) < 0)
 				return DROP_WRITE_ERROR;
-			return __encap_and_redirect_with_nodeid(ctx, 0, vtep->tunnel_endpoint,
+			return __encap_and_redirect_with_nodeid(ctx, vtep->tunnel_endpoint,
 								SECLABEL_IPV4, WORLD_IPV4_ID,
 								WORLD_IPV4_ID, &trace);
 		}
@@ -1223,7 +1218,7 @@ ct_recreate4:
 skip_vtep:
 #endif
 
-#if defined(TUNNEL_MODE) || defined(ENABLE_HIGH_SCALE_IPCACHE)
+#if defined(TUNNEL_MODE)
 	if (!skip_tunnel) {
 		struct tunnel_key key = {};
 
@@ -1280,7 +1275,7 @@ skip_vtep:
 			return ret;
 		}
 	}
-#endif /* TUNNEL_MODE || ENABLE_HIGH_SCALE_IPCACHE */
+#endif /* TUNNEL_MODE */
 
 	if (is_defined(ENABLE_HOST_ROUTING)) {
 		int oif = 0;
@@ -1302,8 +1297,8 @@ to_host:
 	if (is_defined(ENABLE_HOST_FIREWALL) && *dst_sec_identity == HOST_ID) {
 		send_trace_notify(ctx, TRACE_TO_HOST, SECLABEL_IPV4, HOST_ID,
 				  TRACE_EP_ID_UNKNOWN,
-				  HOST_IFINDEX, trace.reason, trace.monitor);
-		return ctx_redirect(ctx, HOST_IFINDEX, BPF_F_INGRESS);
+				  CILIUM_NET_IFINDEX, trace.reason, trace.monitor);
+		return ctx_redirect(ctx, CILIUM_NET_IFINDEX, BPF_F_INGRESS);
 	}
 #endif
 
@@ -1335,7 +1330,7 @@ pass_to_stack:
 #endif
 	}
 
-#if defined(TUNNEL_MODE) || defined(ENABLE_HIGH_SCALE_IPCACHE)
+#if defined(TUNNEL_MODE)
 encrypt_to_stack:
 #endif
 	send_trace_notify(ctx, TRACE_TO_STACK, SECLABEL_IPV4, *dst_sec_identity,
@@ -1357,7 +1352,7 @@ int tail_handle_ipv4_cont(struct __ctx_buff *ctx)
 	if (IS_ERR(ret))
 		return send_drop_notify_ext(ctx, SECLABEL_IPV4, dst_sec_identity,
 					    TRACE_EP_ID_UNKNOWN, ret, ext_err,
-					    CTX_ACT_DROP, METRIC_EGRESS);
+					    METRIC_EGRESS);
 
 #ifdef ENABLE_CUSTOM_CALLS
 	if (!encode_custom_prog_meta(ctx, ret, dst_sec_identity)) {
@@ -1430,7 +1425,7 @@ int tail_handle_ipv4(struct __ctx_buff *ctx)
 
 	if (IS_ERR(ret))
 		return send_drop_notify_error_ext(ctx, SECLABEL_IPV4, ret, ext_err,
-						  CTX_ACT_DROP, METRIC_EGRESS);
+						  METRIC_EGRESS);
 	return ret;
 }
 
@@ -1533,7 +1528,7 @@ out:
 	if (IS_ERR(ret))
 		return send_drop_notify_ext(ctx, sec_label, UNKNOWN_ID,
 					    TRACE_EP_ID_UNKNOWN, ret, ext_err,
-					    CTX_ACT_DROP, METRIC_EGRESS);
+					    METRIC_EGRESS);
 	return ret;
 }
 
@@ -1748,7 +1743,7 @@ int tail_ipv6_policy(struct __ctx_buff *ctx)
 
 drop_err:
 	return send_drop_notify_ext(ctx, src_label, SECLABEL_IPV6, LXC_ID,
-				    ret, ext_err, CTX_ACT_DROP, METRIC_INGRESS);
+				    ret, ext_err, METRIC_INGRESS);
 }
 
 __section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV6_TO_ENDPOINT)
@@ -1820,7 +1815,7 @@ int tail_ipv6_to_endpoint(struct __ctx_buff *ctx)
 out:
 	if (IS_ERR(ret))
 		return send_drop_notify_ext(ctx, src_sec_identity, SECLABEL_IPV6, LXC_ID,
-					ret, ext_err, CTX_ACT_DROP, METRIC_INGRESS);
+					ret, ext_err, METRIC_INGRESS);
 
 #ifdef ENABLE_CUSTOM_CALLS
 	/* Make sure we skip the tail call when the packet is being redirected
@@ -2107,7 +2102,7 @@ int tail_ipv4_policy(struct __ctx_buff *ctx)
 
 drop_err:
 	return send_drop_notify_ext(ctx, src_label, SECLABEL_IPV4, LXC_ID,
-				    ret, ext_err, CTX_ACT_DROP, METRIC_INGRESS);
+				    ret, ext_err, METRIC_INGRESS);
 }
 
 __section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV4_TO_ENDPOINT)
@@ -2178,7 +2173,7 @@ int tail_ipv4_to_endpoint(struct __ctx_buff *ctx)
 out:
 	if (IS_ERR(ret))
 		return send_drop_notify_ext(ctx, src_sec_identity, SECLABEL_IPV4, LXC_ID,
-					ret, ext_err, CTX_ACT_DROP, METRIC_INGRESS);
+					ret, ext_err, METRIC_INGRESS);
 
 #ifdef ENABLE_CUSTOM_CALLS
 	/* Make sure we skip the tail call when the packet is being redirected
@@ -2257,7 +2252,7 @@ int handle_policy(struct __ctx_buff *ctx)
 out:
 	if (IS_ERR(ret))
 		return send_drop_notify_ext(ctx, src_label, sec_label, LXC_ID, ret, ext_err,
-					    CTX_ACT_DROP, METRIC_INGRESS);
+					    METRIC_INGRESS);
 
 	return ret;
 }
@@ -2312,7 +2307,7 @@ out:
 	if (IS_ERR(ret))
 		return send_drop_notify_ext(ctx, sec_label, UNKNOWN_ID,
 					    TRACE_EP_ID_UNKNOWN, ret, ext_err,
-					    CTX_ACT_DROP, METRIC_EGRESS);
+					    METRIC_EGRESS);
 
 	return ret;
 #else
@@ -2347,7 +2342,7 @@ int cil_to_container(struct __ctx_buff *ctx)
 	else if (magic == MARK_MAGIC_PROXY_EGRESS_EPID) {
 		ret = tail_call_egress_policy(ctx, (__u16)identity);
 		return send_drop_notify(ctx, identity, sec_label, LXC_ID,
-					ret, CTX_ACT_DROP, METRIC_INGRESS);
+					ret, METRIC_INGRESS);
 	}
 #endif
 
@@ -2369,8 +2364,7 @@ int cil_to_container(struct __ctx_buff *ctx)
 
 		ret = tail_call_policy(ctx, HOST_EP_ID);
 		return send_drop_notify(ctx, identity, sec_label, LXC_ID,
-					DROP_HOST_NOT_READY, CTX_ACT_DROP,
-					METRIC_INGRESS);
+					DROP_HOST_NOT_READY, METRIC_INGRESS);
 	}
 #endif /* ENABLE_HOST_FIREWALL && !ENABLE_ROUTING */
 
@@ -2384,22 +2378,6 @@ int cil_to_container(struct __ctx_buff *ctx)
 #ifdef ENABLE_IPV6
 	case bpf_htons(ETH_P_IPV6):
 		sec_label = SECLABEL_IPV6;
-# ifdef ENABLE_HIGH_SCALE_IPCACHE
-	if (identity_is_world_ipv6(identity)) {
-		struct endpoint_info *ep;
-		void *data, *data_end;
-		struct ipv6hdr *ip6;
-
-		if (!revalidate_data(ctx, &data, &data_end, &ip6)) {
-			ret = DROP_INVALID;
-			goto out;
-		}
-
-		ep = __lookup_ip6_endpoint((union v6addr *)&ip6->saddr);
-		if (ep)
-			identity = ep->sec_id;
-	}
-# endif /* ENABLE_HIGH_SCALE_IPCACHE */
 		ctx_store_meta(ctx, CB_SRC_LABEL, identity);
 		ret = tail_call_internal(ctx, CILIUM_CALL_IPV6_CT_INGRESS, &ext_err);
 		break;
@@ -2407,22 +2385,6 @@ int cil_to_container(struct __ctx_buff *ctx)
 #ifdef ENABLE_IPV4
 	case bpf_htons(ETH_P_IP):
 		sec_label = SECLABEL_IPV4;
-# ifdef ENABLE_HIGH_SCALE_IPCACHE
-	if (identity_is_world_ipv4(identity)) {
-		struct endpoint_info *ep;
-		void *data, *data_end;
-		struct iphdr *ip4;
-
-		if (!revalidate_data(ctx, &data, &data_end, &ip4)) {
-			ret = DROP_INVALID;
-			goto out;
-		}
-
-		ep = __lookup_ip4_endpoint(ip4->saddr);
-		if (ep)
-			identity = ep->sec_id;
-	}
-# endif /* ENABLE_HIGH_SCALE_IPCACHE */
 		ctx_store_meta(ctx, CB_SRC_LABEL, identity);
 		ret = tail_call_internal(ctx, CILIUM_CALL_IPV4_CT_INGRESS, &ext_err);
 		break;
@@ -2435,7 +2397,7 @@ int cil_to_container(struct __ctx_buff *ctx)
 out:
 	if (IS_ERR(ret))
 		return send_drop_notify_ext(ctx, identity, sec_label, LXC_ID, ret,
-					    ext_err, CTX_ACT_DROP, METRIC_INGRESS);
+					    ext_err, METRIC_INGRESS);
 
 	return ret;
 }

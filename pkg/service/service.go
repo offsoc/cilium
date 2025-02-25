@@ -17,7 +17,6 @@ import (
 	"github.com/cilium/cilium/pkg/cidr"
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/counter"
-	datapathOpt "github.com/cilium/cilium/pkg/datapath/option"
 	"github.com/cilium/cilium/pkg/datapath/sockets"
 	datapathTypes "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/k8s"
@@ -862,10 +861,10 @@ func (s *Service) upsertService(params *lb.SVC) (bool, lb.ID, error) {
 		return false, lb.ID(0), err
 	}
 
-	// Update managed neighbor entries of the LB
-	if option.Config.DatapathMode == datapathOpt.DatapathModeLBOnly {
-		s.upsertBackendNeighbors(newBackends, obsoleteBackends)
-	}
+	// Update managed neighbor entries of the LB, this is needed so that
+	// neighbor entries for the backends are always up to date if they
+	// reside in the same L2. In particular XDP cannot resolve on-demand.
+	s.upsertBackendNeighbors(newBackends, obsoleteBackends)
 
 	// Only add a HealthCheckNodePort server if this is a service which may
 	// only contain local backends (i.e. it has externalTrafficPolicy=Local)
@@ -1269,9 +1268,7 @@ func (s *Service) RestoreServices() error {
 
 	var errs error
 	// Restore service cache from BPF maps
-	if err := s.restoreServicesLocked(backendsById); err != nil {
-		errs = errors.Join(errs, fmt.Errorf("error while restoring services: %w", err))
-	}
+	s.restoreServicesLocked(backendsById)
 
 	// Restore backend IDs
 	if err := s.restoreBackendsLocked(backendsById); err != nil {
@@ -1424,9 +1421,7 @@ func (s *Service) SyncWithK8sFinished(localOnly bool, localServices sets.Set[k8s
 	}
 
 	// Remove obsolete backends and release their IDs
-	if err := s.deleteOrphanBackends(); err != nil {
-		log.WithError(err).Warn("Failed to remove orphan backends")
-	}
+	s.deleteOrphanBackends()
 
 	return stale, nil
 }
@@ -1839,7 +1834,7 @@ func (s *Service) restoreBackendsLocked(svcBackendsById map[lb.BackendID]struct{
 	return nil
 }
 
-func (s *Service) deleteOrphanBackends() error {
+func (s *Service) deleteOrphanBackends() {
 	orphanBackends := 0
 
 	for hash, b := range s.backendByHash {
@@ -1857,11 +1852,9 @@ func (s *Service) deleteOrphanBackends() error {
 	log.WithFields(logrus.Fields{
 		logfields.OrphanBackends: orphanBackends,
 	}).Info("Deleted orphan backends")
-
-	return nil
 }
 
-func (s *Service) restoreServicesLocked(svcBackendsById map[lb.BackendID]struct{}) error {
+func (s *Service) restoreServicesLocked(svcBackendsById map[lb.BackendID]struct{}) {
 	failed, restored := 0, 0
 
 	svcs, errors := s.lbmap.DumpServiceMaps()
@@ -1929,9 +1922,7 @@ func (s *Service) restoreServicesLocked(svcBackendsById map[lb.BackendID]struct{
 		// the changed M param.
 		ipv6 := newSVC.frontend.IsIPv6() || (svc.NatPolicy == lb.SVCNatPolicyNat46)
 		recreated := s.lbmap.IsMaglevLookupTableRecreated(ipv6)
-		if option.Config.DatapathMode == datapathOpt.DatapathModeLBOnly &&
-			newSVC.useMaglev() && recreated {
-
+		if newSVC.useMaglev() && recreated {
 			backends := make(map[string]*lb.Backend, len(newSVC.backends))
 			for _, b := range newSVC.backends {
 				// DumpServiceMaps() can return services with some empty (nil) backends.
@@ -1957,8 +1948,6 @@ func (s *Service) restoreServicesLocked(svcBackendsById map[lb.BackendID]struct{
 		logfields.RestoredSVCs: restored,
 		logfields.FailedSVCs:   failed,
 	}).Info("Restored services from maps")
-
-	return nil
 }
 
 func (s *Service) deleteServiceLocked(svc *svcInfo) error {
@@ -2005,9 +1994,7 @@ func (s *Service) deleteServiceLocked(svc *svcInfo) error {
 	}
 
 	// Delete managed neighbor entries of the LB
-	if option.Config.DatapathMode == datapathOpt.DatapathModeLBOnly {
-		s.deleteBackendNeighbors(obsoleteBackends)
-	}
+	s.deleteBackendNeighbors(obsoleteBackends)
 
 	if svc.healthcheckFrontendHash != "" {
 		healthSvc := s.svcByHash[svc.healthcheckFrontendHash]
@@ -2324,6 +2311,9 @@ func backendToNode(b *lb.Backend) *nodeTypes.Node {
 }
 
 func (s *Service) upsertBackendNeighbors(newBackends, oldBackends []*lb.Backend) {
+	if s.backendDiscovery == nil {
+		return
+	}
 	for _, b := range newBackends {
 		s.backendDiscovery.InsertMiscNeighbor(backendToNode(b))
 	}
@@ -2331,6 +2321,9 @@ func (s *Service) upsertBackendNeighbors(newBackends, oldBackends []*lb.Backend)
 }
 
 func (s *Service) deleteBackendNeighbors(obsoleteBackends []*lb.Backend) {
+	if s.backendDiscovery == nil {
+		return
+	}
 	for _, b := range obsoleteBackends {
 		s.backendDiscovery.DeleteMiscNeighbor(backendToNode(b))
 	}

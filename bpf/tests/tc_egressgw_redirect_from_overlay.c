@@ -5,12 +5,6 @@
 
 #include <bpf/ctx/skb.h>
 #include "pktgen.h"
-#define SECLABEL
-#define SECLABEL_IPV4
-#define SECLABEL_IPV6
-#undef SECLABEL
-#undef SECLABEL_IPV4
-#undef SECLABEL_IPV6
 
 /* Enable code paths under test */
 #define ENABLE_IPV4
@@ -19,8 +13,6 @@
 #define ENABLE_MASQUERADE_IPV4
 #define ENCAP_IFINDEX	42
 #define IFACE_IFINDEX	44
-
-#define SECCTX_FROM_IPCACHE 1
 
 #define ctx_redirect mock_ctx_redirect
 static __always_inline __maybe_unused int

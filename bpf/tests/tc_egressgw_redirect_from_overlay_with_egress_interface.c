@@ -5,12 +5,6 @@
 
 #include <bpf/ctx/skb.h>
 #include "pktgen.h"
-#define SECLABEL
-#define SECLABEL_IPV4
-#define SECLABEL_IPV6
-#undef SECLABEL
-#undef SECLABEL_IPV4
-#undef SECLABEL_IPV6
 
 /* Enable code paths under test */
 #define HAVE_FIB_NEIGH	1
@@ -24,8 +18,6 @@
 
 /* Provide the desired egress interface to the datapath */
 #define EGRESS_IFINDEX	IFACE_IFINDEX
-
-#define SECCTX_FROM_IPCACHE 1
 
 #define fib_lookup mock_fib_lookup
 static __always_inline __maybe_unused long

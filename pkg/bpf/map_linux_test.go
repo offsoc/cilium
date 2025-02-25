@@ -40,6 +40,7 @@ type TestLPMKey struct {
 type TestValue struct {
 	Value uint32
 }
+type TestValues []TestValue
 
 func (k *TestKey) String() string { return fmt.Sprintf("key=%d", k.Key) }
 func (k *TestKey) New() MapKey    { return &TestKey{} }
@@ -49,6 +50,7 @@ func (k *TestLPMKey) New() MapKey    { return &TestLPMKey{} }
 
 func (v *TestValue) String() string { return fmt.Sprintf("value=%d", v.Value) }
 func (v *TestValue) New() MapValue  { return &TestValue{} }
+func (k *TestValue) NewSlice() any  { return &TestValues{} }
 
 func setup(tb testing.TB) *Map {
 	testutils.PrivilegedTest(tb)
@@ -65,6 +67,32 @@ func setup(tb testing.TB) *Map {
 		maxEntries,
 		BPF_F_NO_PREALLOC,
 	).WithCache()
+
+	err = testMap.OpenOrCreate()
+	require.NoError(tb, err, "Failed to create map")
+
+	tb.Cleanup(func() {
+		require.NoError(tb, testMap.Close())
+	})
+
+	return testMap
+}
+
+func setupPerCPU(tb testing.TB) *Map {
+	testutils.PrivilegedTest(tb)
+
+	CheckOrMountFS("")
+
+	err := rlimit.RemoveMemlock()
+	require.NoError(tb, err)
+
+	testMap := NewMap("cilium_test_percpu",
+		ebpf.PerCPUArray,
+		&TestKey{},
+		&TestValue{},
+		3,
+		0,
+	)
 
 	err = testMap.OpenOrCreate()
 	require.NoError(tb, err, "Failed to create map")
@@ -508,6 +536,55 @@ func TestDump(t *testing.T) {
 	}, dump5)
 }
 
+func TestDumpPerCPU(t *testing.T) {
+	testMap := setupPerCPU(t)
+
+	key1 := &TestKey{Key: 0}
+	value1 := &TestValue{Value: 205}
+	key2 := &TestKey{Key: 2}
+	value2 := &TestValue{Value: 206}
+
+	func() {
+		testMap.lock.Lock()
+		defer testMap.lock.Unlock()
+		err := testMap.m.Update(key1, []any{value1}, ebpf.UpdateAny)
+		require.NoError(t, err)
+		err = testMap.m.Update(key2, []any{value1}, ebpf.UpdateAny)
+		require.NoError(t, err)
+		err = testMap.m.Update(key2, []any{value2}, ebpf.UpdateAny)
+		require.NoError(t, err)
+	}()
+
+	dump := map[string][]uint32{}
+	customCb := func(key MapKey, values any) {
+		var value uint32
+		for _, v := range *values.(*TestValues) {
+			if value == 0 && v.Value != 0 {
+				value = v.Value
+			} else if value != 0 {
+				require.Equal(t, uint32(0), v.Value)
+			}
+		}
+		dump[key.String()] = append(dump[key.String()], value)
+	}
+	testMap.DumpPerCPUWithCallback(customCb)
+	require.Equal(t, map[string][]uint32{
+		"key=0": {205},
+		"key=1": {0},
+		"key=2": {206},
+	}, dump)
+
+	require.NoError(t, testMap.ClearAll())
+
+	dump = map[string][]uint32{}
+	testMap.DumpPerCPUWithCallback(customCb)
+	require.Equal(t, map[string][]uint32{
+		"key=0": {0},
+		"key=1": {0},
+		"key=2": {0},
+	}, dump)
+}
+
 // TestDumpReliablyWithCallbackOverlapping attempts to test that DumpReliablyWithCallback
 // will reliably iterate all keys that are known to be in a map, even if keys that are ahead
 // of the current iteration can be deleted or updated concurrently.
@@ -908,7 +985,7 @@ func TestErrorResolver(t *testing.T) {
 			require.NoError(t, m.CreateUnpinned(), "Failed to create map")
 			require.NoError(t, m.Update(&key1, &val1), "Failed to insert element in map")
 
-			// Let's attempt to insert a second element in the map, which will fail because the map can only hold one
+			// Let's attempt to insert a second element in the map, which will fail because the map can only hold one.
 			require.Error(t, m.Update(&key2, &val2), "Map insertion should have failed")
 
 			// Let's now remove one of the two elements (the actual assertion depends on which element is to be removed)
@@ -940,16 +1017,26 @@ func TestErrorResolver(t *testing.T) {
 	}
 }
 
+func TestBatchIteratorTypes(t *testing.T) {
+	m := NewMap("cilium_test",
+		ebpf.Array,
+		&TestKey{},
+		&TestValue{}, 1, 0)
+	iter := NewBatchIterator[TestKey, TestValue](m)
+	iter.IterateAll(context.TODO())
+	assert.Error(t, iter.Err())
+}
+
 func TestBatchIterator(t *testing.T) {
 	testutils.PrivilegedTest(t)
 
-	runTest := func(size, mapSize int, t *testing.T, opts ...BatchIteratorOpt[TestKey, TestValue]) {
+	runTest := func(mapType ebpf.MapType, size, mapSize int, t *testing.T, opts ...BatchIteratorOpt[TestKey, TestValue, *TestKey, *TestValue]) {
 		m := NewMap("cilium_test",
-			ebpf.Hash,
+			mapType,
 			&TestKey{},
 			&TestValue{},
 			mapSize,
-			BPF_F_NO_PREALLOC,
+			0,
 		)
 		assert.NoError(t, m.OpenOrCreate())
 		defer assert.NoError(t, m.UnpinIfExists())
@@ -962,20 +1049,19 @@ func TestBatchIterator(t *testing.T) {
 		ks := sets.New[int]()
 		vs := sets.New[int]()
 
-		iter := BatchIterator[TestKey, TestValue]{
-			m: m,
-		}
+		iter := NewBatchIterator[TestKey, TestValue](m)
 		count := 0
 		for k, v := range iter.IterateAll(context.TODO(), opts...) {
 			count++
 			ks.Insert(int(k.Key))
 			vs.Insert(int(v.Value))
 		}
-		assert.NoError(t, iter.Err())
+		require.NoError(t, iter.Err())
+		assert.Equal(t, size, count)
 
 		for i := range int(size) {
-			assert.Contains(t, ks, i)
-			assert.Contains(t, vs, i)
+			require.Contains(t, ks, i, "expect iterate to return key="+strconv.Itoa(i))
+			require.Contains(t, vs, i, "expect iterate to return val="+strconv.Itoa(i))
 		}
 		assert.Len(t, ks, int(size))
 		assert.Len(t, vs, int(size))
@@ -985,35 +1071,45 @@ func TestBatchIterator(t *testing.T) {
 	for _, test := range []struct {
 		mapSize int
 		size    int
-		opts    []BatchIteratorOpt[TestKey, TestValue]
+		opts    []BatchIteratorOpt[TestKey, TestValue, *TestKey, *TestValue]
+		// LRU hash maps aren't totally safe to test like this, even if you're
+		// within the max map size number of elements, in practice the kernel
+		// will occasionally do a LRU eviction causing failures.
+		// Setting the max size appears to make this safe enough (test up to a
+		// test million runs) that we can run a subset of tests on LRU.
+		unsafeLRU bool
 	}{
-		{10, 10, nil},
-		{1024, 1024, nil},
+		{10, 10, nil, true},
+		{1024, 1024, nil, true},
+		{1048576, 1024, nil, false}, // Max map size much larger means no chance of LRU eviction.
 		// Setup iteration that starts with batch size of 1, this is bound to fail at some point
 		// so this will test if the chunk size growth retry loop works correctly.
 		{
 			size:    1 << 12,
 			mapSize: 1 << 13,
-			opts: []BatchIteratorOpt[TestKey, TestValue]{
+			opts: []BatchIteratorOpt[TestKey, TestValue, *TestKey, *TestValue]{
 				WithMaxRetries[TestKey, TestValue](13), WithStartingChunkSize[TestKey, TestValue](1)},
+			unsafeLRU: true,
 		},
 		{
 			size:    1,
 			mapSize: 1 << 12,
 		},
 		{
-			size:    1 << 8,
-			mapSize: 1 << 8,
-		},
-		{
 			size:    1 << 12,
 			mapSize: 1 << 12,
-			opts: []BatchIteratorOpt[TestKey, TestValue]{
+			opts: []BatchIteratorOpt[TestKey, TestValue, *TestKey, *TestValue]{
 				WithMaxRetries[TestKey, TestValue](1), WithStartingChunkSize[TestKey, TestValue](1 << 13)},
+			unsafeLRU: true,
 		},
 	} {
 		t.Run(fmt.Sprintf("size=%d mapSize=%d", test.size, test.mapSize), func(t *testing.T) {
-			runTest(test.size, test.mapSize, t, test.opts...)
+			runTest(ebpf.Hash, test.size, test.mapSize, t, test.opts...)
 		})
+		if !test.unsafeLRU {
+			t.Run(fmt.Sprintf("size=%d mapSize=%d", test.size, test.mapSize), func(t *testing.T) {
+				runTest(ebpf.LRUHash, test.size, test.mapSize, t, test.opts...)
+			})
+		}
 	}
 }

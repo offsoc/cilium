@@ -15,7 +15,6 @@ import (
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/k8s"
 	ciliumv2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
-	"github.com/cilium/cilium/pkg/k8s/client"
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	"github.com/cilium/cilium/pkg/k8s/synced"
@@ -29,12 +28,6 @@ import (
 	"github.com/cilium/cilium/pkg/time"
 )
 
-// allService is a resource.Resource[*slim_corev1.Service]
-type allService resource.Resource[*slim_corev1.Service]
-
-// allEndpoint is a resource.Resource[*slim_corev1.Service]
-type allEndpoint resource.Resource[*k8s.Endpoints]
-
 // Cell provides support for the CRD CiliumEnvoyConfig that backs Ingress, Gateway API
 // and L7 loadbalancing.
 var Cell = cell.Module(
@@ -46,29 +39,19 @@ var Cell = cell.Module(
 	cell.ProvidePrivate(newCECManager),
 	cell.ProvidePrivate(newCECResourceParser),
 	cell.ProvidePrivate(newEnvoyServiceBackendSyncer),
-	cell.ProvidePrivate(
-		func(lc cell.Lifecycle, cfg k8s.Config, cs client.Clientset) (allService, error) {
-			return k8s.ServiceResource(lc, cfg, cs)
-		},
-		func(lc cell.Lifecycle, cfg k8s.Config, cs client.Clientset) (allEndpoint, error) {
-			return k8s.EndpointsResource(lc, cfg, cs)
-		},
-	),
 	cell.ProvidePrivate(newPortAllocator),
 
 	experimentalCell,
 )
 
 type cecConfig struct {
-	EnvoyConfigRetryInterval  time.Duration
-	EnvoyConfigTimeout        time.Duration
-	ProxyMaxConcurrentRetries uint32
+	EnvoyConfigRetryInterval time.Duration
+	EnvoyConfigTimeout       time.Duration
 }
 
 func (r cecConfig) Flags(flags *pflag.FlagSet) {
 	flags.Duration("envoy-config-retry-interval", 15*time.Second, "Interval in which an attempt is made to reconcile failed EnvoyConfigs. If the duration is zero, the retry is deactivated.")
 	flags.Duration("envoy-config-timeout", 2*time.Minute, "Timeout that determines how long to wait for Envoy to N/ACK CiliumEnvoyConfig resources")
-	flags.Uint32("proxy-max-concurrent-retries", 128, "Maximum number of concurrent retries on Envoy clusters")
 }
 
 type reconcilerParams struct {
@@ -90,7 +73,7 @@ type reconcilerParams struct {
 	CCECResources  resource.Resource[*ciliumv2.CiliumClusterwideEnvoyConfig]
 	LocalNodeStore *node.LocalNodeStore
 
-	EndpointResources allEndpoint
+	EndpointResources resource.Resource[*k8s.Endpoints]
 }
 
 func registerCECK8sReconciler(params reconcilerParams) {
@@ -161,7 +144,8 @@ type managerParams struct {
 
 	Logger logrus.FieldLogger
 
-	Config cecConfig
+	Config      cecConfig
+	EnvoyConfig envoy.ProxyConfig
 
 	PolicyUpdater  *policy.Updater
 	ServiceManager service.ServiceManager
@@ -170,15 +154,15 @@ type managerParams struct {
 	BackendSyncer  *envoyServiceBackendSyncer
 	ResourceParser *cecResourceParser
 
-	Services  allService
-	Endpoints allEndpoint
+	Services  resource.Resource[*slim_corev1.Service]
+	Endpoints resource.Resource[*k8s.Endpoints]
 
 	MetricsManager CECMetrics
 }
 
 func newCECManager(params managerParams) ciliumEnvoyConfigManager {
 	return newCiliumEnvoyConfigManager(params.Logger, params.PolicyUpdater, params.ServiceManager, params.XdsServer,
-		params.BackendSyncer, params.ResourceParser, params.Config.EnvoyConfigTimeout, params.Config.ProxyMaxConcurrentRetries, params.Services, params.Endpoints, params.MetricsManager)
+		params.BackendSyncer, params.ResourceParser, params.Config.EnvoyConfigTimeout, params.EnvoyConfig.ProxyMaxConcurrentRetries, params.Services, params.Endpoints, params.MetricsManager)
 }
 
 func newPortAllocator(proxy *proxy.Proxy) PortAllocator {

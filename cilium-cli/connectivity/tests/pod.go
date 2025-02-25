@@ -30,6 +30,7 @@ func PodToPod(opts ...Option) check.Scenario {
 		opt(options)
 	}
 	return &podToPod{
+		ScenarioBase:      check.NewScenarioBase(),
 		sourceLabels:      options.sourceLabels,
 		destinationLabels: options.destinationLabels,
 		method:            options.method,
@@ -38,6 +39,8 @@ func PodToPod(opts ...Option) check.Scenario {
 
 // podToPod implements a Scenario.
 type podToPod struct {
+	check.ScenarioBase
+
 	sourceLabels      map[string]string
 	destinationLabels map[string]string
 	method            string
@@ -85,20 +88,30 @@ func PodToPodWithEndpoints(opts ...Option) check.Scenario {
 	for _, opt := range opts {
 		opt(options)
 	}
+
+	rc := &retryCondition{}
+	for _, opt := range options.retryCondition {
+		opt(rc)
+	}
 	return &podToPodWithEndpoints{
+		ScenarioBase:      check.NewScenarioBase(),
 		sourceLabels:      options.sourceLabels,
 		destinationLabels: options.destinationLabels,
 		method:            options.method,
 		path:              options.path,
+		retryCondition:    rc,
 	}
 }
 
 // podToPodWithEndpoints implements a Scenario.
 type podToPodWithEndpoints struct {
+	check.ScenarioBase
+
 	sourceLabels      map[string]string
 	destinationLabels map[string]string
 	method            string
 	path              string
+	retryCondition    *retryCondition
 }
 
 func (s *podToPodWithEndpoints) Name() string {
@@ -148,6 +161,7 @@ func (s *podToPodWithEndpoints) curlEndpoints(ctx context.Context, t *check.Test
 		ep := check.HTTPEndpointWithLabels(epName, url, echo.Labels())
 
 		t.NewAction(s, epName, client, ep, ipFam).Run(func(a *check.Action) {
+			curlOpts = append(curlOpts, s.retryCondition.CurlOptions(ep, ipFam, *client, ct.Params())...)
 			a.ExecInPod(ctx, ct.CurlCommand(ep, ipFam, curlOpts...))
 
 			a.ValidateFlows(ctx, client, a.GetEgressRequirements(check.FlowParameters{}))
@@ -181,10 +195,14 @@ func (s *podToPodWithEndpoints) curlEndpoints(ctx context.Context, t *check.Test
 // - For IPv4: $POD_MTU - 20 (IPv4 hdr) - 8 (ICMP Echo hdr)
 // - For IPv6: $POD_MTU - 40 (IPv6 hdr) - 8 (ICMP Echo hdr)
 func PodToPodNoFrag() check.Scenario {
-	return &podToPodNoFrag{}
+	return &podToPodNoFrag{
+		ScenarioBase: check.NewScenarioBase(),
+	}
 }
 
-type podToPodNoFrag struct{}
+type podToPodNoFrag struct {
+	check.ScenarioBase
+}
 
 func (s *podToPodNoFrag) Name() string {
 	return "pod-to-pod-no-frag"
@@ -262,6 +280,7 @@ func PodToPodMissingIPCache(opts ...Option) check.Scenario {
 		opt(options)
 	}
 	return &podToPodMissingIPCache{
+		ScenarioBase:      check.NewScenarioBase(),
 		sourceLabels:      options.sourceLabels,
 		destinationLabels: options.destinationLabels,
 		method:            options.method,
@@ -269,6 +288,8 @@ func PodToPodMissingIPCache(opts ...Option) check.Scenario {
 }
 
 type podToPodMissingIPCache struct {
+	check.ScenarioBase
+
 	sourceLabels      map[string]string
 	destinationLabels map[string]string
 	method            string

@@ -991,6 +991,9 @@
                 "healthPort": {
                   "type": "integer"
                 },
+                "kvstoreMode": {
+                  "type": "string"
+                },
                 "lifecycle": {
                   "type": "object"
                 },
@@ -1490,6 +1493,12 @@
       "type": [
         "null",
         "object"
+      ]
+    },
+    "connectivityProbeFrequencyRatio": {
+      "type": [
+        "null",
+        "number"
       ]
     },
     "conntrackGCInterval": {
@@ -2040,6 +2049,12 @@
         },
         "log": {
           "properties": {
+            "accessLogBufferSize": {
+              "type": [
+                "null",
+                "integer"
+              ]
+            },
             "defaultLevel": {
               "oneOf": [
                 {
@@ -2111,6 +2126,12 @@
             }
           },
           "type": "object"
+        },
+        "policyRestoreTimeoutDuration": {
+          "type": [
+            "null",
+            "string"
+          ]
         },
         "priorityClassName": {
           "type": [
@@ -2343,14 +2364,6 @@
       },
       "type": "object"
     },
-    "externalWorkloads": {
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
     "extraArgs": {
       "items": {},
       "type": "array"
@@ -2466,14 +2479,6 @@
     "healthPort": {
       "type": "integer"
     },
-    "highScaleIPcache": {
-      "properties": {
-        "enabled": {
-          "type": "boolean"
-        }
-      },
-      "type": "object"
-    },
     "hostFirewall": {
       "properties": {
         "enabled": {
@@ -2544,6 +2549,15 @@
                                 "items": {},
                                 "type": "array"
                               },
+                              "fileCompress": {
+                                "type": "boolean"
+                              },
+                              "fileMaxBackups": {
+                                "type": "integer"
+                              },
+                              "fileMaxSizeMb": {
+                                "type": "integer"
+                              },
                               "filePath": {
                                 "type": "string"
                               },
@@ -2572,12 +2586,6 @@
               },
               "type": "object"
             },
-            "fileMaxBackups": {
-              "type": "integer"
-            },
-            "fileMaxSizeMb": {
-              "type": "integer"
-            },
             "static": {
               "properties": {
                 "allowList": {
@@ -2594,6 +2602,15 @@
                 "fieldMask": {
                   "items": {},
                   "type": "array"
+                },
+                "fileCompress": {
+                  "type": "boolean"
+                },
+                "fileMaxBackups": {
+                  "type": "integer"
+                },
+                "fileMaxSizeMb": {
+                  "type": "integer"
                 },
                 "filePath": {
                   "type": "string"
@@ -2894,12 +2911,6 @@
             "annotations": {
               "type": "object"
             },
-            "dialTimeout": {
-              "type": [
-                "null",
-                "string"
-              ]
-            },
             "enabled": {
               "type": "boolean"
             },
@@ -2998,6 +3009,14 @@
               "properties": {
                 "fsGroup": {
                   "type": "integer"
+                },
+                "seccompProfile": {
+                  "properties": {
+                    "type": {
+                      "type": "string"
+                    }
+                  },
+                  "type": "object"
                 }
               },
               "type": "object"
@@ -3076,6 +3095,9 @@
             },
             "securityContext": {
               "properties": {
+                "allowPrivilegeEscalation": {
+                  "type": "boolean"
+                },
                 "capabilities": {
                   "properties": {
                     "drop": {
@@ -3590,6 +3612,13 @@
     "identityChangeGracePeriod": {
       "type": "string"
     },
+    "identityManagementMode": {
+      "enum": [
+        "agent",
+        "operator",
+        "both"
+      ]
+    },
     "image": {
       "properties": {
         "digest": {
@@ -3876,6 +3905,20 @@
       },
       "type": "object"
     },
+    "k8sClientExponentialBackoff": {
+      "properties": {
+        "backoffBaseSeconds": {
+          "type": "integer"
+        },
+        "backoffMaxDurationSeconds": {
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      },
+      "type": "object"
+    },
     "k8sClientRateLimit": {
       "properties": {
         "burst": {
@@ -3920,6 +3963,23 @@
     },
     "k8sServiceHost": {
       "type": "string"
+    },
+    "k8sServiceHostRef": {
+      "properties": {
+        "key": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "type": "object"
     },
     "k8sServiceLookupConfigMapName": {
       "type": [
@@ -5036,6 +5096,9 @@
       },
       "type": "object"
     },
+    "secretsNamespaceAnnotations": {
+      "type": "object"
+    },
     "securityContext": {
       "properties": {
         "capabilities": {
@@ -5407,27 +5470,39 @@
           },
           "type": "object"
         },
+        "readSecretsOnlyFromSecretsNamespace": {
+          "type": [
+            "null",
+            "boolean"
+          ]
+        },
         "secretSync": {
           "properties": {
             "enabled": {
-              "type": "boolean"
-            },
-            "secretsNamespace": {
-              "properties": {
-                "create": {
-                  "type": "boolean"
-                },
-                "name": {
-                  "type": "string"
-                }
-              },
-              "type": "object"
+              "type": [
+                "null",
+                "boolean"
+              ]
             }
           },
           "type": "object"
         },
         "secretsBackend": {
-          "type": "string"
+          "type": [
+            "null",
+            "string"
+          ]
+        },
+        "secretsNamespace": {
+          "properties": {
+            "create": {
+              "type": "boolean"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "type": "object"
         }
       },
       "type": "object"
@@ -5450,6 +5525,9 @@
       "type": "integer"
     },
     "tunnelProtocol": {
+      "type": "string"
+    },
+    "tunnelSourcePortRange": {
       "type": "string"
     },
     "updateStrategy": {

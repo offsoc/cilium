@@ -52,6 +52,23 @@ spec:
           metadata:
             type: object
           spec:
+            anyOf:
+            - properties:
+                ingress: {}
+              required:
+              - ingress
+            - properties:
+                ingressDeny: {}
+              required:
+              - ingressDeny
+            - properties:
+                egress: {}
+              required:
+              - egress
+            - properties:
+                egressDeny: {}
+              required:
+              - egressDeny
             description: Spec is the desired Cilium specific rule specification.
             oneOf:
             - properties:
@@ -438,7 +455,7 @@ spec:
                               A trailing "." is automatically added when missing.
 
                               Examples:
-                              `*.cilium.io` matches subomains of cilium at that level
+                              `*.cilium.io` matches subdomains of cilium at that level
                                 www.cilium.io and blog.cilium.io match, cilium.io and google.com do not
                               `*cilium.io` matches cilium.io and all subdomains ends with "cilium.io"
                                 except those containing "." separator, subcilium.io and sub-cilium.io match,
@@ -752,7 +769,7 @@ spec:
                                         A trailing "." is automatically added when missing.
 
                                         Examples:
-                                        `*.cilium.io` matches subomains of cilium at that level
+                                        `*.cilium.io` matches subdomains of cilium at that level
                                           www.cilium.io and blog.cilium.io match, cilium.io and google.com do not
                                         `*cilium.io` matches cilium.io and all subdomains ends with "cilium.io"
                                           except those containing "." separator, subcilium.io and sub-cilium.io match,
@@ -1098,14 +1115,13 @@ spec:
                       description: |-
                         ToServices is a list of services to which the endpoint subject
                         to the rule is allowed to initiate connections.
-                        Currently Cilium only supports toServices for K8s services without
-                        selectors.
-
-                        Example:
-                        Any endpoint with the label "app=backend-app" is allowed to
-                        initiate connections to all cidrs backing the "external-service" service
+                        Currently Cilium only supports toServices for K8s services.
                       items:
-                        description: Service wraps around selectors for services
+                        description: |-
+                          Service selects policy targets that are bundled as part of a
+                          logical load-balanced service.
+
+                          Currently only Kubernetes-based Services are supported.
                         properties:
                           k8sService:
                             description: K8sService selects service by name and namespace
@@ -1721,14 +1737,13 @@ spec:
                       description: |-
                         ToServices is a list of services to which the endpoint subject
                         to the rule is allowed to initiate connections.
-                        Currently Cilium only supports toServices for K8s services without
-                        selectors.
-
-                        Example:
-                        Any endpoint with the label "app=backend-app" is allowed to
-                        initiate connections to all cidrs backing the "external-service" service
+                        Currently Cilium only supports toServices for K8s services.
                       items:
-                        description: Service wraps around selectors for services
+                        description: |-
+                          Service selects policy targets that are bundled as part of a
+                          logical load-balanced service.
+
+                          Currently only Kubernetes-based Services are supported.
                         properties:
                           k8sService:
                             description: K8sService selects service by name and namespace
@@ -2590,7 +2605,7 @@ spec:
                                         A trailing "." is automatically added when missing.
 
                                         Examples:
-                                        `*.cilium.io` matches subomains of cilium at that level
+                                        `*.cilium.io` matches subdomains of cilium at that level
                                           www.cilium.io and blog.cilium.io match, cilium.io and google.com do not
                                         `*cilium.io` matches cilium.io and all subdomains ends with "cilium.io"
                                           except those containing "." separator, subcilium.io and sub-cilium.io match,
@@ -3484,6 +3499,23 @@ spec:
           specs:
             description: Specs is a list of desired Cilium specific rule specification.
             items:
+              anyOf:
+              - properties:
+                  ingress: {}
+                required:
+                - ingress
+              - properties:
+                  ingressDeny: {}
+                required:
+                - ingressDeny
+              - properties:
+                  egress: {}
+                required:
+                - egress
+              - properties:
+                  egressDeny: {}
+                required:
+                - egressDeny
               description: |-
                 Rule is a policy rule which must be applied to all endpoints which match the
                 labels contained in the endpointSelector
@@ -3882,7 +3914,7 @@ spec:
                                 A trailing "." is automatically added when missing.
 
                                 Examples:
-                                `*.cilium.io` matches subomains of cilium at that level
+                                `*.cilium.io` matches subdomains of cilium at that level
                                   www.cilium.io and blog.cilium.io match, cilium.io and google.com do not
                                 `*cilium.io` matches cilium.io and all subdomains ends with "cilium.io"
                                   except those containing "." separator, subcilium.io and sub-cilium.io match,
@@ -4196,7 +4228,7 @@ spec:
                                           A trailing "." is automatically added when missing.
 
                                           Examples:
-                                          `*.cilium.io` matches subomains of cilium at that level
+                                          `*.cilium.io` matches subdomains of cilium at that level
                                             www.cilium.io and blog.cilium.io match, cilium.io and google.com do not
                                           `*cilium.io` matches cilium.io and all subdomains ends with "cilium.io"
                                             except those containing "." separator, subcilium.io and sub-cilium.io match,
@@ -4542,14 +4574,13 @@ spec:
                         description: |-
                           ToServices is a list of services to which the endpoint subject
                           to the rule is allowed to initiate connections.
-                          Currently Cilium only supports toServices for K8s services without
-                          selectors.
-
-                          Example:
-                          Any endpoint with the label "app=backend-app" is allowed to
-                          initiate connections to all cidrs backing the "external-service" service
+                          Currently Cilium only supports toServices for K8s services.
                         items:
-                          description: Service wraps around selectors for services
+                          description: |-
+                            Service selects policy targets that are bundled as part of a
+                            logical load-balanced service.
+
+                            Currently only Kubernetes-based Services are supported.
                           properties:
                             k8sService:
                               description: K8sService selects service by name and
@@ -5166,14 +5197,13 @@ spec:
                         description: |-
                           ToServices is a list of services to which the endpoint subject
                           to the rule is allowed to initiate connections.
-                          Currently Cilium only supports toServices for K8s services without
-                          selectors.
-
-                          Example:
-                          Any endpoint with the label "app=backend-app" is allowed to
-                          initiate connections to all cidrs backing the "external-service" service
+                          Currently Cilium only supports toServices for K8s services.
                         items:
-                          description: Service wraps around selectors for services
+                          description: |-
+                            Service selects policy targets that are bundled as part of a
+                            logical load-balanced service.
+
+                            Currently only Kubernetes-based Services are supported.
                           properties:
                             k8sService:
                               description: K8sService selects service by name and
@@ -6036,7 +6066,7 @@ spec:
                                           A trailing "." is automatically added when missing.
 
                                           Examples:
-                                          `*.cilium.io` matches subomains of cilium at that level
+                                          `*.cilium.io` matches subdomains of cilium at that level
                                             www.cilium.io and blog.cilium.io match, cilium.io and google.com do not
                                           `*cilium.io` matches cilium.io and all subdomains ends with "cilium.io"
                                             except those containing "." separator, subcilium.io and sub-cilium.io match,

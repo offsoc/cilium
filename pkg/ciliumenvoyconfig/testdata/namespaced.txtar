@@ -9,11 +9,11 @@ db/cmp services services_empty.table
 db/cmp ciliumenvoyconfigs cec_empty.table
 
 # Set up the services and endpoints
-k8s add service.yaml endpointslice.yaml
+k8s/add service.yaml endpointslice.yaml
 db/cmp services services.table
 
 # Add the CiliumEnvoyConfig and wait for it to be ingested.
-k8s add cec.yaml
+k8s/add cec.yaml
 db/cmp ciliumenvoyconfigs cec.table
 
 # Check that both services are now redirected to proxy.
@@ -29,18 +29,18 @@ envoy envoy.out
 
 # Test the processing other way around, e.g. CEC exists before
 # the service. Start by dropping the backends.
-k8s delete endpointslice.yaml
+k8s/delete endpointslice.yaml
 
 # Backends towards Envoy should be dropped.
 envoy envoy.out
 * cmp envoy.out envoy2.expected
 
 # Drop the service
-k8s delete service.yaml
+k8s/delete service.yaml
 db/cmp services services_empty.table
 
 # Add back the service and endpoints
-k8s add service.yaml endpointslice.yaml
+k8s/add service.yaml endpointslice.yaml
 db/cmp services services_redirected.table
 
 # Check again that updates happened.
@@ -48,7 +48,7 @@ envoy envoy.out
 * cmp envoy.out envoy3.expected
 
 # Cleanup. Remove CEC and check that proxy redirect is gone.
-k8s delete cec.yaml
+k8s/delete cec.yaml
 db/cmp services services.table
 db/cmp ciliumenvoyconfigs cec_empty.table
 
@@ -148,14 +148,14 @@ ports:
   protocol: TCP
 
 -- lbmaps.expected --
-BE: ID=1 ADDR=10.244.1.1:8080 STATE=active
-BE: ID=2 ADDR=10.244.1.1:25 STATE=active
+BE: ID=1 ADDR=10.244.1.1:8080/TCP STATE=active
+BE: ID=2 ADDR=10.244.1.1:25/TCP STATE=active
 REV: ID=1 ADDR=10.96.50.104:80
 REV: ID=2 ADDR=10.96.50.104:25
-SVC: ID=1 ADDR=10.96.50.104:80 SLOT=0 BEID=59395 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+non-routable+l7-load-balancer
-SVC: ID=1 ADDR=10.96.50.104:80 SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable+l7-load-balancer
-SVC: ID=2 ADDR=10.96.50.104:25 SLOT=0 BEID=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+non-routable
-SVC: ID=2 ADDR=10.96.50.104:25 SLOT=1 BEID=2 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
+SVC: ID=1 ADDR=10.96.50.104:80/TCP SLOT=0 L7Proxy=1000 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+non-routable+l7-load-balancer
+SVC: ID=1 ADDR=10.96.50.104:80/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable+l7-load-balancer
+SVC: ID=2 ADDR=10.96.50.104:25/TCP SLOT=0 LBALG=undef AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+non-routable
+SVC: ID=2 ADDR=10.96.50.104:25/TCP SLOT=1 BEID=2 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+non-routable
 -- envoy1.expected --
 policy-trigger-count: 1
 update: count=1 listeners=test/envoy-lb-listener/envoy-lb-listener/1000 endpoints=test/echo:*=,test/echo:80=10.244.1.1:8080,test/echo=

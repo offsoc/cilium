@@ -25,7 +25,6 @@ import (
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
-	"github.com/cilium/cilium/pkg/math"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/trigger"
 )
@@ -339,7 +338,7 @@ func calculateNeededIPs(availableIPs, usedIPs, preAllocate, minAllocate, maxAllo
 	neededIPs = preAllocate - (availableIPs - usedIPs)
 
 	if minAllocate > 0 {
-		neededIPs = math.IntMax(neededIPs, minAllocate-availableIPs)
+		neededIPs = max(neededIPs, minAllocate-availableIPs)
 	}
 
 	// If maxAllocate is set (> 0) and neededIPs is higher than the
@@ -440,7 +439,7 @@ func (n *Node) UpdatedResource(resource *v2.CiliumNode) bool {
 
 	n.ops.UpdatedNode(resource)
 
-	n.recalculate()
+	n.recalculate(context.Background())
 	allocationNeeded := n.allocationNeeded()
 	if allocationNeeded {
 		n.requirePoolMaintenance()
@@ -457,14 +456,14 @@ func (n *Node) resourceAttached() (attached bool) {
 	return
 }
 
-func (n *Node) recalculate() {
+func (n *Node) recalculate(ctx context.Context) {
 	// Skip any recalculation if the CiliumNode resource does not exist yet
 	if !n.resourceAttached() {
 		return
 	}
 	scopedLog := n.logger()
 
-	a, stats, err := n.ops.ResyncInterfacesAndIPs(context.TODO(), scopedLog)
+	a, stats, err := n.ops.ResyncInterfacesAndIPs(ctx, scopedLog)
 
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
@@ -922,7 +921,7 @@ func (n *Node) handleIPAllocation(ctx context.Context, a *maintenanceAction) (in
 
 	// Assign needed addresses
 	if a.allocation.IPv4.AvailableForAllocation > 0 {
-		a.allocation.IPv4.AvailableForAllocation = math.IntMin(a.allocation.IPv4.AvailableForAllocation, a.allocation.IPv4.MaxIPsToAllocate)
+		a.allocation.IPv4.AvailableForAllocation = min(a.allocation.IPv4.AvailableForAllocation, a.allocation.IPv4.MaxIPsToAllocate)
 
 		start := time.Now()
 		err := n.ops.AllocateIPs(ctx, a.allocation)
@@ -1026,7 +1025,7 @@ func (n *Node) MaintainIPPool(ctx context.Context) error {
 		n.requireResync()
 	}
 	n.poolMaintenanceComplete()
-	n.recalculate()
+	n.recalculate(ctx)
 	if instanceMutated || err != nil {
 		n.instanceSync.Trigger()
 	}

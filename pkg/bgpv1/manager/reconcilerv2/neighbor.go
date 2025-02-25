@@ -5,6 +5,7 @@ package reconcilerv2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/netip"
 
@@ -116,11 +117,8 @@ func (r *NeighborReconciler) Cleanup(i *instance.BGPInstance) {
 }
 
 func (r *NeighborReconciler) Reconcile(ctx context.Context, p ReconcileParams) error {
-	if p.DesiredConfig == nil {
-		return fmt.Errorf("attempted neighbor reconciliation with nil CiliumBGPNodeInstance")
-	}
-	if p.BGPInstance == nil {
-		return fmt.Errorf("attempted neighbor reconciliation with nil BGPInstance")
+	if err := p.ValidateParams(); err != nil {
+		return err
 	}
 
 	var (
@@ -236,9 +234,7 @@ func (r *NeighborReconciler) Reconcile(ctx context.Context, p ReconcileParams) e
 	for _, n := range toRemove {
 		l.WithField(types.PeerLogField, n.Peer.Name).Info("Removing peer")
 
-		if err := p.BGPInstance.Router.RemoveNeighbor(ctx, types.NeighborRequest{
-			Peer: n.Peer,
-		}); err != nil {
+		if err := p.BGPInstance.Router.RemoveNeighbor(ctx, types.ToNeighborV2(n.Peer, n.Config, "")); err != nil {
 			return fmt.Errorf("failed to remove neigbhor %s from instance %s: %w", n.Peer.Name, p.DesiredConfig.Name, err)
 		}
 		// update metadata
@@ -249,11 +245,7 @@ func (r *NeighborReconciler) Reconcile(ctx context.Context, p ReconcileParams) e
 	for _, n := range toUpdate {
 		l.WithField(types.PeerLogField, n.Peer.Name).Info("Updating peer")
 
-		if err := p.BGPInstance.Router.UpdateNeighbor(ctx, types.NeighborRequest{
-			Peer:       n.Peer,
-			PeerConfig: n.Config,
-			Password:   n.Password,
-		}); err != nil {
+		if err := p.BGPInstance.Router.UpdateNeighbor(ctx, types.ToNeighborV2(n.Peer, n.Config, n.Password)); err != nil {
 			return fmt.Errorf("failed to update neigbhor %s in instance %s: %w", n.Peer.Name, p.DesiredConfig.Name, err)
 		}
 		// update metadata
@@ -264,11 +256,7 @@ func (r *NeighborReconciler) Reconcile(ctx context.Context, p ReconcileParams) e
 	for _, n := range toCreate {
 		l.WithField(types.PeerLogField, n.Peer.Name).Info("Adding peer")
 
-		if err := p.BGPInstance.Router.AddNeighbor(ctx, types.NeighborRequest{
-			Peer:       n.Peer,
-			PeerConfig: n.Config,
-			Password:   n.Password,
-		}); err != nil {
+		if err := p.BGPInstance.Router.AddNeighbor(ctx, types.ToNeighborV2(n.Peer, n.Config, n.Password)); err != nil {
 			return fmt.Errorf("failed to add neigbhor %s in instance %s: %w", n.Peer.Name, p.DesiredConfig.Name, err)
 		}
 		// update metadata
@@ -292,6 +280,9 @@ func (r *NeighborReconciler) getPeerConfig(peerConfig *v2alpha1.PeerConfigRefere
 
 	config, exists, err := r.PeerConfig.GetByKey(resource.Key{Name: peerConfig.Name})
 	if err != nil || !exists {
+		if errors.Is(err, store.ErrStoreUninitialized) {
+			err = errors.Join(err, ErrAbortReconcile)
+		}
 		return nil, exists, err
 	}
 
@@ -336,6 +327,9 @@ func (r *NeighborReconciler) fetchSecret(name string) (map[string][]byte, bool, 
 	}
 	item, ok, err := r.SecretStore.GetByKey(resource.Key{Namespace: r.DaemonConfig.BGPSecretsNamespace, Name: name})
 	if err != nil || !ok {
+		if errors.Is(err, store.ErrStoreUninitialized) {
+			err = errors.Join(err, ErrAbortReconcile)
+		}
 		return nil, ok, err
 	}
 	result := map[string][]byte{}

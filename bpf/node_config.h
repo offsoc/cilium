@@ -17,32 +17,17 @@
 
 #define CLUSTER_ID 0
 
-#ifndef THIS_INTERFACE_MAC
-DEFINE_MAC(THIS_INTERFACE_MAC, 0xde, 0xad, 0xbe, 0xef, 0xc0, 0xde);
-#define THIS_INTERFACE_MAC fetch_mac(THIS_INTERFACE_MAC)
-#endif
+/* Hack: the agent declares and assigns ROUTER_IP in the runtime-generated
+ * node_config.h, replacing this file before compilation. Declare the variables
+ * manually here, so dpgen doesn't pick it up at compile time and we don't
+ * substitute an empty default value.
+ */
+volatile const __u64 __config_ROUTER_IP_1;
+volatile const __u64 __config_ROUTER_IP_2;
 
-#ifndef THIS_INTERFACE_IFINDEX
-DECLARE_CONFIG(__u32, interface_ifindex, "ifindex of the interface the bpf program is attached to")
-#define THIS_INTERFACE_IFINDEX CONFIG(interface_ifindex) /* Backwards compatibility */
-#endif
-
-#ifndef ROUTER_IP
-DEFINE_IPV6(ROUTER_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0x0, 0x1, 0x0, 0x1, 0x0, 0x0);
-#endif
-
-#define HOST_IFINDEX 1
-#define CILIUM_IFINDEX 1
+#define CILIUM_NET_IFINDEX 1
+#define CILIUM_HOST_IFINDEX 1
 #define NATIVE_DEV_MAC_BY_IFINDEX(_) { .addr = { 0xce, 0x72, 0xa7, 0x03, 0x88, 0x56 } }
-
-#ifndef HOST_IP
-DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x0, 0x2, 0xf, 0xff, 0xff);
-#endif
-
-#ifndef SECCTX_FROM_IPCACHE
- DEFINE_U32(SECCTX_FROM_IPCACHE, 1);
- #define SECCTX_FROM_IPCACHE fetch_u32(SECCTX_FROM_IPCACHE)
-#endif
 
 #define TUNNEL_PORT 8472
 #define TUNNEL_PROTOCOL_VXLAN 1
@@ -73,11 +58,11 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
  * before it leaves the host.
  */
 #define ENCRYPTED_OVERLAY_ID 11
-#define HOST_IFINDEX_MAC { .addr = { 0xce, 0x72, 0xa7, 0x03, 0x88, 0x56 } }
+#define CILIUM_HOST_MAC { .addr = { 0xce, 0x72, 0xa7, 0x03, 0x88, 0x56 } }
 #define NODEPORT_PORT_MIN 30000
 #define NODEPORT_PORT_MAX 32767
 #define NODEPORT_PORT_MIN_NAT (NODEPORT_PORT_MAX + 1)
-#define NODEPORT_PORT_MAX_NAT 43835
+#define NODEPORT_PORT_MAX_NAT 65535
 
 #define CT_CONNECTION_LIFETIME_TCP	21600
 #define CT_CONNECTION_LIFETIME_NONTCP	60
@@ -122,10 +107,6 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
 #endif /* ENABLE_NODEPORT */
 #define CAPTURE4_RULES cilium_capture4_rules
 #define CAPTURE4_SIZE 16384
-# ifdef ENABLE_HIGH_SCALE_IPCACHE
-#  define IPV4_NATIVE_ROUTING_CIDR 0xffff0000
-#  define IPV4_NATIVE_ROUTING_CIDR_LEN 16
-# endif /* ENABLE_HIGH_SCALE_IPCACHE */
 #endif /* ENABLE_IPV4 */
 
 #ifdef ENABLE_IPV6
@@ -142,6 +123,10 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
 #define CAPTURE6_RULES cilium_capture6_rules
 #define CAPTURE6_SIZE 16384
 #endif /* ENABLE_IPV6 */
+
+#ifdef ENABLE_NODEPORT
+#define SNAT_COLLISION_RETRIES 32
+#endif
 
 #define EGRESS_POLICY_MAP test_cilium_egress_gw_policy_v4
 #define SRV6_VRF_MAP4 test_cilium_srv6_vrf_v4
@@ -237,10 +222,6 @@ DEFINE_IPV6(HOST_IP, 0xbe, 0xef, 0x0, 0x0, 0x0, 0x0, 0x0, 0x1, 0x0, 0x0, 0xa, 0x
 #define LB4_HEALTH_MAP test_cilium_lb4_health
 #define LB6_HEALTH_MAP test_cilium_lb6_health
 #endif /* ENABLE_NODEPORT || ENABLE_HOST_FIREWALL */
-#ifdef ENABLE_HIGH_SCALE_IPCACHE
-# define WORLD_CIDRS4_MAP test_cilium_world_cidrs4
-# define WORLD_CIDRS4_MAP_SIZE 16384
-#endif /* ENABLE_HIGH_SCALE_IPCACHE */
 
 #ifdef ENABLE_NODEPORT
 #ifdef ENABLE_IPV4

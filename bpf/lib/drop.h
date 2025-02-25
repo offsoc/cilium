@@ -20,7 +20,6 @@
 #include "metrics.h"
 #include "ratelimit.h"
 
-#ifdef DROP_NOTIFY
 struct drop_notify {
 	NOTIFY_CAPTURE_HDR
 	__u32		src_label;
@@ -32,6 +31,7 @@ struct drop_notify {
 	__u32		ifindex;
 };
 
+#ifdef DROP_NOTIFY
 /*
  * We pass information in the meta area as follows:
  *
@@ -176,18 +176,22 @@ int _send_drop_notify(__u8 file __maybe_unused, __u16 line __maybe_unused,
 	__DROP_REASON(err) | ((__u8)(__ext_err < -128 ? 0 : __ext_err) << 8); \
 })
 
-#define send_drop_notify(ctx, src, dst, dst_id, reason, exitcode, direction) \
+#define send_drop_notify(ctx, src, dst, dst_id, reason, direction) \
 	_send_drop_notify(__MAGIC_FILE__, __MAGIC_LINE__, ctx, src, dst, dst_id, \
-			  __DROP_REASON(reason), exitcode, direction)
+			  __DROP_REASON(reason), CTX_ACT_DROP, direction)
 
-#define send_drop_notify_error(ctx, src, reason, exitcode, direction) \
+#define send_drop_notify_error(ctx, src, reason, direction) \
 	_send_drop_notify(__MAGIC_FILE__, __MAGIC_LINE__, ctx, src, 0, 0, \
-			  __DROP_REASON(reason), exitcode, direction)
+			  __DROP_REASON(reason), CTX_ACT_DROP, direction)
 
-#define send_drop_notify_ext(ctx, src, dst, dst_id, reason, ext_err, exitcode, direction) \
+#define send_drop_notify_ext(ctx, src, dst, dst_id, reason, ext_err, direction) \
 	_send_drop_notify(__MAGIC_FILE__, __MAGIC_LINE__, ctx, src, dst, dst_id, \
-			  __DROP_REASON_EXT(reason, ext_err), exitcode, direction)
+			  __DROP_REASON_EXT(reason, ext_err), CTX_ACT_DROP, direction)
 
-#define send_drop_notify_error_ext(ctx, src, reason, ext_err, exitcode, direction) \
+#define send_drop_notify_error_ext(ctx, src, reason, ext_err, direction) \
+	_send_drop_notify(__MAGIC_FILE__, __MAGIC_LINE__, ctx, src, 0, 0, \
+			  __DROP_REASON_EXT(reason, ext_err), CTX_ACT_DROP, direction)
+
+#define send_drop_notify_error_with_exitcode_ext(ctx, src, reason, ext_err, exitcode, direction) \
 	_send_drop_notify(__MAGIC_FILE__, __MAGIC_LINE__, ctx, src, 0, 0, \
 			  __DROP_REASON_EXT(reason, ext_err), exitcode, direction)

@@ -30,7 +30,6 @@ import (
 	"github.com/cilium/cilium/pkg/fqdn/restore"
 	"github.com/cilium/cilium/pkg/ipam"
 	"github.com/cilium/cilium/pkg/k8s"
-	k8sConst "github.com/cilium/cilium/pkg/k8s/apis/cilium.io"
 	"github.com/cilium/cilium/pkg/k8s/client"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
@@ -131,6 +130,17 @@ func (d *Daemon) getEndpointList(params GetEndpointParams) []*models.Endpoint {
 func deleteEndpointHandler(d *Daemon, params DeleteEndpointParams) middleware.Responder {
 	log.WithField(logfields.Params, logfields.Repr(params)).Debug("DELETE /endpoint/ request")
 
+	if params.Endpoint.ContainerID == "" {
+		return api.New(DeleteEndpointInvalidCode, "invalid container id")
+	}
+
+	// Bypass the rate limiter for endpoints that have already been deleted.
+	// Kubelet will generate at minimum 2 delete requests for a Pod, so this
+	// returns in earlier retruns for over half of all delete calls.
+	if eps := d.endpointManager.GetEndpointsByContainerID(params.Endpoint.ContainerID); len(eps) == 0 {
+		return api.New(DeleteEndpointNotFoundCode, "endpoints not found")
+	}
+
 	r, err := d.apiLimiterSet.Wait(params.HTTPRequest.Context(), restapi.APIRequestEndpointDelete)
 	if err != nil {
 		return api.Error(http.StatusTooManyRequests, err)
@@ -147,9 +157,9 @@ func deleteEndpointHandler(d *Daemon, params DeleteEndpointParams) middleware.Re
 		return api.Error(DeleteEndpointInvalidCode, err)
 	} else if nerr > 0 {
 		return NewDeleteEndpointErrors().WithPayload(int64(nerr))
-	} else {
-		return NewDeleteEndpointOK()
 	}
+
+	return NewDeleteEndpointOK()
 }
 
 func getEndpointIDHandler(d *Daemon, params GetEndpointIDParams) middleware.Responder {
@@ -478,11 +488,11 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
 			ep.SetK8sMetadata(k8sMetadata.ContainerPorts)
 			identityLbls.MergeLabels(k8sMetadata.IdentityLabels)
 			infoLabels.MergeLabels(k8sMetadata.InfoLabels)
-			if _, ok := pod.Annotations[bandwidth.IngressBandwidth]; ok {
+			if _, ok := pod.Annotations[bandwidth.IngressBandwidth]; ok && !d.bwManager.Enabled() {
 				log.WithFields(logrus.Fields{
 					logfields.K8sPodName:  epTemplate.K8sNamespace + "/" + epTemplate.K8sPodName,
 					logfields.Annotations: logfields.Repr(pod.Annotations),
-				}).Warningf("Endpoint has %s annotation which is unsupported. This annotation is ignored.",
+				}).Warningf("Endpoint has %s annotation, but BPF bandwidth manager is disabled. This annotation is ignored.",
 					bandwidth.IngressBandwidth)
 			}
 			if _, ok := pod.Annotations[bandwidth.EgressBandwidth]; ok && !d.bwManager.Enabled() {
@@ -512,18 +522,6 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
 		// get its actual identity.
 		identityLbls = labels.Labels{
 			labels.IDNameInit: labels.NewLabel(labels.IDNameInit, "", labels.LabelSourceReserved),
-		}
-	}
-
-	// Static pods (mirror pods) might be configured before the apiserver
-	// is available or has received the notification that includes the
-	// static pod's labels. In this case, start a controller to attempt to
-	// resolve the labels.
-	if ep.K8sNamespaceAndPodNameIsSet() && d.clientset.IsEnabled() {
-		// If there are labels, but no pod namespace, then it's
-		// likely that there are no k8s labels at all. Resolve.
-		if _, k8sLabelsConfigured := identityLbls[k8sConst.PodNamespaceLabel]; !k8sLabelsConfigured {
-			ep.RunMetadataResolver(false, false, apiLabels, d.bwManager, d.fetchK8sMetadataForEndpoint)
 		}
 	}
 
@@ -902,6 +900,15 @@ func (d *Daemon) EndpointRestored(ep *endpoint.Endpoint) {
 func deleteEndpointIDHandler(d *Daemon, params DeleteEndpointIDParams) middleware.Responder {
 	log.WithField(logfields.Params, logfields.Repr(params)).Debug("DELETE /endpoint/{id} request")
 
+	// Bypass the rate limiter for endpoints that have already been deleted.
+	// Kubelet will generate at minimum 2 delete requests for a Pod, so this
+	// returns in earlier retruns for over half of all delete calls.
+	if ep, err := d.endpointManager.Lookup(params.ID); err != nil {
+		return api.Error(GetEndpointIDInvalidCode, err)
+	} else if ep == nil {
+		return NewGetEndpointIDNotFound()
+	}
+
 	r, err := d.apiLimiterSet.Wait(params.HTTPRequest.Context(), restapi.APIRequestEndpointDelete)
 	if err != nil {
 		return api.Error(http.StatusTooManyRequests, err)
@@ -918,9 +925,9 @@ func deleteEndpointIDHandler(d *Daemon, params DeleteEndpointIDParams) middlewar
 		return api.Error(DeleteEndpointIDErrorsCode, err)
 	} else if nerr > 0 {
 		return NewDeleteEndpointIDErrors().WithPayload(int64(nerr))
-	} else {
-		return NewDeleteEndpointIDOK()
 	}
+
+	return NewDeleteEndpointIDOK()
 }
 
 // EndpointUpdate updates the options of the given endpoint and regenerates the endpoint

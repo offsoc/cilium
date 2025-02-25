@@ -92,26 +92,35 @@ with ``example.com``, whereas ``.*example\.com`` will match labels that contain
 the pattern matching too broadly and therefore including or excluding too many
 labels.
 
-The label patterns are using regular expressions. Therefore, using  ``kind$`` 
+The label patterns are using regular expressions. Therefore, using  ``kind$``
 or ``^kind$`` can exactly match the label key ``kind``, not just the prefix.
 
 Upon defining a custom list of label patterns in the ConfigMap, Cilium adds the
 provided list of label patterns to the default list of label patterns. After
-saving the ConfigMap, restart the Cilium Agents to pickup the new label pattern
-setting.
+saving the ConfigMap, if the Operator is managing identities (:ref:`IdentityManagementMode`),
+restart both the Cilium Operators and Agents to pickup the new label pattern setting. If the Agent
+is managing identities, restart the Cilium Agents to pickup the new label pattern.
 
 .. code-block:: shell-session
 
     kubectl delete pods -n kube-system -l k8s-app=cilium
 
 .. note:: Configuring Cilium with label patterns via ``labels`` Helm value does
-          **not** override the default set of label patterns.
+          **not** override the default set of label patterns. That is to say,
+          you can consider this configuration to append a list of label
+          configurations to the defaults listed above.
+
+          If you wish to configure this setting in a declarative way including
+          the exact set of label prefixes to be considered for determining
+          workload security identities, you should instead configure the
+          ``label-prefix-file`` configuration flag.
 
 Existing identities will not change as a result of this new configuration. To
 apply the new label pattern setting to existing identities, restart the
-associated pods. Upon restart, new identities will be created. The old
-identities will be garbage collected by the Cilium Operator once they are no
-longer used by any Cilium endpoints.
+corresponding Cilium pod on the node where the workload is running. Upon
+restart, new identities will be created. The old identities will be garbage
+collected by the Cilium Operator once they are no longer used by any Cilium
+endpoints.
 
 When specifying multiple label patterns to evaluate, provide the list of labels
 as a space-separated string.
@@ -152,7 +161,7 @@ for Cilium identities:
 - name-defined
 
 Because we have ``$`` in label key ``kind$`` and ``other$``. Only label keys using
-exactly ``kind`` and ``other`` will be evaluated for Cilium. 
+exactly ``kind`` and ``other`` will be evaluated for Cilium.
 
 When a single inclusive label is added to the filter, all labels not defined
 in the default list will be excluded. For example, pods running with the

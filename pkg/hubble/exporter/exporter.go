@@ -17,7 +17,19 @@ import (
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 )
 
-var _ FlowLogExporter = (*exporter)(nil)
+const (
+	DefaultFileMaxSizeMB  = 10
+	DefaultFileMaxBackups = 5
+)
+
+// FlowLogExporter is represents a type that can export hubble events.
+type FlowLogExporter interface {
+	// Export exports the received event.
+	Export(ctx context.Context, ev *v1.Event) error
+
+	// Stop stops this exporter instance from further events processing.
+	Stop() error
+}
 
 // OnExportEvent is a hook that can be registered on an exporter and is invoked for each event.
 //
@@ -34,6 +46,8 @@ type OnExportEventFunc func(ctx context.Context, ev *v1.Event, encoder Encoder) 
 func (f OnExportEventFunc) OnExportEvent(ctx context.Context, ev *v1.Event, encoder Encoder) (bool, error) {
 	return f(ctx, ev, encoder)
 }
+
+var _ FlowLogExporter = (*exporter)(nil)
 
 // exporter is an implementation of OnDecodedEvent interface that writes Hubble events to a file.
 type exporter struct {
@@ -82,7 +96,7 @@ func newExporter(logger logrus.FieldLogger, opts Options) (*exporter, error) {
 	}, nil
 }
 
-// Export implements the FlowLogExporter interface.
+// Export implements FlowLogExporter.
 //
 // It takes care of applying filters on the received event, and if allowed, proceeds to invoke the
 // registered OnExportEvent hooks. If none of the hooks return true (abort signal) the event is then
@@ -117,7 +131,7 @@ func (e *exporter) Export(ctx context.Context, ev *v1.Event) error {
 	return e.encoder.Encode(res)
 }
 
-// Stop implements the FlowLogExporter interface.
+// Stop implements FlowLogExporter.
 func (e *exporter) Stop() error {
 	e.logger.Debug("hubble flow exporter stopping")
 	if e.writer == nil {

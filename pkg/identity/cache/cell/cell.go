@@ -4,6 +4,7 @@
 package identitycachecell
 
 import (
+	"cmp"
 	"context"
 	"log/slog"
 	"maps"
@@ -29,6 +30,7 @@ import (
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
+	"github.com/cilium/cilium/pkg/time"
 )
 
 var log = logging.DefaultLogger.WithField(logfields.LogSubsys, "identity-cache-cell")
@@ -65,6 +67,8 @@ type CachingIdentityAllocator interface {
 	ReleaseRestoredIdentities()
 
 	Close()
+
+	LocalIdentityChanges() stream.Observable[cache.IdentityChange]
 }
 
 type identityAllocatorParams struct {
@@ -93,16 +97,15 @@ type identityAllocatorOut struct {
 }
 
 type config struct {
-	EnableOperatorManageCIDs bool `mapstructure:"operator-manages-identities"`
+	IdentityManagementMode string `mapstructure:"identity-management-mode"`
 }
 
 func (c config) Flags(flags *pflag.FlagSet) {
-	flags.Bool("operator-manages-identities", c.EnableOperatorManageCIDs, "Enables operator to manage Cilium Identities by running a Cilium Identity controller")
-	flags.MarkHidden("operator-manages-identities") // See https://github.com/cilium/cilium/issues/34675
+	flags.String(option.IdentityManagementMode, c.IdentityManagementMode, "Configure whether Cilium Identities are managed by cilium-agent, cilium-operator, or both")
 }
 
 var defaultConfig = config{
-	EnableOperatorManageCIDs: false,
+	IdentityManagementMode: option.IdentityManagementModeAgent,
 }
 
 func newIdentityAllocator(params identityAllocatorParams) identityAllocatorOut {
@@ -118,8 +121,13 @@ func newIdentityAllocator(params identityAllocatorParams) identityAllocatorOut {
 	var idAlloc CachingIdentityAllocator
 
 	if option.NetworkPolicyEnabled(option.Config) {
+		isOperatorManageCIDsEnabled := cmp.Or(
+			params.Config.IdentityManagementMode == option.IdentityManagementModeOperator,
+			params.Config.IdentityManagementMode == option.IdentityManagementModeBoth,
+		)
+
 		allocatorConfig := cache.AllocatorConfig{
-			EnableOperatorManageCIDs: params.Config.EnableOperatorManageCIDs,
+			EnableOperatorManageCIDs: isOperatorManageCIDsEnabled,
 		}
 
 		// Allocator: allocates local and cluster-wide security identities.
@@ -162,8 +170,9 @@ type identityAllocatorOwner struct {
 
 	// set of notification waitgroups to wait in for batched UpdatePolicyMaps,
 	// and a mutex to protect for writing
-	wgsLock lock.Mutex
-	wgs     []*sync.WaitGroup
+	wgsLock        lock.Mutex
+	wgs            []*sync.WaitGroup
+	firstStartTime time.Time // the start time for the first batched update
 
 	updatePolicyMaps job.Trigger
 }
@@ -183,6 +192,8 @@ func (iao *identityAllocatorOwner) UpdateIdentities(added, deleted identity.Iden
 		return
 	}
 
+	start := time.Now()
+
 	log.WithFields(logrus.Fields{
 		logfields.AddedPolicyID:   slices.Collect(maps.Keys(added)),
 		logfields.DeletedPolicyID: slices.Collect(maps.Keys(deleted)),
@@ -201,6 +212,9 @@ func (iao *identityAllocatorOwner) UpdateIdentities(added, deleted identity.Iden
 	// Direct endpoints to consume pending incremental updates.
 	iao.wgsLock.Lock()
 	iao.wgs = append(iao.wgs, wg)
+	if iao.firstStartTime.IsZero() {
+		iao.firstStartTime = start
+	}
 	iao.wgsLock.Unlock()
 	iao.updatePolicyMaps.Trigger()
 }
@@ -216,7 +230,9 @@ func (iao *identityAllocatorOwner) doUpdatePolicyMaps(ctx context.Context) error
 		return nil
 	}
 	wgs := iao.wgs
+	start := iao.firstStartTime
 	iao.wgs = nil
+	iao.firstStartTime = time.Time{}
 	iao.wgsLock.Unlock()
 
 	log.WithField(logfields.Count, len(wgs)).Info("Incremental policy update: waiting for endpoint notifications to complete")
@@ -244,6 +260,7 @@ func (iao *identityAllocatorOwner) doUpdatePolicyMaps(ctx context.Context) error
 	log.Info("Incremental policy update: triggering UpdatePolicyMaps for all endpoints")
 	updatedWG := iao.epmanager.UpdatePolicyMaps(ctx, noopWG)
 	updatedWG.Wait()
+	metrics.PolicyIncrementalUpdateDuration.WithLabelValues("global").Observe(time.Since(start).Seconds())
 	return nil
 }
 

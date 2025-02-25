@@ -10,6 +10,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"sync/atomic"
 
 	"github.com/cilium/stream"
 	"github.com/google/renameio/v2"
@@ -225,9 +226,10 @@ func (m *CachingIdentityAllocator) InitIdentityAllocator(client clientset.Interf
 		case option.IdentityAllocationModeCRD:
 			log.Debug("Identity allocation backed by CRD")
 			backend, err = identitybackend.NewCRDBackend(identitybackend.CRDBackendConfiguration{
-				Store:   nil,
-				Client:  client,
-				KeyFunc: (&key.GlobalIdentity{}).PutKeyFromMap,
+				Store:    nil,
+				StoreSet: &atomic.Bool{},
+				Client:   client,
+				KeyFunc:  (&key.GlobalIdentity{}).PutKeyFromMap,
 			})
 			if err != nil {
 				log.WithError(err).Fatal("Unable to initialize Kubernetes CRD backend for identity allocation")
@@ -241,9 +243,10 @@ func (m *CachingIdentityAllocator) InitIdentityAllocator(client clientset.Interf
 			log.Debugf("Double-Write Identity allocation mode (CRD and KVStore) with reads from KVStore = %t", readFromKVStore)
 			backend, err = doublewrite.NewDoubleWriteBackend(doublewrite.DoubleWriteBackendConfiguration{
 				CRDBackendConfiguration: identitybackend.CRDBackendConfiguration{
-					Store:   nil,
-					Client:  client,
-					KeyFunc: (&key.GlobalIdentity{}).PutKeyFromMap,
+					Store:    nil,
+					StoreSet: &atomic.Bool{},
+					Client:   client,
+					KeyFunc:  (&key.GlobalIdentity{}).PutKeyFromMap,
 				},
 				KVStoreBackendConfiguration: kvstoreallocator.KVStoreBackendConfiguration{
 					BasePath: m.identitiesPath,
@@ -831,7 +834,7 @@ type IdentityChange struct {
 	Labels labels.Labels
 }
 
-// Observe the identity changes. Conforms to stream.Observable.
+// Observe identity changes. Doesn't include local identities. Conforms to stream.Observable.
 // Replays the current state of the cache when subscribing.
 func (m *CachingIdentityAllocator) Observe(ctx context.Context, next func(IdentityChange), complete func(error)) {
 	// This short-lived go routine serves the purpose of waiting for the global identity allocator becoming ready
@@ -878,6 +881,12 @@ func mapLabels(allocatorKey allocator.AllocatorKey) labels.Labels {
 	}
 
 	return idLabels
+}
+
+// LocalIdentityChanges returns an observable for (only) node-local identities.
+// Replays current state on subscription followed by a Sync event.
+func (m *CachingIdentityAllocator) LocalIdentityChanges() stream.Observable[IdentityChange] {
+	return m.localIdentities
 }
 
 // clusterIDValidator returns a validator ensuring that the identity ID belongs

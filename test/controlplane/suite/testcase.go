@@ -68,7 +68,7 @@ func (cpt *ControlPlaneTest) AgentDB() (*statedb.DB, statedb.Table[datapathTable
 }
 
 func NewControlPlaneTest(t *testing.T, nodeName string, k8sVersion string) *ControlPlaneTest {
-	clients, _ := k8sClient.NewFakeClientset()
+	clients, _ := k8sClient.NewFakeClientset(hivetest.Logger(t))
 	var w lock.Map[string, struct{}]
 	clients.KubernetesFakeClientset = augmentTracker(clients.KubernetesFakeClientset, t, &w)
 	clients.SlimFakeClientset = augmentTracker(clients.SlimFakeClientset, t, &w)
@@ -463,6 +463,14 @@ func filterList(obj k8sRuntime.Object, restrictions k8sTesting.ListRestrictions)
 	switch obj := obj.(type) {
 	case *corev1.NodeList:
 		items := make([]corev1.Node, 0, len(obj.Items))
+		for i := range obj.Items {
+			if matchFieldSelector(&obj.Items[i], selector) {
+				items = append(items, obj.Items[i])
+			}
+		}
+		obj.Items = items
+	case *corev1.ConfigMapList:
+		items := make([]corev1.ConfigMap, 0, len(obj.Items))
 		for i := range obj.Items {
 			if matchFieldSelector(&obj.Items[i], selector) {
 				items = append(items, obj.Items[i])

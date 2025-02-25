@@ -24,7 +24,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/anypb"
-	"google.golang.org/protobuf/types/known/durationpb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 
 	"github.com/cilium/cilium/pkg/bpf"
@@ -69,14 +68,15 @@ type parserParams struct {
 	PortAllocator  PortAllocator
 	LocalNodeStore *node.LocalNodeStore
 
-	CecConfig cecConfig
+	CecConfig   cecConfig
+	EnvoyConfig envoy.ProxyConfig
 }
 
 func newCECResourceParser(params parserParams) *cecResourceParser {
 	parser := &cecResourceParser{
 		logger:                      params.Logger,
 		portAllocator:               params.PortAllocator,
-		defaultMaxConcurrentRetries: params.CecConfig.ProxyMaxConcurrentRetries,
+		defaultMaxConcurrentRetries: params.EnvoyConfig.ProxyMaxConcurrentRetries,
 	}
 
 	// Retrieve Ingress IPs from local Node.
@@ -534,7 +534,6 @@ func (r *cecResourceParser) getBPFMetadataListenerFilter(useOriginalSourceAddr b
 		BpfRoot:                  bpf.BPFFSRoot(),
 		IsL7Lb:                   l7lb,
 		ProxyId:                  uint32(proxyPort),
-		PolicyUpdateWarningLimit: durationpb.New(option.Config.FQDNProxyResponseMaxDelay),
 	}
 
 	// Set Ingress source addresses if configuring for L7 LB.  One of these will be used when

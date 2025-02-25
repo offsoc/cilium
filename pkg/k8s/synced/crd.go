@@ -17,8 +17,9 @@ import (
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
 
+	operatorOption "github.com/cilium/cilium/operator/option"
 	v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
-	v2alpha1 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
+	"github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2alpha1"
 	"github.com/cilium/cilium/pkg/k8s/client"
 	"github.com/cilium/cilium/pkg/k8s/informer"
 	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
@@ -103,19 +104,27 @@ func ClusterMeshAPIServerResourceNames() []string {
 		CRDResourceName(v2.CNName),
 		CRDResourceName(v2.CIDName),
 		CRDResourceName(v2.CEPName),
-		CRDResourceName(v2.CEWName),
+	}
+}
+
+func GatewayAPIResourceNames() []string {
+	if !operatorOption.Config.EnableGatewayAPI {
+		return nil
+	}
+	return []string{
+		CRDResourceName(v2alpha1.CGCCName),
 	}
 }
 
 // AllCiliumCRDResourceNames returns a list of all Cilium CRD resource names
 // that the cilium operator or testsuite may register.
 func AllCiliumCRDResourceNames() []string {
-	return append(
-		AgentCRDResourceNames(),
-		CRDResourceName(v2.CEWName),
+	res := append(AgentCRDResourceNames(), GatewayAPIResourceNames()...)
+	res = append(res,
 		CRDResourceName(v2.CNCName),
 		CRDResourceName(v2alpha1.CNCName), // TODO depreciate CNC on v2alpha1 https://github.com/cilium/cilium/issues/31982
 	)
+	return res
 }
 
 // SyncCRDs will sync Cilium CRDs to ensure that they have all been

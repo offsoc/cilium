@@ -6,7 +6,6 @@ package proxy
 import (
 	"github.com/sirupsen/logrus"
 
-	"github.com/cilium/cilium/pkg/completion"
 	"github.com/cilium/cilium/pkg/fqdn/proxy"
 	"github.com/cilium/cilium/pkg/fqdn/restore"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -14,16 +13,17 @@ import (
 	"github.com/cilium/cilium/pkg/revert"
 )
 
-var (
-	// DefaultDNSProxy is the global, shared, DNS Proxy singleton.
-	DefaultDNSProxy proxy.DNSProxier
-)
+// DefaultDNSProxy is the global, shared, DNS Proxy singleton.
+var DefaultDNSProxy proxy.DNSProxier
 
 // dnsRedirect implements the Redirect interface for an l7 proxy
 type dnsRedirect struct {
-	redirect         *Redirect
-	currentRules     policy.L7DataMap
+	Redirect
 	proxyRuleUpdater proxyRuleUpdater
+}
+
+func (dr *dnsRedirect) GetRedirect() *Redirect {
+	return &dr.Redirect
 }
 
 // proxyRuleUpdater updates L7 proxy rules per endpoint.
@@ -33,68 +33,43 @@ type dnsRedirect struct {
 type proxyRuleUpdater interface {
 	// UpdateAllowed updates the rules in the DNS proxy with newRules for the
 	// endpointID and destPort.
-	UpdateAllowed(endpointID uint64, destPort restore.PortProto, newRules policy.L7DataMap) error
+	UpdateAllowed(endpointID uint64, destPort restore.PortProto, newRules policy.L7DataMap) (revert.RevertFunc, error)
 }
 
 // setRules replaces old l7 rules of a redirect with new ones.
-// TODO: Get rid of the duplication between 'currentRules' and 'r.rules'
-func (dr *dnsRedirect) setRules(_ *completion.WaitGroup, newRules policy.L7DataMap) error {
-	log.WithFields(logrus.Fields{
-		"newRules":           newRules,
-		logfields.EndpointID: dr.redirect.endpointID,
-	}).Debug("DNS Proxy updating matchNames in allowed list during UpdateRules")
-	if err := dr.proxyRuleUpdater.UpdateAllowed(uint64(dr.redirect.endpointID), dr.redirect.dstPortProto, newRules); err != nil {
-		return err
-	}
-	dr.currentRules = copyRules(dr.redirect.rules)
-
-	return nil
+func (dr *dnsRedirect) setRules(newRules policy.L7DataMap) (revert.RevertFunc, error) {
+	dr.logger.Debug("DNS Proxy updating matchNames in allowed list during UpdateRules",
+		"newRules", newRules,
+		logfields.EndpointID, dr.endpointID,
+	)
+	return dr.proxyRuleUpdater.UpdateAllowed(uint64(dr.endpointID), dr.dstPortProto, newRules)
 }
 
 // UpdateRules atomically replaces the proxy rules in effect for this redirect.
 // It is not aware of revision number and doesn't account for out-of-order
 // calls to UpdateRules or the returned RevertFunc.
-func (dr *dnsRedirect) UpdateRules(wg *completion.WaitGroup) (revert.RevertFunc, error) {
-	oldRules := dr.currentRules
-	err := dr.setRules(wg, dr.redirect.rules)
-	revertFunc := func() error {
-		return dr.setRules(nil, oldRules)
-	}
-	return revertFunc, err
+func (dr *dnsRedirect) UpdateRules(rules policy.L7DataMap) (revert.RevertFunc, error) {
+	return dr.setRules(rules)
 }
 
 // Close the redirect.
 func (dr *dnsRedirect) Close() {
-	dr.proxyRuleUpdater.UpdateAllowed(uint64(dr.redirect.endpointID), dr.redirect.dstPortProto, nil)
-	dr.currentRules = nil
+	dr.setRules(nil)
 }
 
-type dnsProxyIntegration struct {
-}
+type dnsProxyIntegration struct{}
 
 // createRedirect creates a redirect to the dns proxy. The redirect structure passed
 // in is safe to access for reading and writing.
-func (p *dnsProxyIntegration) createRedirect(r *Redirect, _ *completion.WaitGroup) (RedirectImplementation, error) {
+func (p *dnsProxyIntegration) createRedirect(redirect Redirect) (RedirectImplementation, error) {
 	dr := &dnsRedirect{
-		redirect:         r,
+		Redirect:         redirect,
 		proxyRuleUpdater: DefaultDNSProxy,
 	}
 
-	log.WithFields(logrus.Fields{
-		"dnsRedirect": dr,
-	}).Debug("Creating DNS Proxy redirect")
-
-	return dr, dr.setRules(nil, r.rules)
+	return dr, nil
 }
 
 func (p *dnsProxyIntegration) changeLogLevel(level logrus.Level) error {
 	return nil
-}
-
-func copyRules(rules policy.L7DataMap) policy.L7DataMap {
-	currentRules := policy.L7DataMap{}
-	for key, val := range rules {
-		currentRules[key] = val
-	}
-	return currentRules
 }

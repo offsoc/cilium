@@ -185,7 +185,6 @@ do_decrypt(struct __ctx_buff *ctx, __u16 proto)
 
 		if (!node_id)
 			return send_drop_notify_error(ctx, UNKNOWN_ID, DROP_NO_NODE_ID,
-						      CTX_ACT_DROP,
 						      METRIC_INGRESS);
 		set_ipsec_decrypt_mark(ctx, node_id);
 
@@ -201,8 +200,8 @@ do_decrypt(struct __ctx_buff *ctx, __u16 proto)
 #ifdef ENABLE_ENDPOINT_ROUTES
 	return CTX_ACT_OK;
 #else
-	return ctx_redirect(ctx, CILIUM_IFINDEX, 0);
-#endif /* ENABLE_ROUTING */
+	return ctx_redirect(ctx, CILIUM_HOST_IFINDEX, 0);
+#endif /* ENABLE_ENDPOINT_ROUTES */
 }
 
 #if defined(ENABLE_ENCRYPTED_OVERLAY)

@@ -62,7 +62,7 @@ func (s *ClusterMeshServicesTestSuite) prepareServiceUpdate(tb testing.TB, clust
 }
 
 type ClusterMeshServicesTestSuite struct {
-	svcCache   *k8s.ServiceCache
+	svcCache   *k8s.ServiceCacheImpl
 	mesh       *ClusterMesh
 	randomName string
 }
@@ -151,7 +151,7 @@ func (s *ClusterMeshServicesTestSuite) expectEvent(t *testing.T, action k8s.Cach
 	require.EventuallyWithT(t, func(c *assert.CollectT) {
 		var event k8s.ServiceEvent
 		select {
-		case event = <-s.svcCache.Events:
+		case event = <-s.svcCache.Events():
 		case <-time.After(defaults.NodeDeleteDelay + timeout):
 			c.Errorf("Timeout while waiting for event to be received")
 		}
@@ -311,7 +311,7 @@ func TestClusterMeshServicesUpdate(t *testing.T) {
 
 	require.NoError(t, kvstore.Client().DeletePrefix(context.TODO(), "cilium/state/services/v1/"+s.randomName+"2"))
 	s.expectEvent(t, k8s.DeleteService, svcID, func(c *assert.CollectT, event k8s.ServiceEvent) {
-		assert.Contains(c, event.OldEndpoints.Backends, cmtypes.MustParseAddrCluster("90.0.185.196"))
+		assert.Empty(c, event.Endpoints.Backends)
 	})
 
 	swgSvcs.Stop()
@@ -343,7 +343,7 @@ func TestClusterMeshServicesNonGlobal(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 	select {
-	case event := <-s.svcCache.Events:
+	case event := <-s.svcCache.Events():
 		t.Errorf("Unexpected service event received: %+v", event)
 	default:
 	}

@@ -83,7 +83,7 @@ const (
 	AllowLocalhostPolicy = "policy"
 
 	// AnnotateK8sNode enables annotating a kubernetes node while bootstrapping
-	// the daemon, which can also be disbled using this option.
+	// the daemon, which can also be disabled using this option.
 	AnnotateK8sNode = "annotate-k8s-node"
 
 	// ARPPingRefreshPeriod is the ARP entries refresher period
@@ -159,6 +159,9 @@ const (
 	// GopsPort is the TCP port for the gops server.
 	GopsPort = "gops-port"
 
+	// EnableGops run the gops server
+	EnableGops = "enable-gops"
+
 	// FixedIdentityMapping is the key-value for the fixed identity mapping
 	// which allows to use reserved label for fixed identities
 	FixedIdentityMapping = "fixed-identity-mapping"
@@ -189,10 +192,6 @@ const (
 	// K8sRequireIPv6PodCIDRName is the name of the K8sRequireIPv6PodCIDR option
 	K8sRequireIPv6PodCIDRName = "k8s-require-ipv6-pod-cidr"
 
-	// K8sWatcherEndpointSelector specifies the k8s endpoints that Cilium
-	// should watch for.
-	K8sWatcherEndpointSelector = "k8s-watcher-endpoint-selector"
-
 	// EnableK8s operation of Kubernetes-related services/controllers.
 	// Intended for operating cilium with CNI-compatible orchestrators other than Kubernetes. (default is true)
 	EnableK8s = "enable-k8s"
@@ -205,13 +204,6 @@ const (
 
 	// K8sServiceCacheSize is service cache size for cilium k8s package.
 	K8sServiceCacheSize = "k8s-service-cache-size"
-
-	// K8sServiceDebounceBufferSize is the maximum number of service events to buffer.
-	K8sServiceDebounceBufferSize = "k8s-service-debounce-buffer-size"
-
-	// K8sServiceDebounceBufferWaitTime is the amount of time to wait before emitting
-	// the service event buffer.
-	K8sServiceDebounceWaitTime = "k8s-service-debounce-wait-time"
 
 	// K8sSyncTimeout is the timeout since last event was received to synchronize all resources with k8s.
 	K8sSyncTimeoutName = "k8s-sync-timeout"
@@ -280,12 +272,18 @@ const (
 	// Alias to NodePortAlg
 	LoadBalancerAlgorithm = "bpf-lb-algorithm"
 
+	// LoadBalancerNat46X64 enables NAT46 and NAT64 for services
+	LoadBalancerNat46X64 = "bpf-lb-nat46x64"
+
 	// LoadBalancerAlgorithmAnnotation tells whether controller should check service
 	// level annotation for configuring bpf loadbalancing algorithm.
 	LoadBalancerAlgorithmAnnotation = "bpf-lb-algorithm-annotation"
 
 	// Alias to NodePortAcceleration
 	LoadBalancerAcceleration = "bpf-lb-acceleration"
+
+	// LoadBalancerIPIPSockMark enables sock-lb logic to force service traffic via IPIP
+	LoadBalancerIPIPSockMark = "bpf-lb-ipip-sock-mark"
 
 	// LoadBalancerExternalControlPlane switch skips connectivity to kube-apiserver
 	// which is relevant in lb-only mode
@@ -316,11 +314,6 @@ const (
 	// local traffic. This may be disabled if chaining modes and Cilium use
 	// conflicting marks.
 	EnableIdentityMark = "enable-identity-mark"
-
-	// EnableHighScaleIPcache enables the special ipcache mode for high scale
-	// clusters. The ipcache content will be reduced to the strict minimum and
-	// traffic will be encapsulated to carry security identities.
-	EnableHighScaleIPcache = "enable-high-scale-ipcache"
 
 	// AddressScopeMax controls the maximum address scope for addresses to be
 	// considered local ones with HOST_ID in the ipcache
@@ -674,9 +667,6 @@ const (
 	// AgentNotReadyNodeTaintKey
 	AgentNotReadyNodeTaintKeyName = "agent-not-ready-taint-key"
 
-	// JoinClusterName is the name of the JoinCluster Option
-	JoinClusterName = "join-cluster"
-
 	// EnableIPv4Name is the name of the option to enable IPv4 support
 	EnableIPv4Name = "enable-ipv4"
 
@@ -783,6 +773,9 @@ const (
 
 	// EnableWireguard is the name of the option to enable WireGuard
 	EnableWireguard = "enable-wireguard"
+
+	// WireguardTrackAllIPsFallback forces the WireGuard agent to track all IPs.
+	WireguardTrackAllIPsFallback = "wireguard-track-all-ips-fallback"
 
 	// EnableL2Announcements is the name of the option to enable l2 announcements
 	EnableL2Announcements = "enable-l2-announcements"
@@ -972,11 +965,6 @@ const (
 	// the allocation prefix of the local node.
 	EnableLocalNodeRoute = "enable-local-node-route"
 
-	// EnableWellKnownIdentities enables the use of well-known identities.
-	// This is requires if identiy resolution is required to bring up the
-	// control plane, e.g. when using the managed etcd feature
-	EnableWellKnownIdentities = "enable-well-known-identities"
-
 	// PolicyAuditModeArg argument enables policy audit mode.
 	PolicyAuditModeArg = "policy-audit-mode"
 
@@ -1157,6 +1145,9 @@ const (
 	// EnableEndpointLockdownOnPolicyOverflow enables endpoint lockdown when an endpoint's
 	// policy map overflows.
 	EnableEndpointLockdownOnPolicyOverflow = "enable-endpoint-lockdown-on-policy-overflow"
+
+	// ConnectivityProbeFrequencyRatio is the name of the option to specify the connectivity probe frequency
+	ConnectivityProbeFrequencyRatio = "connectivity-probe-frequency-ratio"
 )
 
 // Default string arguments
@@ -1205,8 +1196,8 @@ const (
 	// EnableCiliumEndpointSlice enables the cilium endpoint slicing feature.
 	EnableCiliumEndpointSlice = "enable-cilium-endpoint-slice"
 
-	// EnableExternalWorkloads enables the support for external workloads.
-	EnableExternalWorkloads = "enable-external-workloads"
+	// IdentityManagementMode controls whether CiliumIdentities are managed by cilium-agent, cilium-operator, or both.
+	IdentityManagementMode = "identity-management-mode"
 
 	// EnableSourceIPVerification enables the source ip verification, defaults to true
 	EnableSourceIPVerification = "enable-source-ip-verification"
@@ -1271,6 +1262,16 @@ const (
 
 	// PprofPortAgent is the default value for pprof in the agent
 	PprofPortAgent = 6060
+
+	// IdentityManagementModeAgent means cilium-agent is solely responsible for managing CiliumIdentity.
+	IdentityManagementModeAgent = "agent"
+
+	// IdentityManagementModeOperator means cilium-operator is solely responsible for managing CiliumIdentity.
+	IdentityManagementModeOperator = "operator"
+
+	// IdentityManagementModeBoth means cilium-agent and cilium-operator both manage identities
+	// (used only during migration between "agent" and "operator").
+	IdentityManagementModeBoth = "both"
 )
 
 // getEnvName returns the environment variable to be used for the given option name.
@@ -1413,13 +1414,6 @@ type DaemonConfig struct {
 	// K8sServiceCacheSize is the service cache size for cilium k8s package.
 	K8sServiceCacheSize uint
 
-	// Number of distinct services to buffer at most.
-	K8sServiceDebounceBufferSize int
-
-	// The amount of time to wait to debounce service events before
-	// emitting the buffer.
-	K8sServiceDebounceWaitTime time.Duration
-
 	// MTU is the maximum transmission unit of the underlying network
 	MTU int
 
@@ -1530,10 +1524,6 @@ type DaemonConfig struct {
 	// pods.
 	AgentNotReadyNodeTaintKey string
 
-	// JoinCluster is 'true' if the agent should join a Cilium cluster via kvstore
-	// registration
-	JoinCluster bool
-
 	// EnableIPv4 is true when IPv4 is enabled
 	EnableIPv4 bool
 
@@ -1589,6 +1579,9 @@ type DaemonConfig struct {
 
 	// EnableEncryptionStrictMode enables strict mode for encryption
 	EnableEncryptionStrictMode bool
+
+	// WireguardTrackAllIPsFallback forces the WireGuard agent to track all IPs.
+	WireguardTrackAllIPsFallback bool
 
 	// EncryptionStrictModeCIDR is the CIDR to use for strict mode
 	EncryptionStrictModeCIDR netip.Prefix
@@ -1650,7 +1643,6 @@ type DaemonConfig struct {
 	IPv6ServiceRange              string
 	K8sSyncTimeout                time.Duration
 	AllocatorListTimeout          time.Duration
-	K8sWatcherEndpointSelector    string
 	KVStore                       string
 	KVStoreOpt                    map[string]string
 	LabelPrefixFile               string
@@ -1793,11 +1785,6 @@ type DaemonConfig struct {
 	// is marked as healthy.
 	HealthCheckICMPFailureThreshold int
 
-	// KVstoreKeepAliveInterval is the interval in which the lease is being
-	// renewed. This must be set to a value lesser than the LeaseTTL ideally
-	// by a factor of 3.
-	KVstoreKeepAliveInterval time.Duration
-
 	// KVstoreLeaseTTL is the time-to-live for kvstore lease.
 	KVstoreLeaseTTL time.Duration
 
@@ -1886,6 +1873,9 @@ type DaemonConfig struct {
 	// LoadBalancerModeAnnotation tells whether controller should check service
 	// level annotation for configuring bpf load balancing algorithm.
 	LoadBalancerModeAnnotation bool
+
+	// LoadBalancerIPIPSockMark enables sock-lb logic to force service traffic via IPIP
+	LoadBalancerIPIPSockMark bool
 
 	// NodePortAlg indicates which backend selection algorithm is used
 	// ("random" or "maglev")
@@ -1976,11 +1966,6 @@ type DaemonConfig struct {
 	// conflicting marks.
 	EnableIdentityMark bool
 
-	// EnableHighScaleIPcache enables the special ipcache mode for high scale
-	// clusters. The ipcache content will be reduced to the strict minimum and
-	// traffic will be encapsulated to carry security identities.
-	EnableHighScaleIPcache bool
-
 	// KernelHz is the HZ rate the kernel is operating in
 	KernelHz int
 
@@ -2030,11 +2015,6 @@ type DaemonConfig struct {
 	// AllowICMPFragNeeded allows ICMP Fragmentation Needed type packets in
 	// the network policy for cilium-agent.
 	AllowICMPFragNeeded bool
-
-	// EnableWellKnownIdentities enables the use of well-known identities.
-	// This is requires if identiy resolution is required to bring up the
-	// control plane, e.g. when using the managed etcd feature
-	EnableWellKnownIdentities bool
 
 	// Azure options
 
@@ -2270,6 +2250,9 @@ type DaemonConfig struct {
 	// EnableEndpointLockdownOnPolicyOverflow enables endpoint lockdown when an endpoint's
 	// policy map overflows.
 	EnableEndpointLockdownOnPolicyOverflow bool
+
+	// ConnectivityProbeFrequencyRatio is the ratio of the connectivity probe frequency vs resource consumption
+	ConnectivityProbeFrequencyRatio float64
 }
 
 var (
@@ -2308,7 +2291,6 @@ var (
 		AutoCreateCiliumNodeResource:    defaults.AutoCreateCiliumNodeResource,
 		IdentityAllocationMode:          IdentityAllocationModeKVstore,
 		AllowICMPFragNeeded:             defaults.AllowICMPFragNeeded,
-		EnableWellKnownIdentities:       defaults.EnableWellKnownIdentities,
 		AllocatorListTimeout:            defaults.AllocatorListTimeout,
 		EnableICMPRules:                 defaults.EnableICMPRules,
 		UseCiliumInternalIPForIPsec:     defaults.UseCiliumInternalIPForIPsec,
@@ -2334,6 +2316,8 @@ var (
 		EnableNonDefaultDenyPolicies: defaults.EnableNonDefaultDenyPolicies,
 
 		EnableSourceIPVerification: defaults.EnableSourceIPVerification,
+
+		ConnectivityProbeFrequencyRatio: defaults.ConnectivityProbeFrequencyRatio,
 	}
 )
 
@@ -2394,18 +2378,36 @@ func (c *DaemonConfig) TunnelingEnabled() bool {
 // devices to implement some features.
 func (c *DaemonConfig) AreDevicesRequired() bool {
 	return c.EnableNodePort || c.EnableHostFirewall || c.EnableWireguard ||
-		c.EnableHighScaleIPcache || c.EnableL2Announcements || c.ForceDeviceRequired ||
-		c.EnableIPSecEncryptedOverlay
+		c.EnableL2Announcements || c.ForceDeviceRequired || c.EnableIPSecEncryptedOverlay
 }
 
-// When WG & encrypt-node are on, a NodePort BPF to-be forwarded request
-// to a remote node running a selected service endpoint must be encrypted.
-// To make the NodePort's rev-{S,D}NAT translations to happen for a reply
-// from the remote node, we need to attach bpf_host to the Cilium's WG
-// netdev (otherwise, the WG netdev after decrypting the reply will pass
-// it to the stack which drops the packet).
+// NeedBPFHostOnWireGuardDevice returns true if the agent needs to attach
+// a BPF program on the Ingress of Cilium's WireGuard device
 func (c *DaemonConfig) NeedBPFHostOnWireGuardDevice() bool {
-	return c.EnableNodePort && c.EnableWireguard && c.EncryptNode
+	if !c.EnableWireguard {
+		return false
+	}
+
+	// In native routing mode we want to deliver packets to local endpoints
+	// straight from BPF, without passing through the stack.
+	// This matches overlay mode (where bpf_overlay would handle the delivery)
+	// and native routing mode without encryption (where bpf_host at the native
+	// device would handle the delivery).
+	if !c.TunnelingEnabled() {
+		return true
+	}
+
+	// When WG & encrypt-node are on, a NodePort BPF to-be forwarded request
+	// to a remote node running a selected service endpoint must be encrypted.
+	// To make the NodePort's rev-{S,D}NAT translations to happen for a reply
+	// from the remote node, we need to attach bpf_host to the Cilium's WG
+	// netdev (otherwise, the WG netdev after decrypting the reply will pass
+	// it to the stack which drops the packet).
+	if c.EnableNodePort && c.EncryptNode {
+		return true
+	}
+
+	return false
 }
 
 // MasqueradingEnabled returns true if either IPv4 or IPv6 masquerading is enabled.
@@ -2843,12 +2845,12 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.IPv6MCastDevice = vp.GetString(IPv6MCastDevice)
 	c.EnableIPSec = vp.GetBool(EnableIPSecName)
 	c.EnableWireguard = vp.GetBool(EnableWireguard)
+	c.WireguardTrackAllIPsFallback = vp.GetBool(WireguardTrackAllIPsFallback)
 	c.EnableL2Announcements = vp.GetBool(EnableL2Announcements)
 	c.L2AnnouncerLeaseDuration = vp.GetDuration(L2AnnouncerLeaseDuration)
 	c.L2AnnouncerRenewDeadline = vp.GetDuration(L2AnnouncerRenewDeadline)
 	c.L2AnnouncerRetryPeriod = vp.GetDuration(L2AnnouncerRetryPeriod)
 	c.WireguardPersistentKeepalive = vp.GetDuration(WireguardPersistentKeepalive)
-	c.EnableWellKnownIdentities = vp.GetBool(EnableWellKnownIdentities)
 	c.EnableXDPPrefilter = vp.GetBool(EnableXDPPrefilter)
 	c.EnableTCX = vp.GetBool(EnableTCX)
 	c.DisableCiliumEndpointCRD = vp.GetBool(DisableCiliumEndpointCRDName)
@@ -2878,6 +2880,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.EnableHostPort = vp.GetBool(EnableHostPort)
 	c.EnableHostLegacyRouting = vp.GetBool(EnableHostLegacyRouting)
 	c.NodePortBindProtection = vp.GetBool(NodePortBindProtection)
+	c.NodePortNat46X64 = vp.GetBool(LoadBalancerNat46X64)
 	c.EnableAutoProtectNodePortRange = vp.GetBool(EnableAutoProtectNodePortRange)
 	c.KubeProxyReplacement = vp.GetString(KubeProxyReplacement)
 	c.EnableSessionAffinity = vp.GetBool(EnableSessionAffinity)
@@ -2899,19 +2902,14 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.IPv6NodeAddr = vp.GetString(IPv6NodeAddr)
 	c.IPv6Range = vp.GetString(IPv6Range)
 	c.IPv6ServiceRange = vp.GetString(IPv6ServiceRange)
-	c.JoinCluster = vp.GetBool(JoinClusterName)
 	c.K8sRequireIPv4PodCIDR = vp.GetBool(K8sRequireIPv4PodCIDRName)
 	c.K8sRequireIPv6PodCIDR = vp.GetBool(K8sRequireIPv6PodCIDRName)
 	c.K8sServiceCacheSize = uint(vp.GetInt(K8sServiceCacheSize))
-	c.K8sServiceDebounceBufferSize = vp.GetInt(K8sServiceDebounceBufferSize)
-	c.K8sServiceDebounceWaitTime = vp.GetDuration(K8sServiceDebounceWaitTime)
 	c.K8sSyncTimeout = vp.GetDuration(K8sSyncTimeoutName)
 	c.AllocatorListTimeout = vp.GetDuration(AllocatorListTimeoutName)
-	c.K8sWatcherEndpointSelector = vp.GetString(K8sWatcherEndpointSelector)
 	c.KeepConfig = vp.GetBool(KeepConfig)
 	c.KVStore = vp.GetString(KVStore)
 	c.KVstoreLeaseTTL = vp.GetDuration(KVstoreLeaseTTL)
-	c.KVstoreKeepAliveInterval = c.KVstoreLeaseTTL / defaults.KVstoreKeepAliveIntervalFactor
 	c.KVstorePeriodicSync = vp.GetDuration(KVstorePeriodicSync)
 	c.KVstoreConnectivityTimeout = vp.GetDuration(KVstoreConnectivityTimeout)
 	c.KVstorePodNetworkSupport = vp.GetBool(KVstorePodNetworkSupport)
@@ -2961,13 +2959,13 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.LoadBalancerDSRDispatch = vp.GetString(LoadBalancerDSRDispatch)
 	c.LoadBalancerRSSv4CIDR = vp.GetString(LoadBalancerRSSv4CIDR)
 	c.LoadBalancerRSSv6CIDR = vp.GetString(LoadBalancerRSSv6CIDR)
+	c.LoadBalancerIPIPSockMark = vp.GetBool(LoadBalancerIPIPSockMark)
 	c.InstallNoConntrackIptRules = vp.GetBool(InstallNoConntrackIptRules)
 	c.ContainerIPLocalReservedPorts = vp.GetString(ContainerIPLocalReservedPorts)
 	c.EnableCustomCalls = vp.GetBool(EnableCustomCallsName)
 	c.BGPSecretsNamespace = vp.GetString(BGPSecretsNamespace)
 	c.ExternalClusterIP = vp.GetBool(ExternalClusterIPName)
 	c.EnableNat46X64Gateway = vp.GetBool(EnableNat46X64Gateway)
-	c.EnableHighScaleIPcache = vp.GetBool(EnableHighScaleIPcache)
 	c.EnableIPv4Masquerade = vp.GetBool(EnableIPv4Masquerade) && c.EnableIPv4
 	c.EnableIPv6Masquerade = vp.GetBool(EnableIPv6Masquerade) && c.EnableIPv6
 	c.EnableBPFMasquerade = vp.GetBool(EnableBPFMasquerade)
@@ -3026,10 +3024,10 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 		c.AddressScopeMax = defaults.AddressScopeMax
 	}
 
-	if c.EnableNat46X64Gateway {
+	if c.EnableNat46X64Gateway || c.NodePortNat46X64 {
 		if !c.EnableIPv4 || !c.EnableIPv6 {
-			log.Fatalf("--%s requires both --%s and --%s enabled",
-				EnableNat46X64Gateway, EnableIPv4Name, EnableIPv6Name)
+			log.Fatalf("NAT46/NAT64 requires both --%s and --%s enabled",
+				EnableIPv4Name, EnableIPv6Name)
 		}
 	}
 
@@ -3328,10 +3326,17 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	}
 
 	c.LoadBalancerProtocolDifferentiation = vp.GetBool(LoadBalancerProtocolDifferentiation)
-
 	c.EnableInternalTrafficPolicy = vp.GetBool(EnableInternalTrafficPolicy)
-
 	c.EnableSourceIPVerification = vp.GetBool(EnableSourceIPVerification)
+
+	// Allow the range [0.0, 1.0].
+	connectivityFreqRatio := vp.GetFloat64(ConnectivityProbeFrequencyRatio)
+	if 0.0 <= connectivityFreqRatio && connectivityFreqRatio <= 1.0 {
+		c.ConnectivityProbeFrequencyRatio = connectivityFreqRatio
+	} else {
+		log.Warningf("specified connectivity probe frequency ratio %f must be in the range [0.0, 1.0], using default", connectivityFreqRatio)
+		c.ConnectivityProbeFrequencyRatio = defaults.ConnectivityProbeFrequencyRatio
+	}
 }
 
 func (c *DaemonConfig) populateLoadBalancerSettings(vp *viper.Viper) {
@@ -3804,6 +3809,7 @@ func (c *DaemonConfig) checksum() [32]byte {
 	sumConfig := *c
 	// Ignore variable parts
 	sumConfig.Opts = nil
+	sumConfig.EncryptInterface = nil
 	cBytes, err := json.Marshal(&sumConfig)
 	if err != nil {
 		return [32]byte{}
@@ -3859,7 +3865,8 @@ func (c *DaemonConfig) diffFromFile() error {
 
 		diff = cmp.Diff(&config, c, opts,
 			cmpopts.IgnoreTypes(&IntOptions{}),
-			cmpopts.IgnoreTypes(&OptionLibrary{}))
+			cmpopts.IgnoreTypes(&OptionLibrary{}),
+			cmpopts.IgnoreFields(DaemonConfig{}, "EncryptInterface"))
 	}
 	return fmt.Errorf("Config differs:\n%s", diff)
 }

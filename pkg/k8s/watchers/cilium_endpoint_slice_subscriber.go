@@ -124,18 +124,13 @@ func (cs *cesSubscriber) OnDelete(ces *cilium_v2a1.CiliumEndpointSlice) {
 	}
 }
 
-// OnDelete calls endpointDeleted for CEPs from remote Nodes.
+// onDelete calls endpointDeleted for CEPs removed from a CES
 func (cs *cesSubscriber) onDelete(ces *cilium_v2a1.CiliumEndpointSlice, cep *types.CiliumEndpoint) {
 	CEPName := cep.Namespace + "/" + cep.Name
 	log.WithFields(logrus.Fields{
 		"CESName": ces.GetName(),
 		"CEPName": CEPName,
 	}).Debug("CES deleted, calling endpointDeleted")
-	// LocalNode already deleted the CEP.
-	// Hence, skip processing endpointDeleted for localNode CEPs.
-	if p := cs.epCache.LookupCEPName(k8sUtils.GetObjNamespaceName(cep)); p != nil {
-		return
-	}
 	// Delete CEP if and only if that CEP is owned by a CES, that was used during CES updated.
 	// Delete CEP only if there is match in CEPToCES map and also delete CEPName in CEPToCES map.
 	cs.deleteCEPfromCES(CEPName, ces.GetName(), cep)
@@ -157,13 +152,13 @@ func (cs *cesSubscriber) deleteCEPfromCES(CEPName, CESName string, c *types.Cili
 		log.WithFields(logrus.Fields{
 			"CESName": CESName,
 			"CEPName": CEPName,
-		}).Info("CEP deleted, calling endpointDeleted")
+		}).Debug("CEP deleted, calling endpointDeleted")
 		cs.epWatcher.endpointDeleted(c)
 	} else {
 		log.WithFields(logrus.Fields{
 			"CESName": CESName,
 			"CEPName": CEPName,
-		}).Info("CEP deleted, other CEP exists, calling endpointUpdated")
+		}).Debug("CEP deleted, other CEP exists, calling endpointUpdated")
 		cs.epWatcher.endpointUpdated(c, cep)
 	}
 }

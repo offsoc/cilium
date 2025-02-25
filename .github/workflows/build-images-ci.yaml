@@ -26,7 +26,9 @@ jobs:
   build-and-push-prs:
     timeout-minutes: 45
     name: Build and Push Images
-    runs-on: ${{ vars.GH_RUNNER_EXTRA_POWER_UBUNTU_LATEST || 'ubuntu-latest' }}
+    runs-on: ${{ vars.GH_RUNNER_EXTRA_POWER_UBUNTU_LATEST || 'ubuntu-24.04' }}
+    outputs:
+      sha: ${{ steps.tag.outputs.sha }}
     strategy:
       matrix:
         include:
@@ -74,11 +76,16 @@ jobs:
           persist-credentials: false
 
       - name: Cleanup Disk space in runner
-        if: runner.name == 'ubuntu-latest'
+        if: runner.name == 'ubuntu-24.04'
         uses: ./.github/actions/disk-cleanup
 
       - name: Set Environment Variables
         uses: ./.github/actions/set-env-variables
+
+      - name: Copy scripts to trusted directory
+        run: |
+          mkdir -p ../cilium-base-branch
+          cp -r .github/actions/set-runtime-image ../cilium-base-branch
 
       - name: Setup docker volumes into /mnt
         # This allows us to make use of all available disk.
@@ -90,7 +97,7 @@ jobs:
           sudo systemctl start docker
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@c47758b77c9736f4b2ef4073d4d51994fabfe349 # v3.7.1
+        uses: docker/setup-buildx-action@f7ce87c1d6bead3e36075b2ce75da1f6cc28aaca # v3.9.0
         # Disable GC entirely to avoid buildkit from GC caches.
         with:
           buildkitd-config-inline: |
@@ -108,15 +115,25 @@ jobs:
         id: tag
         run: |
           if [ "${{ github.event.pull_request.head.sha }}" != "" ]; then
-            tag=${{ github.event.pull_request.head.sha }}
+            sha=${{ github.event.pull_request.head.sha }}
           else
-            tag=${{ github.sha }}
+            sha=${{ github.sha }}
           fi
-          if [[ "${{ github.event_name == 'push' }}" == "true" && "${{ github.ref_name }}" == "${{ github.event.repository.default_branch }}" ]]; then
-            floating_tag=latest
+          echo sha=${sha} >> $GITHUB_OUTPUT
+
+          tag=${sha}
+          echo tag=${tag} >> $GITHUB_OUTPUT
+
+          if [[ "${{ github.event_name == 'push' }}" == "true" ]]; then
+            if [[ "${{ github.ref_name }}" == "${{ github.event.repository.default_branch }}" ]]; then
+              floating_tag=latest
+            else
+              floating_tag="${{ github.ref_name }}"
+              # Remove slashes from branch names
+              floating_tag=${floating_tag##*/}
+            fi
             echo floating_tag=${floating_tag} >> $GITHUB_OUTPUT
           fi
-          echo tag=${tag} >> $GITHUB_OUTPUT
 
           normal_tag="quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/${{ matrix.name }}-ci:${tag}"
           race_tag="${normal_tag}-race"
@@ -142,12 +159,21 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           persist-credentials: false
-          ref: ${{ steps.tag.outputs.tag }}
+          ref: ${{ steps.tag.outputs.sha }}
 
       - name: Check for disk usage
         shell: bash
         run: |
           df -h
+
+      - name: Copy runtime image tag from untrusted branch
+        run: |
+          cp -r .github/actions/set-runtime-image/runtime-image.txt ../cilium-base-branch/set-runtime-image/
+
+      - name: Set runtime image environment variable
+        uses: ./../cilium-base-branch/set-runtime-image
+        with:
+          repository: ${{ env.CILIUM_RUNTIME_IMAGE_PREFIX }}
 
       # Load Golang cache build from GitHub
       - name: Restore Golang cache build from GitHub
@@ -173,7 +199,7 @@ jobs:
 
       # Import GitHub's cache build to docker cache
       - name: Copy ${{ matrix.name }} Golang cache to docker cache
-        uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
+        uses: docker/build-push-action@ca877d9245402d1537745e0e356eab47c3520991 # v6.13.0
         with:
           provenance: false
           context: /tmp/.cache/go
@@ -189,10 +215,10 @@ jobs:
           docker buildx du
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@dc72c7d5c4d10cd6bcb8cf6e3fd625a9e5e537da # v3.7.0
+        uses: sigstore/cosign-installer@c56c2d3e59e4281cc41dea2217323ba5694b171e # v3.8.0
 
       - name: CI Build ${{ matrix.name }}
-        uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
+        uses: docker/build-push-action@ca877d9245402d1537745e0e356eab47c3520991 # v6.13.0
         id: docker_build_ci
         with:
           provenance: false
@@ -203,10 +229,11 @@ jobs:
           tags: ${{ steps.tag.outputs.normal_tag }}
           target: release
           build-args: |
+            CILIUM_RUNTIME_IMAGE=${{ env.CILIUM_RUNTIME_IMAGE }}
             OPERATOR_VARIANT=${{ matrix.name }}
 
       - name: CI race detection Build ${{ matrix.name }}
-        uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
+        uses: docker/build-push-action@ca877d9245402d1537745e0e356eab47c3520991 # v6.13.0
         id: docker_build_ci_detect_race_condition
         with:
           provenance: false
@@ -217,12 +244,13 @@ jobs:
           tags: ${{ steps.tag.outputs.race_tag }}
           target: release
           build-args: |
-            BASE_IMAGE=quay.io/cilium/cilium-runtime:ce95aa5782dcc3e841c09cc619a685e2538f7714@sha256:5aa8e44d5087eee42faf276441f555a750e9a5774ccae264198609810275cd24
+            BASE_IMAGE=${{ env.CILIUM_RUNTIME_IMAGE }}
+            CILIUM_RUNTIME_IMAGE=${{ env.CILIUM_RUNTIME_IMAGE }}
             MODIFIERS="LOCKDEBUG=1 RACE=1"
             OPERATOR_VARIANT=${{ matrix.name }}
 
       - name: CI Unstripped Binaries Build ${{ matrix.name }}
-        uses: docker/build-push-action@48aba3b46d1b1fec4febb7c5d0c644b249a11355 # v6.10.0
+        uses: docker/build-push-action@ca877d9245402d1537745e0e356eab47c3520991 # v6.13.0
         id: docker_build_ci_unstripped
         with:
           provenance: false
@@ -233,6 +261,7 @@ jobs:
           tags: ${{ steps.tag.outputs.unstripped_tag }}
           target: release
           build-args: |
+            CILIUM_RUNTIME_IMAGE=${{ env.CILIUM_RUNTIME_IMAGE }}
             MODIFIERS="NOSTRIP=1"
             OPERATOR_VARIANT=${{ matrix.name }}
 
@@ -244,7 +273,7 @@ jobs:
 
       - name: Generate SBOM
         if: ${{ matrix.name != 'cilium-cli' }}
-        uses: anchore/sbom-action@df80a981bc6edbc4e220a492d3cbe9f5547a6e75 # v0.17.9
+        uses: anchore/sbom-action@f325610c9f50a54015d37c8d16cb3b0e2c8f4de0 # v0.18.0
         with:
           artifact-name: sbom_ci_${{ matrix.name }}_${{ steps.tag.outputs.tag }}.spdx.json
           output-file: ./sbom_ci_${{ matrix.name }}_${{ steps.tag.outputs.tag }}.spdx.json
@@ -252,7 +281,7 @@ jobs:
 
       - name: Generate SBOM (race)
         if: ${{ matrix.name != 'cilium-cli' }}
-        uses: anchore/sbom-action@df80a981bc6edbc4e220a492d3cbe9f5547a6e75 # v0.17.9
+        uses: anchore/sbom-action@f325610c9f50a54015d37c8d16cb3b0e2c8f4de0 # v0.18.0
         with:
           artifact-name: sbom_ci_race_${{ matrix.name }}_${{ steps.tag.outputs.tag }}.spdx.json
           output-file: ./sbom_ci_race_${{ matrix.name }}_${{ steps.tag.outputs.tag }}.spdx.json
@@ -260,7 +289,7 @@ jobs:
 
       - name: Generate SBOM (unstripped)
         if: ${{ matrix.name != 'cilium-cli' }}
-        uses: anchore/sbom-action@df80a981bc6edbc4e220a492d3cbe9f5547a6e75 # v0.17.9
+        uses: anchore/sbom-action@f325610c9f50a54015d37c8d16cb3b0e2c8f4de0 # v0.18.0
         with:
           artifact-name: sbom_ci_unstripped_${{ matrix.name }}_${{ steps.tag.outputs.tag }}.spdx.json
           output-file: ./sbom_ci_unstripped_${{ matrix.name }}_${{ steps.tag.outputs.tag }}.spdx.json
@@ -288,7 +317,7 @@ jobs:
 
       # Upload artifact digests
       - name: Upload artifact digests
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: image-digest ${{ matrix.name }}
           path: image-digest
@@ -322,3 +351,16 @@ jobs:
         run: |
           cd image-digest/
           find -type f | sort | xargs -d '\n' cat
+
+  push-chart:
+    name: Push dev chart
+    needs: build-and-push-prs
+    permissions:
+      contents: read
+      pull-requests: read
+      statuses: write
+    uses: ./.github/workflows/push-chart-ci.yaml
+    with:
+      checkout_ref: ${{ needs.build-and-push-prs.outputs.sha }}
+      image_tag: ${{ needs.build-and-push-prs.outputs.sha }}
+    secrets: inherit

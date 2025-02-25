@@ -28,16 +28,11 @@ var (
 	kvs store.SyncStore
 )
 
-func k8sServiceHandler(ctx context.Context, cinfo cmtypes.ClusterInfo, shared bool, logger *slog.Logger) {
+func k8sServiceHandler(ctx context.Context, cinfo cmtypes.ClusterInfo, logger *slog.Logger) {
 	serviceHandler := func(event k8s.ServiceEvent) {
 		defer event.SWGDone()
 
-		var svc serviceStore.ClusterService
-		if event.Action == k8s.UpdateService {
-			svc = k8s.NewClusterService(event.ID, event.Service, event.Endpoints)
-		} else if event.Action == k8s.DeleteService {
-			svc = k8s.NewClusterService(event.ID, event.OldService, event.OldEndpoints)
-		}
+		svc := k8s.NewClusterService(event.ID, event.Service, event.Endpoints)
 		svc.Cluster = cinfo.Name
 		svc.ClusterID = cinfo.ID
 
@@ -47,12 +42,10 @@ func k8sServiceHandler(ctx context.Context, cinfo cmtypes.ClusterInfo, shared bo
 			"action", event.Action,
 			"service", event.Service,
 			"endpoints", event.Endpoints,
-			"old-service", event.OldService,
-			"old-endpoints", event.OldEndpoints,
-			"shared", svc.Shared,
+			"shared", event.Service.Shared,
 		)
 
-		if shared && !svc.Shared {
+		if !event.Service.Shared {
 			// The annotation may have been added, delete an eventual existing service
 			kvs.DeleteKey(ctx, &svc)
 			return
@@ -76,7 +69,7 @@ func k8sServiceHandler(ctx context.Context, cinfo cmtypes.ClusterInfo, shared bo
 	}
 	for {
 		select {
-		case event, ok := <-K8sSvcCache.Events:
+		case event, ok := <-K8sSvcCache.Events():
 			if !ok {
 				return
 			}
@@ -95,7 +88,6 @@ type ServiceSyncParameters struct {
 	Services     resource.Resource[*slim_corev1.Service]
 	Endpoints    resource.Resource[*k8s.Endpoints]
 	Backend      store.SyncStoreBackend
-	SharedOnly   bool
 	StoreFactory store.Factory
 	SyncCallback func(context.Context)
 }
@@ -132,7 +124,7 @@ func StartSynchronizingServices(ctx context.Context, wg *sync.WaitGroup, cfg Ser
 		<-kvstoreReady
 
 		log.Info("Starting to synchronize Kubernetes services to kvstore")
-		k8sServiceHandler(ctx, cfg.ClusterInfo, cfg.SharedOnly, logger)
+		k8sServiceHandler(ctx, cfg.ClusterInfo, logger)
 	}()
 
 	// Start populating the service cache with Kubernetes services and endpoints

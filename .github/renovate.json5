@@ -22,7 +22,7 @@
     ".github/actions/ginkgo/**",
     ".github/actions/lvh-kind/**",
     ".github/actions/set-env-variables/action.yml",
-    ".github/actions/ipsec/configs.yml",
+    ".github/actions/ipsec/configs.yaml",
     ".github/workflows/**",
     ".github/ISSUE_TEMPLATE/bug_report.yaml",
     "cilium-cli/**",
@@ -72,7 +72,6 @@
     "v1.17",
     "v1.16",
     "v1.15",
-    "v1.14",
   ],
   "vulnerabilityAlerts": {
     "enabled": true
@@ -122,6 +121,8 @@
         "github.com/prometheus/", // Prometheu's official org
         "go.etcd.io/etcd/", // etcd's official org
         "golang.org/x/", // Golang official experimental org
+        "golangci/golangci-lint", // Golang CI linter
+        "protocolbuffers/protobuf", // protobuf buffers
         "google.golang.org/", // Google official repo for api/genproto/grpc/protobuf
         "k8s.io/", // Kubernetes official repo
         "quay.io/cilium/", // LVH images
@@ -195,7 +196,6 @@
         "v1.17",
         "v1.16",
         "v1.15",
-        "v1.14",
       ]
     },
     {
@@ -211,7 +211,6 @@
         "v1.17",
         "v1.16",
         "v1.15",
-        "v1.14",
       ]
     },
     {
@@ -273,17 +272,6 @@
         "v1.17",
         "v1.16",
         "v1.15",
-        "v1.14",
-      ]
-    },
-    {
-      // Do not upgrade etcd as they have removed bash starting from v3.5.5
-      "matchDepNames": [
-        "quay.io/coreos/etcd"
-      ],
-      "allowedVersions": "<3.5.5",
-      "matchBaseBranches": [
-        "v1.14",
       ]
     },
     {
@@ -313,19 +301,6 @@
       "allowedVersions": "<1.10",
     },
     {
-      "matchFiles": [
-        "install/kubernetes/Makefile.values"
-      ],
-      "matchPackageNames": [
-        "ghcr.io/spiffe/spire-agent",
-        "ghcr.io/spiffe/spire-server"
-      ],
-      "matchBaseBranches": [
-        "v1.14"
-      ],
-      "allowedVersions": "<1.7",
-    },
-    {
       "matchPackageNames": [
         "docker.io/library/ubuntu"
       ],
@@ -343,7 +318,6 @@
       "matchBaseBranches": [
         "v1.16",
         "v1.15",
-        "v1.14",
       ],
     },
     {
@@ -354,18 +328,8 @@
       "allowedVersions": "<1.24",
       "matchBaseBranches": [
         "v1.17",
-      ]
-    },
-    {
-      "matchPackageNames": [
-        "docker.io/library/golang",
-        "go"
-      ],
-      "allowedVersions": "<1.23",
-      "matchBaseBranches": [
         "v1.16",
         "v1.15",
-        "v1.14",
       ]
     },
     {
@@ -381,15 +345,6 @@
     },
     {
       "matchPackageNames": [
-        "docker.io/library/alpine"
-      ],
-      "allowedVersions": "<3.19",
-      "matchBaseBranches": [
-        "v1.14"
-      ]
-    },
-    {
-      "matchPackageNames": [
         "quay.io/cilium/certgen",
       ],
       "allowedVersions": "<0.2.0",
@@ -397,7 +352,6 @@
         "v1.17",
         "v1.16",
         "v1.15",
-        "v1.14",
       ]
     },
     {
@@ -438,7 +392,6 @@
         "v1.17",
         "v1.16",
         "v1.15",
-        "v1.14"
       ]
     },
     {
@@ -474,7 +427,6 @@
         "v1.17",
         "v1.16",
         "v1.15",
-        "v1.14",
       ]
     },
     {
@@ -497,7 +449,6 @@
         "v1.17",
         "v1.16",
         "v1.15",
-        "v1.14",
       ],
     },
     {
@@ -618,11 +569,11 @@
         "quay.io/cilium/cilium-envoy"
       ],
       "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)-(?<revision>.*)$",
-      "allowedVersions": "/^v1\\.30\\.([0-9]+)-([0-9]+)-.*$/",
+      "allowedVersions": "/^v1\\.31\\.([0-9]+)-([0-9]+)-.*$/",
       "matchBaseBranches": [
+        "v1.17",
         "v1.16",
         "v1.15",
-        "v1.14",
       ]
     },
     {
@@ -630,9 +581,8 @@
         "quay.io/cilium/cilium-envoy"
       ],
       "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)-(?<revision>.*)$",
-      "allowedVersions": "/^v1\\.31\\.([0-9]+)-([0-9]+)-.*$/",
+      "allowedVersions": "/^v1\\.32\\.([0-9]+)-([0-9]+)-.*$/",
       "matchBaseBranches": [
-        "v1.17",
         "main",
       ]
     },
@@ -644,9 +594,13 @@
     },
     {
       "matchPackageNames": [
-        "github.com/aws/aws-sdk-go-v2/service/ec2",
         "github.com/aliyun/alibaba-cloud-sdk-go",
+        "github.com/aws/smithy-go",
         "renovatebot/github-action"
+      ],
+      "matchDepPatterns": [
+        "github.com/Azure/azure-sdk-for-go/sdk/*",
+        "github.com/aws/aws-sdk-go-v2*"
       ],
       "schedule": ["on the 1st day instance on sunday"]
     },
@@ -764,8 +718,8 @@
         "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+.+version: (?<currentValue>.*)",
         "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+.+_VERSION: (?<currentValue>.*)",
         "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+.+kernel: '(?<currentValue>.*)'",
-        '# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*)\\s+.+kernel: "(?<currentValue>.*)@(?<currentDigest>sha256:[a-f0-9]+)"',
-        '# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*)\\s+.+image-version: "(?<currentValue>.*)@(?<currentDigest>sha256:[a-f0-9]+)"',
+        '# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*)\\s+.+kernel: "(?<currentValue>.*)"',
+        '# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*)\\s+.+image-version: "(?<currentValue>.*)"',
         '# renovate: datasource=(?<datasource>.*?)\\s+.+kube-image: "(?<depName>.*):(?<currentValue>.*)@(?<currentDigest>sha256:[a-f0-9]+)"',
         '# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?) branch=(?<currentValue>.*?)\\s+.+_ref: (?<currentDigest>.*)'
       ]
@@ -788,6 +742,14 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>.*?) depName=(?<depName>.*?)\\s+.+_VERSION=\"(?<currentValue>.*)\"",
         "# renovate: datasource=(?<datasource>.*?)\\s+KIND_K8S_IMAGE=\"(?<depName>.*):(?<currentValue>.*)@(?<currentDigest>sha256:[a-f0-9]+)\""
+      ]
+    },
+    {
+      "fileMatch": [
+        "^.github/workflows/renovate-config-validator\\.yaml$"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>.*?)\\s+RENOVATE_IMAGE=\"(?<depName>.*):(?<currentValue>.*)@(?<currentDigest>sha256:[a-f0-9]+)\""
       ]
     },
     {

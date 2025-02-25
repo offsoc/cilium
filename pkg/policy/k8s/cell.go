@@ -53,7 +53,7 @@ type PolicyManager interface {
 }
 
 type serviceCache interface {
-	ForEachService(func(svcID k8s.ServiceID, svc *k8s.Service, eps *k8s.EndpointSlices) bool)
+	ForEachService(func(svcID k8s.ServiceID, svc *k8s.MinimalService, eps *k8s.MinimalEndpoints) bool)
 }
 
 type ipc interface {
@@ -73,7 +73,7 @@ type PolicyWatcherParams struct {
 	K8sResourceSynced *synced.Resources
 	K8sAPIGroups      *synced.APIGroups
 
-	ServiceCache   *k8s.ServiceCache
+	ServiceCache   k8s.ServiceCache
 	IPCache        *ipcache.IPCache
 	PolicyImporter policycell.PolicyImporter
 
@@ -93,7 +93,6 @@ func startK8sPolicyWatcher(params PolicyWatcherParams) {
 	// We want to subscribe before the start hook is invoked in order to not miss
 	// any events
 	ctx, cancel := context.WithCancel(context.Background())
-	svcCacheNotifications := serviceNotificationsQueue(ctx, params.ServiceCache.Notifications())
 
 	p := &policyWatcher{
 		log:                              params.Logger,
@@ -102,7 +101,6 @@ func startK8sPolicyWatcher(params PolicyWatcherParams) {
 		k8sResourceSynced:                params.K8sResourceSynced,
 		k8sAPIGroups:                     params.K8sAPIGroups,
 		svcCache:                         params.ServiceCache,
-		svcCacheNotifications:            svcCacheNotifications,
 		ipCache:                          params.IPCache,
 		ciliumNetworkPolicies:            params.CiliumNetworkPolicies,
 		ciliumClusterwideNetworkPolicies: params.CiliumClusterwideNetworkPolicies,
@@ -116,6 +114,11 @@ func startK8sPolicyWatcher(params PolicyWatcherParams) {
 		toServicesPolicies: make(map[resource.Key]struct{}),
 		cnpByServiceID:     make(map[k8s.ServiceID]map[resource.Key]struct{}),
 		metricsManager:     params.MetricsManager,
+	}
+
+	// Service notifications are not used if CNPs/CCNPs are disabled.
+	if params.Config.EnableCiliumNetworkPolicy || params.Config.EnableCiliumClusterwideNetworkPolicy {
+		p.svcCacheNotifications = serviceNotificationsQueue(ctx, params.ServiceCache.Notifications())
 	}
 
 	params.Lifecycle.Append(cell.Hook{

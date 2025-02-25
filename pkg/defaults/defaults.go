@@ -17,6 +17,9 @@ const (
 	// ClusterMeshHealthPort is the default value for option.ClusterMeshHealthPort
 	ClusterMeshHealthPort = 80
 
+	// EnableGops is the default value for option.EnableGops
+	EnableGops = true
+
 	// GopsPortAgent is the default value for option.GopsPort in the agent
 	GopsPortAgent = 9890
 
@@ -109,7 +112,7 @@ const (
 	// for each FQDN selector in endpoint's restored DNS rules.
 	DNSMaxIPsPerRestoredRule = 1000
 
-	// FFQDNRegexCompileLRUSize defines the maximum size for the FQDN regex
+	// FQDNRegexCompileLRUSize defines the maximum size for the FQDN regex
 	// compilation LRU used by the DNS proxy and policy validation.
 	FQDNRegexCompileLRUSize = 1024
 
@@ -328,10 +331,6 @@ const (
 	// initial allocator state from kvstore before exiting.
 	AllocatorListTimeout = 3 * time.Minute
 
-	// K8sWatcherEndpointSelector specifies the k8s endpoints that Cilium
-	// should watch for.
-	K8sWatcherEndpointSelector = "metadata.name!=kube-scheduler,metadata.name!=kube-controller-manager,metadata.name!=etcd-operator,metadata.name!=gcp-controller-manager"
-
 	// ConntrackGCMaxLRUInterval is the maximum conntrack GC interval when using LRU maps
 	ConntrackGCMaxLRUInterval = 12 * time.Hour
 
@@ -369,10 +368,6 @@ const (
 	// KVstoreMaxConsecutiveQuorumErrors is the maximum number of acceptable
 	// kvstore consecutive quorum errors before the agent assumes permanent failure
 	KVstoreMaxConsecutiveQuorumErrors = 2
-
-	// KVstoreKeepAliveIntervalFactor is the factor to calculate the interval
-	// from KVstoreLeaseTTL in which KVstore lease is being renewed.
-	KVstoreKeepAliveIntervalFactor = 3
 
 	// LockLeaseTTL is the time-to-live of the lease dedicated for locks of Kvstore.
 	LockLeaseTTL = 25 * time.Second
@@ -457,15 +452,11 @@ const (
 	// RestoreV6Addr is used as match for cilium_host v6 (router) address
 	RestoreV6Addr = "cilium.v6.internal.raw "
 
-	// EnableWellKnownIdentities is enabled by default as this is the
-	// original behavior. New default Helm templates will disable this.
-	EnableWellKnownIdentities = true
-
 	// CertsDirectory is the default directory used to find certificates
 	// specified in the L7 policies.
 	CertsDirectory = RuntimePath + "/certs"
 
-	// IPAMExpiration is the timeout after which an IP subject to expiratio
+	// IPAMExpiration is the timeout after which an IP subject to expiration
 	// is being released again if no endpoint is being created in time.
 	IPAMExpiration = 10 * time.Minute
 
@@ -484,11 +475,6 @@ const (
 	// EnableIdentityMark enables setting identity in mark field of packet
 	// for local traffic
 	EnableIdentityMark = true
-
-	// EnableHighScaleIPcache enables the special ipcache mode for high scale
-	// clusters. The ipcache content will be reduced to the strict minimum and
-	// traffic will be encapsulated to carry security identities.
-	EnableHighScaleIPcache = false
 
 	// K8sEnableLeasesFallbackDiscovery enables k8s to fallback to API probing to check
 	// for the support of Leases in Kubernetes when there is an error in discovering
@@ -517,6 +503,10 @@ const (
 
 	// TunnelProtocol is the default tunneling protocol
 	TunnelProtocol = "vxlan"
+
+	// TunnelSourcePortRange specifies the default tunnel source port range. Both
+	// zero means that we rely on the kernel driver defaults.
+	TunnelSourcePortRange = "0-0"
 
 	// ServiceNoBackendResponse is the default response for services without backends
 	ServiceNoBackendResponse = "reject"
@@ -588,6 +578,12 @@ const (
 
 	// BGPRouterIDAllocationMode is default BGP router-id allocation mode
 	BGPRouterIDAllocationMode = "default"
+
+	// WireguardTrackAllIPsFallback forces the WireGuard agent to track all IPs.
+	WireguardTrackAllIPsFallback = false
+
+	// ConnectivityProbeFrequencyRatio is the default connectivity probe frequency
+	ConnectivityProbeFrequencyRatio = 0.5
 )
 
 var (

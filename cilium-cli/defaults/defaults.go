@@ -32,6 +32,7 @@ const (
 	RelayContainerName  = "hubble-relay"
 	RelayDeploymentName = "hubble-relay"
 	RelayConfigMapName  = "hubble-relay-config"
+	RelayPodSelector    = "app.kubernetes.io/name=hubble-relay"
 
 	HubbleUIDeploymentName = "hubble-ui"
 
@@ -53,7 +54,6 @@ const (
 	ClusterMeshAdminSecretName             = "clustermesh-apiserver-admin-cert"
 	ClusterMeshClientSecretName            = "clustermesh-apiserver-client-cert"
 	ClusterMeshRemoteSecretName            = "clustermesh-apiserver-remote-cert"
-	ClusterMeshExternalWorkloadSecretName  = "clustermesh-apiserver-external-workload-cert"
 	ClusterMeshConnectionModeBidirectional = "bidirectional"
 	ClusterMeshConnectionModeMesh          = "mesh"
 	ClusterMeshConnectionModeUnicast       = "unicast"
@@ -74,11 +74,11 @@ const (
 	// renovate: datasource=docker
 	ConnectivityDNSTestServerImage = "docker.io/coredns/coredns:1.12.0@sha256:40384aa1f5ea6bfdc77997d243aec73da05f27aed0c5e9d65bfa98933c519d97"
 	// renovate: datasource=docker
-	ConnectivityTestConnDisruptImage = "quay.io/cilium/test-connection-disruption:v0.0.14@sha256:c3fd56e326ae16f6cb63dbb2e26b4e47ec07a123040623e11399a7fe1196baa0"
+	ConnectivityTestConnDisruptImage = "quay.io/cilium/test-connection-disruption:v0.0.16@sha256:8f47eb03545097f65ac3863720e6f5691feadcd02341a1ad3da7ca4097c0c656"
 	// renovate: datasource=docker
-	ConnectivityTestFRRImage = "quay.io/frrouting/frr:10.2.0@sha256:68733b8504b30d2a8565e43038f1313a500f2d9d58251882915eff0fbbd85e59"
+	ConnectivityTestFRRImage = "quay.io/frrouting/frr:10.2.1@sha256:c8543d3e0a1348cc0f2b19154fd8b0300e237773dbec65d9d6d6570c1d088deb"
 	// renovate: datasource=docker
-	ConnectivityTestSocatImage = "docker.io/alpine/socat:1.8.0.0@sha256:a6be4c0262b339c53ddad723cdd178a1a13271e1137c65e27f90a08c16de02b8"
+	ConnectivityTestSocatImage = "docker.io/alpine/socat:1.8.0.1@sha256:2c36f5a791f286eb196bb3f23ea63e7729088e95239a3220ea7688661ba887a1"
 
 	ConfigMapName = "cilium-config"
 
@@ -124,6 +124,7 @@ var (
 	HelmRepoIDLen    = 4
 	HelmRepository   = "https://helm.cilium.io"
 	HelmRepositoryID = sha256.Sum256([]byte(HelmRepository))
+	HelmMaxHistory   = 10
 
 	// CiliumScheduleAffinity is the node affinity to prevent Cilium from being schedule on
 	// nodes labeled with CiliumNoScheduleLabel.
@@ -172,6 +173,7 @@ var (
 		"inbound_state_invalid",  // XfrmInStateInvalid
 	}
 
+	LogCodeOwners  = false
 	LogCheckLevels = []string{
 		LogLevelError,
 		LogLevelWarning,

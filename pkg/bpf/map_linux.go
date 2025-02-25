@@ -54,6 +54,15 @@ type MapValue interface {
 	New() MapValue
 }
 
+// MapPerCPUValue is the same as MapValue, but for per-CPU maps. Implement to be
+// able to fetch map values from all CPUs.
+type MapPerCPUValue interface {
+	MapValue
+
+	// NewSlice must return a pointer to a slice of structs that implement MapValue.
+	NewSlice() any
+}
+
 type cacheEntry struct {
 	Key   MapKey
 	Value MapValue
@@ -161,6 +170,11 @@ func (m *Map) Flags() uint32 {
 		return m.spec.Flags
 	}
 	return 0
+}
+
+func (m *Map) hasPerCPUValue() bool {
+	mt := m.Type()
+	return mt == ebpf.PerCPUHash || mt == ebpf.PerCPUArray || mt == ebpf.LRUCPUHash || mt == ebpf.PerCPUCGroupStorage
 }
 
 func (m *Map) updateMetrics() {
@@ -604,8 +618,7 @@ type DumpCallback func(key MapKey, value MapValue)
 // each map entry. With the current implementation, it is safe for callbacks to
 // retain the values received, as they are guaranteed to be new instances.
 //
-// TODO(tb): This package currently doesn't support dumping per-cpu maps, as
-// ReadValueSize is always set to the size of a single value.
+// To dump per-cpu maps, use DumpPerCPUWithCallback.
 func (m *Map) DumpWithCallback(cb DumpCallback) error {
 	if cb == nil {
 		return errors.New("empty callback")
@@ -628,6 +641,50 @@ func (m *Map) DumpWithCallback(cb DumpCallback) error {
 
 		mk = m.key.New()
 		mv = m.value.New()
+	}
+
+	return i.Err()
+}
+
+// DumpPerCPUCallback is called by DumpPerCPUWithCallback with the map key and
+// the slice of all values from all CPUs.
+type DumpPerCPUCallback func(key MapKey, values any)
+
+// DumpPerCPUWithCallback iterates over the Map and calls the given
+// DumpPerCPUCallback for each map entry, passing the slice with all values
+// from all CPUs. With the current implementation, it is safe for callbacks
+// to retain the values received, as they are guaranteed to be new instances.
+func (m *Map) DumpPerCPUWithCallback(cb DumpPerCPUCallback) error {
+	if cb == nil {
+		return errors.New("empty callback")
+	}
+
+	if !m.hasPerCPUValue() {
+		return fmt.Errorf("map %s is not a per-CPU map", m.name)
+	}
+
+	v, ok := m.value.(MapPerCPUValue)
+	if !ok {
+		return fmt.Errorf("map %s value type does not implement MapPerCPUValue", m.name)
+	}
+
+	if err := m.Open(); err != nil {
+		return err
+	}
+
+	m.lock.RLock()
+	defer m.lock.RUnlock()
+
+	// Don't need deep copies here, only fresh pointers.
+	mk := m.key.New()
+	mv := v.NewSlice()
+
+	i := m.m.Iterate()
+	for i.Next(mk, mv) {
+		cb(mk, mv)
+
+		mk = m.key.New()
+		mv = v.NewSlice()
 	}
 
 	return i.Err()
@@ -757,7 +814,7 @@ func (m *Map) DumpReliablyWithCallback(cb DumpCallback, stats *DumpStats) error 
 
 // BatchIterator provides a typed wrapper *Map that allows for batched iteration
 // of bpf maps.
-type BatchIterator[KT, VT any] struct {
+type BatchIterator[KT, VT any, KP KeyPointer[KT], VP ValuePointer[VT]] struct {
 	m    *Map
 	err  error
 	keys []KT
@@ -802,21 +859,35 @@ type BatchIterator[KT, VT any] struct {
 //
 // Following iteration, any unresolved errors encountered when iterating
 // the bpf map can be accessed via the Err() function.
-func NewBatchIterator[KT, VT any](m *Map) *BatchIterator[KT, VT] {
-	return &BatchIterator[KT, VT]{
+func NewBatchIterator[KT any, VT any, KP KeyPointer[KT], VP ValuePointer[VT]](m *Map) *BatchIterator[KT, VT, KP, VP] {
+	return &BatchIterator[KT, VT, KP, VP]{
 		m: m,
 	}
+}
+
+// KeyPointer is a generic interface that provides the constraint that the pointer
+// of a type T is a MapKey.
+type KeyPointer[T any] interface {
+	MapKey
+	*T
+}
+
+// ValuePointer is a generic interface that provides the constraint that the pointer
+// of a type T is a MapValue.
+type ValuePointer[T any] interface {
+	MapValue
+	*T
 }
 
 // Err returns errors encountered during the previous iteration when
 // IterateAll(...) is called.
 //
 // If the iterator is reused, the error will be reset,
-func (kvs BatchIterator[KT, VT]) Err() error {
+func (kvs BatchIterator[KT, VT, KP, VP]) Err() error {
 	return kvs.err
 }
 
-func (bi BatchIterator[KT, VT]) maxBatchedRetries() int {
+func (bi BatchIterator[KT, VT, KP, VP]) maxBatchedRetries() int {
 	if bi.maxDumpRetries > 0 {
 		return int(bi.maxDumpRetries)
 	}
@@ -825,12 +896,12 @@ func (bi BatchIterator[KT, VT]) maxBatchedRetries() int {
 
 const defaultBatchedRetries = 3
 
-type BatchIteratorOpt[KT any, VT any] func(*BatchIterator[KT, VT]) *BatchIterator[KT, VT]
+type BatchIteratorOpt[KT any, VT any, KP KeyPointer[KT], VP ValuePointer[VT]] func(*BatchIterator[KT, VT, KP, VP]) *BatchIterator[KT, VT, KP, VP]
 
 // WithEBPFBatchOpts returns a batch iterator option that allows for overriding
 // BPF_MAP_LOOKUP_BATCH options.
-func WithEBPFBatchOpts[KT, VT any](opts *ebpf.BatchOptions) BatchIteratorOpt[KT, VT] {
-	return func(in *BatchIterator[KT, VT]) *BatchIterator[KT, VT] {
+func WithEBPFBatchOpts[KT, VT any, KP KeyPointer[KT], VP ValuePointer[VT]](opts *ebpf.BatchOptions) BatchIteratorOpt[KT, VT, KP, VP] {
+	return func(in *BatchIterator[KT, VT, KP, VP]) *BatchIterator[KT, VT, KP, VP] {
 		in.opts = opts
 		return in
 	}
@@ -845,8 +916,8 @@ func WithEBPFBatchOpts[KT, VT any](opts *ebpf.BatchOptions) BatchIteratorOpt[KT,
 //
 // If this happens, BatchIterator will automatically attempt to double the batch size and
 // retry the iteration from the same place - up to a number of retries.
-func WithMaxRetries[KT, VT any](retries uint32) BatchIteratorOpt[KT, VT] {
-	return func(in *BatchIterator[KT, VT]) *BatchIterator[KT, VT] {
+func WithMaxRetries[KT, VT any, KP KeyPointer[KT], VP ValuePointer[VT]](retries uint32) BatchIteratorOpt[KT, VT, KP, VP] {
+	return func(in *BatchIterator[KT, VT, KP, VP]) *BatchIterator[KT, VT, KP, VP] {
 		in.maxDumpRetries = retries
 		return in
 	}
@@ -854,8 +925,8 @@ func WithMaxRetries[KT, VT any](retries uint32) BatchIteratorOpt[KT, VT] {
 
 // WithStartingChunkSize returns a batch iterator option that allows overriding the dynamically
 // chosen starting chunk size.
-func WithStartingChunkSize[KT, VT any](size int) BatchIteratorOpt[KT, VT] {
-	return func(in *BatchIterator[KT, VT]) *BatchIterator[KT, VT] {
+func WithStartingChunkSize[KT, VT any, KP KeyPointer[KT], VP ValuePointer[VT]](size int) BatchIteratorOpt[KT, VT, KP, VP] {
+	return func(in *BatchIterator[KT, VT, KP, VP]) *BatchIterator[KT, VT, KP, VP] {
 		in.chunkSize = size
 		if in.chunkSize <= 0 {
 			in.chunkSize = 8
@@ -866,7 +937,7 @@ func WithStartingChunkSize[KT, VT any](size int) BatchIteratorOpt[KT, VT] {
 
 // CountAll is a helper function that returns the count of all elements in a batched
 // iterator.
-func CountAll[KT, VT any](ctx context.Context, iter *BatchIterator[KT, VT]) (int, error) {
+func CountAll[KT, VT any, KP KeyPointer[KT], VP ValuePointer[VT]](ctx context.Context, iter *BatchIterator[KT, VT, KP, VP]) (int, error) {
 	c := 0
 	for range iter.IterateAll(ctx) {
 		c++
@@ -880,14 +951,6 @@ func startingChunkSize(maxEntries int) int {
 	return int(math.Pow(2, math.Ceil(nearest2)))
 }
 
-func checkBatchType[T any]() error {
-	var kv T
-	if kind := reflect.TypeOf(kv).Kind(); kind != reflect.Struct {
-		return fmt.Errorf("BatchIterator: generic type(s) must be of kind struct, got: %s", kind)
-	}
-	return nil
-}
-
 // IterateAll returns an iterate Seq2 type which can be used to iterate a map
 // using the batched API.
 // In the case of a the iteration failing due to insufficient batch buffer size,
@@ -899,12 +962,12 @@ func checkBatchType[T any]() error {
 // All other errors will result in immediate termination of iterator.
 //
 // If the iteration fails, then the Err() function will return the error that caused the failure.
-func (bi *BatchIterator[KT, VT]) IterateAll(ctx context.Context, opts ...BatchIteratorOpt[KT, VT]) iter.Seq2[KT, VT] {
-	if bi.err = checkBatchType[KT](); bi.err != nil {
-		return nil
-	}
-
-	if bi.err = checkBatchType[VT](); bi.err != nil {
+func (bi *BatchIterator[KT, VT, KP, VP]) IterateAll(ctx context.Context, opts ...BatchIteratorOpt[KT, VT, KP, VP]) iter.Seq2[KP, VP] {
+	switch bi.m.Type() {
+	case ebpf.Hash, ebpf.LRUHash:
+		break
+	default:
+		bi.err = fmt.Errorf("unsupported map type %s, must be one either hash or lru-hash types", bi.m.Type())
 		return nil
 	}
 
@@ -924,7 +987,7 @@ func (bi *BatchIterator[KT, VT]) IterateAll(ctx context.Context, opts ...BatchIt
 
 	processed := 0
 	var cursor ebpf.MapBatchCursor
-	return func(yield func(KT, VT) bool) {
+	return func(yield func(KP, VP) bool) {
 		if bi.Err() != nil {
 			return
 		}
@@ -951,7 +1014,7 @@ func (bi *BatchIterator[KT, VT]) IterateAll(ctx context.Context, opts ...BatchIt
 				// If we receive ENOSPC failures, we will try to recover by growing the batch buffer
 				// size (up to some max number of retries - default: 3) and retrying the iteration.
 				//
-				// [1] https://elixir.bootlin.com/linux/latest/source/kernel/bpf/hashtab.c#L1776
+				// [1] https://elixir.bootlin.com/linux/v6.12.6/source/kernel/bpf/hashtab.c#L1807-L1809
 				//
 				// Note: If this failure happens during the bpf syscall, it is expected that the underlying
 				// cursor will not have been swapped - meaning that we can retry the iteration at the same cursor.
@@ -974,7 +1037,7 @@ func (bi *BatchIterator[KT, VT]) IterateAll(ctx context.Context, opts ...BatchIt
 				// Yield all received pairs.
 				for i := range bi.batchSize {
 					processed++
-					if !yield(bi.keys[i], bi.vals[i]) {
+					if !yield(&bi.keys[i], &bi.vals[i]) {
 						break iterate
 					}
 				}
@@ -1270,6 +1333,44 @@ func (m *Map) DeleteAll() error {
 	}
 
 	return err
+}
+
+func (m *Map) ClearAll() error {
+	if m.eventsBufferEnabled || m.withValueCache {
+		return fmt.Errorf("clear map: events buffer and value cache are not supported")
+	}
+
+	m.lock.Lock()
+	defer m.lock.Unlock()
+	defer m.updatePressureMetric()
+
+	if err := m.open(); err != nil {
+		return err
+	}
+
+	mk := m.key.New()
+	var mv any
+	if m.hasPerCPUValue() {
+		mv = m.value.(MapPerCPUValue).NewSlice()
+	} else {
+		mv = m.value.New()
+	}
+	empty := reflect.Indirect(reflect.ValueOf(mv)).Interface()
+
+	i := m.m.Iterate()
+	for i.Next(mk, mv) {
+		err := m.m.Update(mk, empty, ebpf.UpdateAny)
+
+		if metrics.BPFMapOps.IsEnabled() {
+			metrics.BPFMapOps.WithLabelValues(m.commonName(), metricOpUpdate, metrics.Error2Outcome(err)).Inc()
+		}
+
+		if err != nil {
+			return err
+		}
+	}
+
+	return i.Err()
 }
 
 // GetModel returns a BPF map in the representation served via the API

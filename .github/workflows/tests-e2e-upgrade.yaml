@@ -71,7 +71,7 @@ jobs:
 
   commit-status-start:
     name: Commit Status Start
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Set initial commit status
         uses: myrotvorets/set-commit-status-action@3730c0a348a2ace3c110851bed53331bc6406e9f # v2.0.1
@@ -80,7 +80,7 @@ jobs:
 
   wait-for-images:
     name: Wait for images
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - name: Checkout context ref (trusted)
@@ -95,7 +95,7 @@ jobs:
 
   setup-and-test:
     needs: [wait-for-images]
-    runs-on: ${{ vars.GH_RUNNER_EXTRA_POWER_UBUNTU_LATEST || 'ubuntu-latest' }}
+    runs-on: ${{ vars.GH_RUNNER_EXTRA_POWER_UBUNTU_LATEST || 'ubuntu-24.04' }}
     name: 'Setup & Test'
     env:
       job_name: 'Setup & Test'
@@ -106,25 +106,25 @@ jobs:
         include:
           - name: '1'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'rhel8.6-20241218.004849'
+            kernel: 'rhel8.6-20250126.112744'
             kube-proxy: 'iptables'
             kpr: 'false'
             tunnel: 'vxlan'
             host-fw: 'true'
-            misc: 'bpfClockProbe=false,cni.uninstall=false,tls.secretsBackend=k8s,tls.secretSync.enabled=true'
+            misc: 'bpfClockProbe=false,cni.uninstall=false,tls.readSecretsOnlyFromSecretsNamespace=false,tls.secretSync.enabled=false'
 
           - name: '2'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '5.4-20241218.004849'
+            kernel: '5.4-20250126.112744'
             kube-proxy: 'iptables'
             kpr: 'false'
             tunnel: 'disabled'
             host-fw: 'true'
-            misc: 'bpfClockProbe=false,cni.uninstall=false,tls.secretsBackend=k8s,tls.secretSync.enabled=true'
+            misc: 'bpfClockProbe=false,cni.uninstall=false,tls.readSecretsOnlyFromSecretsNamespace=false,tls.secretSync.enabled=false'
 
           - name: '3'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '5.10-20241218.004849'
+            kernel: '5.10-20250126.112744'
             kube-proxy: 'iptables'
             kpr: 'false'
             tunnel: 'disabled'
@@ -133,7 +133,7 @@ jobs:
 
           - name: '4'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '5.10-20241218.004849'
+            kernel: '5.10-20250126.112744'
             kube-proxy: 'iptables'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -146,7 +146,7 @@ jobs:
 
           - name: '5'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '5.15-20241218.004849'
+            kernel: '5.15-20250126.112744'
             kube-proxy: 'iptables'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -160,7 +160,7 @@ jobs:
 
           - name: '6'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '6.1-20241218.004849'
+            kernel: '6.1-20250126.112744'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -173,8 +173,8 @@ jobs:
             bgp-control-plane: 'true'
 
           - name: '7'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-next-20241218.004849'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-next-20250110.013326'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -189,8 +189,8 @@ jobs:
             misc: 'bpfClockProbe=false,cni.uninstall=false,tls.secretsBackend=k8s,tls.secretSync.enabled=true'
 
           - name: '8'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-next-20241218.004849'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-next-20250110.013326'
             kube-proxy: 'iptables'
             kpr: 'false'
             tunnel: 'geneve'
@@ -201,7 +201,7 @@ jobs:
 
           - name: '9'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '5.10-20241218.004849'
+            kernel: '5.10-20250126.112744'
             kube-proxy: 'iptables'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -216,7 +216,7 @@ jobs:
 
           - name: '10'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '5.15-20241218.004849'
+            kernel: '5.15-20250126.112744'
             kube-proxy: 'iptables'
             kpr: 'false'
             tunnel: 'disabled'
@@ -230,7 +230,7 @@ jobs:
 
           - name: '11'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '6.1-20241218.004849'
+            kernel: '6.1-20250126.112744'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -246,8 +246,8 @@ jobs:
             node-local-dns: 'true'
 
           - name: '12'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-next-20241218.004849'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-next-20250110.013326'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -262,7 +262,7 @@ jobs:
 
           - name: '13'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'rhel8.6-20241218.004849'
+            kernel: 'rhel8.6-20250126.112744'
             kube-proxy: 'iptables'
             kpr: 'false'
             tunnel: 'vxlan'
@@ -274,7 +274,7 @@ jobs:
             # explains why 5.4 might cause north-south-loadbalancing tests to
             # fail.
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '5.15-20241218.004849'
+            kernel: '5.15-20250126.112744'
             kube-proxy: 'iptables'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -286,25 +286,26 @@ jobs:
             ingress-controller: 'true'
 
           - name: '15'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-next-20241218.004849'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-next-20250110.013326'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
             secondary-network: 'true'
             tunnel: 'disabled'
+            lb-mode: 'dsr'
             ingress-controller: 'true'
-            misc: 'bpfClockProbe=false,cni.uninstall=false,tls.secretsBackend=k8s,tls.secretSync.enabled=true'
+            misc: 'bpfClockProbe=false,cni.uninstall=false,tls.secretsBackend=k8s,tls.secretSync.enabled=true,tunnelProtocol=geneve,loadBalancer.dsrDispatch=geneve'
             ciliumendpointslice: 'true'
 
           - name: '16'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '5.15-20241218.004849'
+            kernel: '5.15-20250126.112744'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
             secondary-network: 'true'
-            tunnel: 'vxlan'
+            tunnel: 'geneve'
             lb-mode: 'snat'
             encryption: 'wireguard'
             encryption-node: 'false'
@@ -313,9 +314,9 @@ jobs:
             ingress-controller: 'true'
 
           - name: '17'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-20241218.004849'
-            misc: 'bpf.datapathMode=netkit,bpf.masquerade=true,enableIPv4BIGTCP=true,enableIPv6BIGTCP=true'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-20250110.013326'
+            misc: 'bpf.datapathMode=netkit,enableIPv4BIGTCP=true,enableIPv6BIGTCP=true'
             kube-proxy: 'none'
             kpr: 'true'
             ipv6: 'true'
@@ -325,9 +326,9 @@ jobs:
             ingress-controller: 'true'
 
           - name: '18'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-20241218.004849'
-            misc: 'bpf.datapathMode=netkit-l2,bpf.masquerade=true,enableIPv4BIGTCP=true,enableIPv6BIGTCP=true'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-20250110.013326'
+            misc: 'bpf.datapathMode=netkit-l2,enableIPv4BIGTCP=true,enableIPv6BIGTCP=true'
             kube-proxy: 'none'
             kpr: 'true'
             ipv6: 'true'
@@ -337,9 +338,9 @@ jobs:
             ingress-controller: 'true'
 
           - name: '19'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-20241218.004849'
-            misc: 'bpf.datapathMode=netkit,bpf.masquerade=true'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-20250110.013326'
+            misc: 'bpf.datapathMode=netkit'
             kube-proxy: 'none'
             kpr: 'true'
             tunnel: 'vxlan'
@@ -349,9 +350,9 @@ jobs:
             kvstore: 'true'
 
           - name: '20'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-20241218.004849'
-            misc: 'bpf.datapathMode=netkit-l2,bpf.masquerade=true'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-20250110.013326'
+            misc: 'bpf.datapathMode=netkit-l2'
             kube-proxy: 'none'
             kpr: 'true'
             tunnel: 'vxlan'
@@ -360,9 +361,9 @@ jobs:
             ingress-controller: 'true'
 
           - name: '21'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-20241218.004849'
-            misc: 'bpf.datapathMode=netkit,bpf.masquerade=true'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-20250110.013326'
+            misc: 'bpf.datapathMode=netkit'
             kube-proxy: 'none'
             kpr: 'true'
             tunnel: 'geneve'
@@ -371,9 +372,9 @@ jobs:
             ingress-controller: 'true'
 
           - name: '22'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-20241218.004849'
-            misc: 'bpf.datapathMode=netkit-l2,bpf.masquerade=true'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-20250110.013326'
+            misc: 'bpf.datapathMode=netkit-l2'
             kube-proxy: 'none'
             kpr: 'true'
             tunnel: 'geneve'
@@ -382,9 +383,9 @@ jobs:
             ingress-controller: 'true'
 
           - name: '23'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-20241218.004849'
-            misc: 'bpf.datapathMode=netkit,bpf.masquerade=true'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-20250110.013326'
+            misc: 'bpf.datapathMode=netkit'
             kube-proxy: 'none'
             kpr: 'true'
             ipv6: 'true'
@@ -395,9 +396,9 @@ jobs:
             host-fw: 'true'
 
           - name: '24'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-net-20241218.004849'
-            misc: 'bpf.datapathMode=netkit,bpf.masquerade=true,enableIPv4BIGTCP=true,enableIPv6BIGTCP=true'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-net-20250110.013326'
+            misc: 'bpf.datapathMode=netkit,enableIPv4BIGTCP=true,enableIPv6BIGTCP=true'
             kube-proxy: 'none'
             kpr: 'true'
             ipv6: 'true'
@@ -407,9 +408,9 @@ jobs:
             ingress-controller: 'true'
 
           - name: '25'
-            # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: 'bpf-net-20241218.004849'
-            misc: 'bpf.datapathMode=netkit-l2,bpf.masquerade=true,enableIPv4BIGTCP=true,enableIPv6BIGTCP=true'
+            # Skip kernel updates due to https://github.com/cilium/cilium/issues/37520.
+            kernel: 'bpf-net-20250110.013326'
+            misc: 'bpf.datapathMode=netkit-l2,enableIPv4BIGTCP=true,enableIPv6BIGTCP=true'
             kube-proxy: 'none'
             kpr: 'true'
             ipv6: 'true'
@@ -420,7 +421,7 @@ jobs:
 
           - name: '26'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '6.6-20241218.004849'
+            kernel: '6.6-20250126.112744'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -432,7 +433,7 @@ jobs:
 
           - name: '27'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '6.6-20241218.004849'
+            kernel: '6.6-20250126.112744'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -444,7 +445,7 @@ jobs:
 
           - name: '28'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '6.6-20241218.004849'
+            kernel: '6.6-20250126.112744'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -457,7 +458,7 @@ jobs:
 
           - name: '29'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '6.12-20241218.004849'
+            kernel: '6.12-20250126.112744'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -469,7 +470,7 @@ jobs:
 
           - name: '30'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '6.12-20241218.004849'
+            kernel: '6.12-20250126.112744'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -481,7 +482,7 @@ jobs:
 
           - name: '31'
             # renovate: datasource=docker depName=quay.io/lvh-images/kind
-            kernel: '6.12-20241218.004849'
+            kernel: '6.12-20250126.112744'
             kube-proxy: 'none'
             kpr: 'true'
             devices: '{eth0,eth1}'
@@ -497,7 +498,7 @@ jobs:
           # - name: '23'
           #   # <insert renovate dependency descriptor here>
           #   kernel: 'bpf-20241206.013345'
-          #   misc: 'bpf.datapathMode=netkit-l2,bpf.masquerade=true'
+          #   misc: 'bpf.datapathMode=netkit-l2'
           #   skip-upgrade: 'true'
 
     timeout-minutes: 55
@@ -514,7 +515,7 @@ jobs:
           persist-credentials: false
 
       - name: Cleanup Disk space in runner
-        if: runner.name == 'ubuntu-latest'
+        if: runner.name == 'ubuntu-24.04'
         uses: ./.github/actions/disk-cleanup
 
       - name: Set Environment Variables
@@ -615,7 +616,7 @@ jobs:
           " >> $GITHUB_OUTPUT
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@c52e8c38e6d6235bd8e6e961199a984275547d6f # v0.16.22
+        uses: cilium/cilium-cli@1432ef0e4e0cd766f5c1ee0544759d7a31cd32b2 # v0.17.0
         with:
           skip-build: ${{ env.CILIUM_CLI_SKIP_BUILD }}
           image-repo: ${{ env.CILIUM_CLI_IMAGE_REPO }}
@@ -675,7 +676,8 @@ jobs:
           # Create pods which establish long lived connections. It will be used by
           # subsequent connectivity tests with --include-conn-disrupt-test to catch any
           # interruption in such flows.
-          cilium connectivity test --include-conn-disrupt-test --conn-disrupt-test-setup \
+          cilium connectivity test --include-conn-disrupt-test --include-conn-disrupt-test-ns-traffic \
+            --conn-disrupt-test-setup \
             --conn-disrupt-test-restarts-path "./cilium-conn-disrupt-restarts" \
             --conn-disrupt-dispatch-interval 0ms
 
@@ -688,7 +690,7 @@ jobs:
             ${{ steps.cilium-newest-config.outputs.config }} \
             ${{ steps.kvstore.outputs.config }}
 
-          cilium status --wait --wait-duration=10m
+          cilium status --wait --interactive=false --wait-duration=10m
           kubectl get pods --all-namespaces -o wide
           kubectl -n kube-system exec daemonset/cilium -- cilium status
 
@@ -719,7 +721,9 @@ jobs:
         shell: bash
         run: |
           cilium connectivity test \
+            --log-code-owners \
             --include-conn-disrupt-test \
+            --include-conn-disrupt-test-ns-traffic \
             --test "no-interrupted-connections" \
             --conn-disrupt-test-restarts-path "./cilium-conn-disrupt-restarts" \
             ${{ steps.cli-flags.outputs.flags }}
@@ -728,6 +732,7 @@ jobs:
         shell: bash
         run: |
           cilium connectivity test \
+            --log-code-owners \
             --test "seq-.*" \
             ${{ steps.cli-flags.outputs.flags }}
 
@@ -735,6 +740,7 @@ jobs:
         shell: bash
         run: |
           cilium connectivity test \
+            --log-code-owners \
             --test-concurrency=${{ env.test_concurrency }} \
             --test "!seq-.*" \
             ${{ steps.cli-flags.outputs.flags }}
@@ -763,7 +769,7 @@ jobs:
             ${{ steps.cilium-stable-config.outputs.config }} \
             ${{ steps.kvstore.outputs.config }}
 
-          cilium status --wait --wait-duration=10m
+          cilium status --wait --interactive=false --wait-duration=10m
           kubectl get pods --all-namespaces -o wide
           kubectl -n kube-system exec daemonset/cilium -- cilium status
 
@@ -772,6 +778,7 @@ jobs:
         shell: bash
         run: |
           cilium connectivity test \
+            --log-code-owners \
             --include-conn-disrupt-test \
             --test "no-interrupted-connections" \
             --conn-disrupt-test-restarts-path "./cilium-conn-disrupt-restarts" \
@@ -782,6 +789,7 @@ jobs:
         shell: bash
         run: |
           cilium connectivity test \
+            --log-code-owners \
             --test "seq-.*" \
             ${{ steps.cli-flags.outputs.flags }}
 
@@ -790,6 +798,7 @@ jobs:
         shell: bash
         run: |
           cilium connectivity test \
+            --log-code-owners \
             --test-concurrency=${{ env.test_concurrency }} \
             --test "!seq-.*" \
             ${{ steps.cli-flags.outputs.flags }}
@@ -817,21 +826,21 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ !success() }}
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: cilium-sysdumps-${{ matrix.name }}
           path: cilium-sysdump-*.zip
 
       - name: Upload JUnits [junit]
         if: ${{ always() }}
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: cilium-junits-${{ matrix.name }}
           path: cilium-junits/*.xml
 
       - name: Upload features tested
         if: ${{ always() }}
-        uses: actions/upload-artifact@b4b15b8c7c6ac21ea08fcf65892d2ee8f75cf882 # v4.4.3
+        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
         with:
           name: features-tested-${{ matrix.name }}
           path: ${{ env.job_name }}*.json
@@ -845,7 +854,7 @@ jobs:
   merge-upload:
     if: ${{ always() }}
     name: Merge and Upload Artifacts
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: setup-and-test
     steps:
       - name: Checkout context ref (trusted)
@@ -876,7 +885,7 @@ jobs:
     if: ${{ always() }}
     name: Commit Status Final
     needs: setup-and-test
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Set final commit status
         uses: myrotvorets/set-commit-status-action@3730c0a348a2ace3c110851bed53331bc6406e9f # v2.0.1

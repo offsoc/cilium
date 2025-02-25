@@ -19,7 +19,7 @@ concurrency:
 jobs:
   check_changes:
     name: Deduce required tests from code changes
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     outputs:
       bpf-tree: ${{ steps.changes.outputs.bpf-tree }}
       coccinelle: ${{ steps.changes.outputs.coccinelle }}
@@ -43,6 +43,9 @@ jobs:
             bpf-tree:
               - 'bpf/**'
               - 'images/**'
+              - 'Makefile*'
+              - 'contrib/scripts/builder.sh'
+
             coccinelle:
               - 'contrib/coccinelle/**'
             bpf-tests-runner:
@@ -53,7 +56,7 @@ jobs:
 
   checkpatch:
     name: Check Patch
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -69,7 +72,7 @@ jobs:
     needs: check_changes
     if: ${{ needs.check_changes.outputs.bpf-tree == 'true' || needs.check_changes.outputs.coccinelle == 'true' || needs.check_changes.outputs.workflow-description == 'true' }}
     name: Run coccicheck
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

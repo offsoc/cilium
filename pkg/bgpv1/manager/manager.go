@@ -8,9 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sort"
+	"strings"
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
+	"github.com/cilium/statedb"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"k8s.io/apimachinery/pkg/util/wait"
@@ -23,6 +26,7 @@ import (
 	"github.com/cilium/cilium/pkg/bgpv1/manager/instance"
 	"github.com/cilium/cilium/pkg/bgpv1/manager/reconciler"
 	"github.com/cilium/cilium/pkg/bgpv1/manager/reconcilerv2"
+	"github.com/cilium/cilium/pkg/bgpv1/manager/tables"
 	"github.com/cilium/cilium/pkg/bgpv1/types"
 	"github.com/cilium/cilium/pkg/datapath/linux/safenetlink"
 	"github.com/cilium/cilium/pkg/defaults"
@@ -56,14 +60,16 @@ type LocalInstanceMap map[string]*instance.BGPInstance
 
 type bgpRouterManagerParams struct {
 	cell.In
-	Logger           logrus.FieldLogger
-	JobGroup         job.Group
-	DaemonConfig     *option.DaemonConfig
-	ConfigMode       *mode.ConfigMode
-	Metrics          *BGPManagerMetrics
-	Reconcilers      []reconciler.ConfigReconciler   `group:"bgp-config-reconciler"`
-	ReconcilersV2    []reconcilerv2.ConfigReconciler `group:"bgp-config-reconciler-v2"`
-	StateReconcilers []reconcilerv2.StateReconciler  `group:"bgp-state-reconciler-v2"`
+	Logger              logrus.FieldLogger
+	JobGroup            job.Group
+	DaemonConfig        *option.DaemonConfig
+	ConfigMode          *mode.ConfigMode
+	Metrics             *BGPManagerMetrics
+	DB                  *statedb.DB
+	ReconcileErrorTable statedb.RWTable[*tables.BGPReconcileError]
+	Reconcilers         []reconciler.ConfigReconciler   `group:"bgp-config-reconciler"`
+	ReconcilersV2       []reconcilerv2.ConfigReconciler `group:"bgp-config-reconciler-v2"`
+	StateReconcilers    []reconcilerv2.StateReconciler  `group:"bgp-state-reconciler-v2"`
 }
 
 type State struct {
@@ -145,6 +151,10 @@ type BGPRouterManager struct {
 	BGPInstances      LocalInstanceMap
 	ConfigReconcilers []reconcilerv2.ConfigReconciler
 
+	// statedb tables
+	DB                  *statedb.DB
+	ReconcileErrorTable statedb.RWTable[*tables.BGPReconcileError]
+
 	// running is set when the manager is running, and unset when it is stopped.
 	running bool
 
@@ -176,6 +186,10 @@ func NewBGPRouterManager(params bgpRouterManagerParams) agent.BGPRouterManager {
 		// BGPv2
 		BGPInstances:      make(LocalInstanceMap),
 		ConfigReconcilers: activeReconcilersV2,
+
+		// statedb
+		DB:                  params.DB,
+		ReconcileErrorTable: params.ReconcileErrorTable,
 
 		// state
 		state: State{
@@ -271,9 +285,7 @@ func (m *BGPRouterManager) ConfigurePeers(ctx context.Context,
 	l.WithField("diff", rd.String()).Debug("Reconciling new CiliumBGPPeeringPolicy")
 
 	if len(rd.register) > 0 {
-		if err := m.register(ctx, rd); err != nil {
-			return fmt.Errorf("encountered error adding new BGP Servers: %w", err)
-		}
+		m.register(ctx, rd)
 	}
 	if len(rd.withdraw) > 0 {
 		if err := m.withdraw(ctx, rd); err != nil {
@@ -281,16 +293,14 @@ func (m *BGPRouterManager) ConfigurePeers(ctx context.Context,
 		}
 	}
 	if len(rd.reconcile) > 0 {
-		if err := m.reconcile(ctx, rd); err != nil {
-			return fmt.Errorf("encountered error reconciling existing BGP Servers: %w", err)
-		}
+		m.reconcile(ctx, rd)
 	}
 	return nil
 }
 
 // register instantiates and configures BgpServer(s) as instructed by the provided
 // work diff.
-func (m *BGPRouterManager) register(ctx context.Context, rd *reconcileDiff) error {
+func (m *BGPRouterManager) register(ctx context.Context, rd *reconcileDiff) {
 	l := log.WithFields(
 		logrus.Fields{
 			"component": "manager.add",
@@ -308,7 +318,6 @@ func (m *BGPRouterManager) register(ctx context.Context, rd *reconcileDiff) erro
 			l.WithError(err).Errorf("Error while registering new BGP server for local ASN %v.", config.LocalASN)
 		}
 	}
-	return nil
 }
 
 // registerBGPServer encapsulates the logic for instantiating a
@@ -433,7 +442,7 @@ func (m *BGPRouterManager) withdrawAll(ctx context.Context, rd *reconcileDiff) e
 
 // reconcile evaluates existing BgpServer(s), making changes if necessary, as
 // instructed by the provided reoncileDiff.
-func (m *BGPRouterManager) reconcile(ctx context.Context, rd *reconcileDiff) error {
+func (m *BGPRouterManager) reconcile(ctx context.Context, rd *reconcileDiff) {
 	l := log.WithFields(
 		logrus.Fields{
 			"component": "manager.reconcile",
@@ -456,7 +465,6 @@ func (m *BGPRouterManager) reconcile(ctx context.Context, rd *reconcileDiff) err
 			l.WithError(err).Errorf("Encountered error reconciling virtual router with local ASN %v", newc.LocalASN)
 		}
 	}
-	return nil
 }
 
 // reconcileBGPConfig will utilize the current set of ConfigReconciler(s)
@@ -822,17 +830,13 @@ func (m *BGPRouterManager) ReconcileInstances(ctx context.Context,
 		m.withdrawV2(ctx, rd)
 	}
 	if len(rd.register) > 0 {
-		if err := m.registerV2(ctx, rd); err != nil {
-			return err
-		}
+		err = errors.Join(err, m.registerV2(ctx, rd))
 	}
 	if len(rd.reconcile) > 0 {
-		if err := m.reconcileV2(ctx, rd); err != nil {
-			return err
-		}
+		err = errors.Join(err, m.reconcileV2(ctx, rd))
 	}
 
-	return nil
+	return err
 }
 
 // registerV2 instantiates and configures BGP Instance(s) as instructed by the provided
@@ -947,24 +951,130 @@ func (m *BGPRouterManager) reconcileBGPConfigV2(ctx context.Context,
 	ciliumNode *v2api.CiliumNode) error {
 
 	reconcileStart := time.Now()
+
+	var reconcileErrs []error
 	for _, r := range m.ConfigReconcilers {
-		if err := r.Reconcile(ctx, reconcilerv2.ReconcileParams{
+		if rErr := r.Reconcile(ctx, reconcilerv2.ReconcileParams{
 			BGPInstance:   i,
 			DesiredConfig: newc,
 			CiliumNode:    ciliumNode,
-		}); err != nil {
+		}); rErr != nil {
 			m.metrics.ReconcileErrorCount.WithLabelValues(newc.Name).Inc()
-			return err
+			reconcileErrs = append(reconcileErrs, rErr)
+			// If r.Reconcile returns ErrAbortReconcile, we should stop the reconciliation
+			// for this instance and return the error.
+			// Goal of stopping the reconciliation is twofold:
+			// 1. Error in the infrastructure (e.g. stores are not yet initialized ). In this
+			// case, we should stop the reconciliation as most of the other reconcilers will
+			// also fail.
+			// 2. There is hard dependency on the ordering of reconciliation, and we should
+			// not proceed with other reconcilers if current reconciler returns ErrAbortReconcile.
+			// This is to ensure correctness in the behavior of BGP configuration.
+			//
+			// If the reconciler returns any other error, we should continue with remaining
+			// reconcilers and accumulate the error. This ensures that we try to reconcile
+			// as much configuration as possible.
+			//
+			// High level retry will again call the reconciliation loop as long as we return
+			// error.
+			if errors.Is(rErr, reconcilerv2.ErrAbortReconcile) {
+				break
+			}
 		}
 	}
+
+	reconcileErrs = append(reconcileErrs, m.updateReconcilerErrors(newc.Name, reconcileErrs))
 	m.metrics.ReconcileRunDuration.WithLabelValues(newc.Name).Observe(time.Since(reconcileStart).Seconds())
 	i.Config = newc
+	return errors.Join(reconcileErrs...)
+}
+
+func (m *BGPRouterManager) updateReconcilerErrors(instance string, newErrors []error) error {
+	txn := m.DB.WriteTxn(m.ReconcileErrorTable)
+	defer txn.Abort()
+
+	// We only consider first n errors for matching
+	if len(newErrors) > tables.BGPReconcileErrCountPerInstance {
+		newErrors = newErrors[:tables.BGPReconcileErrCountPerInstance]
+	}
+
+	// get existing errors for this instance from the table
+	prevErrors := m.getErrorsFromTable(txn, instance)
+
+	// compare previous and current errors
+	if errorsChanged(prevErrors, newErrors) {
+		// delete old errors
+		err := m.deleteErrorsFromTable(txn, instance)
+		if err != nil {
+			return err
+		}
+
+		// write new errors
+		for i, newErr := range newErrors {
+			obj := &tables.BGPReconcileError{
+				Instance: instance,
+				ErrorID:  i,
+				Error:    newErr.Error(),
+			}
+			_, _, err := m.ReconcileErrorTable.Insert(txn, obj)
+			if err != nil {
+				return fmt.Errorf("error inserting reconcile error into table: %w", err)
+			}
+		}
+	}
+
+	txn.Commit()
 	return nil
+}
+
+func (m *BGPRouterManager) getErrorsFromTable(txn statedb.WriteTxn, instance string) []error {
+	// get existing errors for this instance from the table
+	var reconcileErrs []*tables.BGPReconcileError
+	iter := m.ReconcileErrorTable.List(txn, tables.BGPReconcileErrorInstance.Query(instance))
+	for instanceErr := range iter {
+		reconcileErrs = append(reconcileErrs, instanceErr.DeepCopy())
+	}
+	// sort errors based on ID
+	sort.Slice(reconcileErrs, func(i, j int) bool { return reconcileErrs[i].ErrorID < reconcileErrs[j].ErrorID })
+
+	var errs []error
+	for _, rErr := range reconcileErrs {
+		errs = append(errs, errors.New(rErr.Error))
+	}
+
+	return errs
+}
+
+func (m *BGPRouterManager) deleteErrorsFromTable(txn statedb.WriteTxn, instance string) error {
+	iter := m.ReconcileErrorTable.List(txn, tables.BGPReconcileErrorInstance.Query(instance))
+	for instanceErr := range iter {
+		_, _, err := m.ReconcileErrorTable.Delete(txn, instanceErr)
+		if err != nil {
+			return fmt.Errorf("error deleting reconcile error from table: %w", err)
+		}
+	}
+	return nil
+}
+
+func errorsChanged(prevErrs, newErrs []error) bool {
+	if len(prevErrs) != len(newErrs) {
+		return true
+	}
+
+	for i, prevErr := range prevErrs {
+		if strings.Compare(prevErr.Error(), newErrs[i].Error()) != 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // withdraw disconnects and removes BGP Instance(s) as instructed by the provided
 // work diff.
 func (m *BGPRouterManager) withdrawV2(ctx context.Context, rd *reconcileDiffV2) {
+	txn := m.DB.WriteTxn(m.ReconcileErrorTable)
+	defer txn.Abort()
+
 	for _, name := range rd.withdraw {
 		var (
 			i  *instance.BGPInstance
@@ -985,8 +1095,15 @@ func (m *BGPRouterManager) withdrawV2(ctx context.Context, rd *reconcileDiffV2) 
 		}
 		delete(m.BGPInstances, name)
 		delete(m.state.notifications, name)
+
+		// cleanup any errors from statedb table for this instance
+		err := m.deleteErrorsFromTable(txn, name)
+		if err != nil {
+			m.Logger.WithField(types.InstanceLogField, name).WithError(err).Warn("error deleting reconcile errors from table")
+		}
 		m.Logger.WithField(types.InstanceLogField, name).Info("Removed BGP instance")
 	}
+	txn.Commit()
 }
 
 // withdrawAll will disconnect and remove all currently registered BGP Instance(s).

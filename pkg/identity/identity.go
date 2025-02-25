@@ -141,12 +141,6 @@ func (id *Identity) IsWellKnown() bool {
 	return WellKnown.lookupByNumericIdentity(id.ID) != nil
 }
 
-// IsWellKnownIdentity returns true if the identity represents a well-known
-// identity, false otherwise.
-func IsWellKnownIdentity(id NumericIdentity) bool {
-	return WellKnown.lookupByNumericIdentity(id) != nil
-}
-
 // NewIdentityFromLabelArray creates a new identity
 func NewIdentityFromLabelArray(id NumericIdentity, lblArray labels.LabelArray) *Identity {
 	var lbls labels.Labels
@@ -326,5 +320,5 @@ func IdentityAllocationIsLocal(lbls labels.Labels) bool {
 
 // UpdateIdentities is an interface to be called when identities change
 type UpdateIdentities interface {
-	UpdateIdentities(added, deleted IdentityMap, wg *sync.WaitGroup)
+	UpdateIdentities(added, deleted IdentityMap, wg *sync.WaitGroup) (mutated bool)
 }

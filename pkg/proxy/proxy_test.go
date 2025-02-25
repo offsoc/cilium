@@ -8,6 +8,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/cilium/hive/hivetest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/cilium/cilium/pkg/completion"
@@ -19,9 +20,15 @@ import (
 	"github.com/cilium/cilium/pkg/u8proto"
 )
 
-func proxyForTest() (*Proxy, func()) {
-	mockDatapathUpdater := &proxyports.MockDatapathUpdater{}
-	p := createProxy(10000, 20000, mockDatapathUpdater, nil, nil)
+func proxyForTest(t *testing.T) (*Proxy, func()) {
+	mockDatapathUpdater := &proxyports.MockIPTablesManager{}
+	ppConfig := proxyports.ProxyPortsConfig{
+		ProxyPortrangeMin:          10000,
+		ProxyPortrangeMax:          20000,
+		RestoredProxyPortsAgeLimit: 0,
+	}
+	pp := proxyports.NewProxyPorts(hivetest.Logger(t), ppConfig, mockDatapathUpdater)
+	p := createProxy(hivetest.Logger(t), pp, nil, nil)
 	triggerDone := make(chan struct{})
 	p.proxyPorts.Trigger, _ = trigger.NewTrigger(trigger.Parameters{
 		MinInterval:  10 * time.Second,
@@ -36,7 +43,7 @@ func proxyForTest() (*Proxy, func()) {
 
 type fakeProxyPolicy struct{}
 
-func (p *fakeProxyPolicy) CopyL7RulesPerEndpoint() policy.L7DataMap {
+func (p *fakeProxyPolicy) GetPerSelectorPolicies() policy.L7DataMap {
 	return policy.L7DataMap{}
 }
 
@@ -66,7 +73,7 @@ func TestCreateOrUpdateRedirectMissingListener(t *testing.T) {
 	err := os.MkdirAll(socketDir, 0700)
 	require.NoError(t, err)
 
-	p, cleaner := proxyForTest()
+	p, cleaner := proxyForTest(t)
 	defer cleaner()
 
 	l4 := &fakeProxyPolicy{}
@@ -74,9 +81,8 @@ func TestCreateOrUpdateRedirectMissingListener(t *testing.T) {
 	ctx := context.TODO()
 	wg := completion.NewWaitGroup(ctx)
 
-	proxyPort, err, finalizeFunc, revertFunc := p.CreateOrUpdateRedirect(ctx, l4, "dummy-proxy-id", 1000, wg)
+	proxyPort, err, revertFunc := p.CreateOrUpdateRedirect(ctx, l4, "dummy-proxy-id", 1000, wg)
 	require.Equal(t, uint16(0), proxyPort)
 	require.Error(t, err)
-	require.Nil(t, finalizeFunc)
 	require.Nil(t, revertFunc)
 }

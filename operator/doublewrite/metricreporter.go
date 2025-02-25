@@ -7,6 +7,7 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cilium/hive/cell"
@@ -90,7 +91,7 @@ func (g *DoubleWriteMetricReporter) Start(ctx cell.HookContext) error {
 	}
 	g.kvStoreBackend = kvStoreBackend
 
-	crdBackend, err := identitybackend.NewCRDBackend(identitybackend.CRDBackendConfiguration{Store: nil, Client: g.clientset, KeyFunc: (&key.GlobalIdentity{}).PutKeyFromMap})
+	crdBackend, err := identitybackend.NewCRDBackend(identitybackend.CRDBackendConfiguration{Store: nil, StoreSet: &atomic.Bool{}, Client: g.clientset, KeyFunc: (&key.GlobalIdentity{}).PutKeyFromMap})
 	if err != nil {
 		g.logger.Error("Unable to initialize CRD backend for the Double Write Metric Reporter", logfields.Error, err)
 		return err
@@ -161,10 +162,10 @@ func (g *DoubleWriteMetricReporter) compareCRDAndKVStoreIdentities(ctx context.C
 	onlyInCrdSample := onlyInCrd[:min(onlyInCrdCount, maxPrintedDiffIDs)]
 	onlyInKVStoreSample := onlyInKVStore[:min(onlyInKVStoreCount, maxPrintedDiffIDs)]
 
-	g.metrics.IdentityCRDTotalCount.Set(float64(len(crdIdentityIds)))
-	g.metrics.IdentityKVStoreTotalCount.Set(float64(len(kvstoreIdentityIds)))
-	g.metrics.IdentityCRDOnlyCount.Set(float64(onlyInCrdCount))
-	g.metrics.IdentityKVStoreOnlyCount.Set(float64(onlyInKVStoreCount))
+	g.metrics.CRDIdentities.Set(float64(len(crdIdentityIds)))
+	g.metrics.KVStoreIdentities.Set(float64(len(kvstoreIdentityIds)))
+	g.metrics.CRDOnlyIdentities.Set(float64(onlyInCrdCount))
+	g.metrics.KVStoreOnlyIdentities.Set(float64(onlyInKVStoreCount))
 
 	if onlyInCrdCount == 0 && onlyInKVStoreCount == 0 {
 		g.logger.Info("CRD and KVStore identities are in sync")

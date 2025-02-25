@@ -9,7 +9,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync"
@@ -31,7 +31,6 @@ import (
 	v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	"github.com/cilium/cilium/pkg/lock"
 	"github.com/cilium/cilium/pkg/logging/logfields"
-	"github.com/cilium/cilium/pkg/math"
 )
 
 const (
@@ -182,7 +181,7 @@ func (n *Node) PrepareIPRelease(excessIPs int, scopedLog *logrus.Entry) *ipam.Re
 			"excessIPs":      excessIPs,
 			"freeOnENICount": freeOnENICount,
 		}).Debug("ENI has unused IPs that can be released")
-		maxReleaseOnENI := math.IntMin(freeOnENICount, excessIPs)
+		maxReleaseOnENI := min(freeOnENICount, excessIPs)
 
 		firstENIWithFreeIPFound := r.IPsToRelease == nil
 		eniWithMoreFreeIPsFound := maxReleaseOnENI > len(r.IPsToRelease)
@@ -230,7 +229,7 @@ func (n *Node) PrepareIPAllocation(scopedLog *logrus.Entry) (a *ipam.AllocationA
 		}
 
 		_, effectiveLimits := n.getEffectiveIPLimits(&e, limits.IPv4)
-		availableOnENI := math.IntMax(effectiveLimits-len(e.Addresses), 0)
+		availableOnENI := max(effectiveLimits-len(e.Addresses), 0)
 		if availableOnENI <= 0 {
 			continue
 		} else {
@@ -251,7 +250,7 @@ func (n *Node) PrepareIPAllocation(scopedLog *logrus.Entry) (a *ipam.AllocationA
 
 				a.InterfaceID = key
 				a.PoolID = ipamTypes.PoolID(subnet.ID)
-				a.IPv4.AvailableForAllocation = math.IntMin(subnet.AvailableAddresses, availableOnENI)
+				a.IPv4.AvailableForAllocation = min(subnet.AvailableAddresses, availableOnENI)
 			}
 		}
 	}
@@ -441,7 +440,7 @@ func (n *Node) CreateInterface(ctx context.Context, allocation *ipam.AllocationA
 	desc := "Cilium-CNI (" + n.node.InstanceID() + ")"
 
 	// Must allocate secondary ENI IPs as needed, up to ENI instance limit - 1 (reserve 1 for primary IP)
-	toAllocate := math.IntMin(allocation.IPv4.MaxIPsToAllocate, limits.IPv4-1)
+	toAllocate := min(allocation.IPv4.MaxIPsToAllocate, limits.IPv4-1)
 	// Validate whether request has already been fulfilled in the meantime
 	if toAllocate == 0 {
 		return 0, "", nil
@@ -591,7 +590,7 @@ func (n *Node) ResyncInterfacesAndIPs(ctx context.Context, scopedLog *logrus.Ent
 				stats.NodeCapacity += leftoverPrefixCapcity
 			}
 
-			availableOnENI := math.IntMax(effectiveLimits-len(e.Addresses), 0)
+			availableOnENI := max(effectiveLimits-len(e.Addresses), 0)
 			if availableOnENI > 0 {
 				stats.RemainingAvailableInterfaceCount++
 			}
@@ -664,7 +663,7 @@ func (n *Node) GetMaximumAllocatableIPv4() int {
 	}
 
 	// limits.IPv4 contains the primary IP which is not available for allocation
-	maxPerInterface := math.IntMax(limits.IPv4-1, 0)
+	maxPerInterface := max(limits.IPv4-1, 0)
 
 	if n.IsPrefixDelegated() {
 		maxPerInterface = maxPerInterface * option.ENIPDBlockSizeIPv4
@@ -729,9 +728,9 @@ func (n *Node) GetMinimumAllocatableIPv4() int {
 	}
 
 	// limits.IPv4 contains the primary IP which is not available for allocation
-	maxPerInterface := math.IntMax(limits.IPv4-1, 0)
+	maxPerInterface := max(limits.IPv4-1, 0)
 
-	return math.IntMin(minimum, (limits.Adapters-index)*maxPerInterface)
+	return min(minimum, (limits.Adapters-index)*maxPerInterface)
 }
 
 func (n *Node) isPrefixDelegationEnabled() bool {
@@ -783,13 +782,13 @@ func (n *Node) IsPrefixDelegated() bool {
 // are included in the count returned.
 func (n *Node) GetUsedIPWithPrefixes() int {
 	var usedIps int
-	eniPrefixes := make(map[string][]*net.IPNet)
+	eniPrefixes := make(map[string][]netip.Prefix)
 
 	// Populate ENI -> Prefix mapping
 	for eniName, eni := range n.k8sObj.Status.ENI.ENIs {
-		var prefixes []*net.IPNet
+		var prefixes []netip.Prefix
 		for _, pfx := range eni.Prefixes {
-			_, ipNet, err := net.ParseCIDR(pfx)
+			ipNet, err := netip.ParsePrefix(pfx)
 			if err != nil {
 				continue
 			}
@@ -797,7 +796,7 @@ func (n *Node) GetUsedIPWithPrefixes() int {
 		}
 		eniPrefixes[eniName] = prefixes
 	}
-	usedPfx := make(map[string]bool)
+	usedPfx := make(map[netip.Prefix]bool)
 	for ip, resource := range n.k8sObj.Status.IPAM.Used {
 		// Fetch prefixes on this IP's ENI
 		prefixNetworks, exists := eniPrefixes[resource.Resource]
@@ -805,12 +804,16 @@ func (n *Node) GetUsedIPWithPrefixes() int {
 			continue
 		}
 		var prefixBased bool
-		var pfx string
+		var pfx netip.Prefix
+		addr, err := netip.ParseAddr(ip)
+		if err != nil {
+			continue
+		}
 		// Check if the IP is from any of the prefixes attached to this ENI
 		for _, ipNet := range prefixNetworks {
-			if ipNet.Contains(net.ParseIP(ip)) {
+			if ipNet.Contains(addr) {
 				prefixBased = true
-				pfx = ipNet.String()
+				pfx = ipNet
 				break
 			}
 		}

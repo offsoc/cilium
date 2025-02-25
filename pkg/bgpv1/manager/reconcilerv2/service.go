@@ -114,12 +114,8 @@ func (r *ServiceReconciler) Cleanup(i *instance.BGPInstance) {
 }
 
 func (r *ServiceReconciler) Reconcile(ctx context.Context, p ReconcileParams) error {
-	if p.DesiredConfig == nil {
-		return fmt.Errorf("BUG: attempted service reconciliation with nil CiliumBGPNodeConfig")
-	}
-
-	if p.CiliumNode == nil {
-		return fmt.Errorf("BUG: attempted service reconciliation with nil local CiliumNode")
+	if err := p.ValidateParams(); err != nil {
+		return err
 	}
 
 	desiredPeerAdverts, err := r.peerAdvert.GetConfiguredAdvertisements(p.DesiredConfig, v2alpha1.BGPServiceAdvert)
@@ -271,28 +267,49 @@ func (r *ServiceReconciler) getDesiredSvcRoutePolicies(p ReconcileParams, desire
 				if !labelSelector.Matches(serviceLabelSet(svc)) {
 					continue
 				}
+
 				// LoadBalancerIP
 				lbPolicy, err := r.getLoadBalancerIPRoutePolicy(p, peer, agentFamily, svc, advert, ls)
 				if err != nil {
 					return nil, fmt.Errorf("failed to get desired LoadBalancerIP route policy: %w", err)
 				}
 				if lbPolicy != nil {
+					currentLbPolicy := desiredSvcRoutePolicies[lbPolicy.Name]
+					if currentLbPolicy != nil {
+						if lbPolicy, err = MergeRoutePolicies(currentLbPolicy, lbPolicy); err != nil {
+							return nil, err
+						}
+					}
 					desiredSvcRoutePolicies[lbPolicy.Name] = lbPolicy
 				}
+
 				// ExternalIP
 				extPolicy, err := r.getExternalIPRoutePolicy(p, peer, agentFamily, svc, advert, ls)
 				if err != nil {
 					return nil, fmt.Errorf("failed to get desired ExternalIP route policy: %w", err)
 				}
 				if extPolicy != nil {
+					currentExtPolicy := desiredSvcRoutePolicies[extPolicy.Name]
+					if currentExtPolicy != nil {
+						if extPolicy, err = MergeRoutePolicies(currentExtPolicy, extPolicy); err != nil {
+							return nil, err
+						}
+					}
 					desiredSvcRoutePolicies[extPolicy.Name] = extPolicy
 				}
+
 				// ClusterIP
 				clusterPolicy, err := r.getClusterIPRoutePolicy(p, peer, agentFamily, svc, advert, ls)
 				if err != nil {
 					return nil, fmt.Errorf("failed to get desired ClusterIP route policy: %w", err)
 				}
 				if clusterPolicy != nil {
+					currentClusterPolicy := desiredSvcRoutePolicies[clusterPolicy.Name]
+					if currentClusterPolicy != nil {
+						if clusterPolicy, err = MergeRoutePolicies(currentClusterPolicy, clusterPolicy); err != nil {
+							return nil, err
+						}
+					}
 					desiredSvcRoutePolicies[clusterPolicy.Name] = clusterPolicy
 				}
 			}

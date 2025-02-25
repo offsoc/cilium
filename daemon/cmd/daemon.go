@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"maps"
 	"net"
 	"net/netip"
 	"runtime"
@@ -40,7 +39,7 @@ import (
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/envoy"
-	"github.com/cilium/cilium/pkg/fqdn"
+	"github.com/cilium/cilium/pkg/fqdn/namemanager"
 	hubblecell "github.com/cilium/cilium/pkg/hubble/cell"
 	"github.com/cilium/cilium/pkg/identity"
 	identitycell "github.com/cilium/cilium/pkg/identity/cache/cell"
@@ -49,7 +48,6 @@ import (
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
 	"github.com/cilium/cilium/pkg/ipcache"
 	"github.com/cilium/cilium/pkg/k8s"
-	k8sConst "github.com/cilium/cilium/pkg/k8s/apis/cilium.io"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
@@ -75,7 +73,6 @@ import (
 	"github.com/cilium/cilium/pkg/redirectpolicy"
 	"github.com/cilium/cilium/pkg/resiliency"
 	"github.com/cilium/cilium/pkg/service"
-	serviceStore "github.com/cilium/cilium/pkg/service/store"
 	"github.com/cilium/cilium/pkg/status"
 	"github.com/cilium/cilium/pkg/time"
 	wireguard "github.com/cilium/cilium/pkg/wireguard/agent"
@@ -112,7 +109,7 @@ type Daemon struct {
 
 	// dnsNameManager tracks which api.FQDNSelector are present in policy which
 	// apply to locally running endpoints.
-	dnsNameManager *fqdn.NameManager
+	dnsNameManager namemanager.NameManager
 
 	// Used to synchronize generation of daemon's BPF programs and endpoint BPF
 	// programs.
@@ -136,14 +133,15 @@ type Daemon struct {
 
 	endpointManager endpointmanager.EndpointManager
 
-	endpointRestoreComplete chan struct{}
+	endpointRestoreComplete       chan struct{}
+	endpointInitialPolicyComplete chan struct{}
 
 	identityAllocator identitycell.CachingIdentityAllocator
 
 	ipcache *ipcache.IPCache
 
 	k8sWatcher  *watchers.K8sWatcher
-	k8sSvcCache *k8s.ServiceCache
+	k8sSvcCache k8s.ServiceCache
 
 	// endpointMetadataFetcher knows how to fetch Kubernetes metadata for endpoints.
 	endpointMetadataFetcher endpointMetadataFetcher
@@ -403,6 +401,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 		lrpManager:        params.LRPManager,
 		ctMapGC:           params.CTNATMapGC,
 		maglevConfig:      params.MaglevConfig,
+		dnsNameManager:    params.NameManager,
 	}
 
 	// initialize endpointRestoreComplete channel as soon as possible so that subsystems
@@ -410,6 +409,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	// waiting when it is not yet initialized (which causes them to block forever).
 	if option.Config.RestoreState {
 		d.endpointRestoreComplete = make(chan struct{})
+		d.endpointInitialPolicyComplete = make(chan struct{})
 	}
 
 	// Collect CIDR identities from the "old" bpf ipcache and restore them
@@ -553,7 +553,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	bootstrapStats.restore.End(true)
 
 	bootstrapStats.fqdn.Start()
-	err = d.bootstrapFQDN(restoredEndpoints.possible, option.Config.ToFQDNsPreCache, d.ipcache)
+	err = d.bootstrapFQDN(restoredEndpoints.possible, option.Config.ToFQDNsPreCache)
 	if err != nil {
 		bootstrapStats.fqdn.EndError(err)
 		return nil, restoredEndpoints, err
@@ -675,11 +675,6 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 			log.WithError(err).Errorf(msg, option.Devices)
 			return nil, nil, fmt.Errorf(msg, option.Devices)
 		}
-		if option.Config.EnableHighScaleIPcache {
-			msg := "External facing device for high-scale IPcache could not be determined. Use --%s to specify."
-			log.WithError(err).Errorf(msg, option.Devices)
-			return nil, nil, fmt.Errorf(msg, option.Devices)
-		}
 	}
 
 	// Some of the k8s watchers rely on option flags set above (specifically
@@ -723,39 +718,6 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 
 	// Configure IPAM without using the configuration yet.
 	d.configureIPAM()
-
-	if option.Config.JoinCluster {
-		if params.Clientset.IsEnabled() {
-			log.WithError(err).Errorf("cannot join a Cilium cluster (--%s) when configured as a Kubernetes node", option.JoinClusterName)
-			return nil, nil, fmt.Errorf("cannot join a Cilium cluster (--%s) when configured as a Kubernetes node", option.JoinClusterName)
-		}
-		if option.Config.KVStore == "" {
-			log.WithError(err).Errorf("joining a Cilium cluster (--%s) requires kvstore (--%s) be set", option.JoinClusterName, option.KVStore)
-			return nil, nil, fmt.Errorf("joining a Cilium cluster (--%s) requires kvstore (--%s) be set", option.JoinClusterName, option.KVStore)
-		}
-
-		agentLabels := labels.NewLabelsFromModel(option.Config.AgentLabels).K8sStringMap()
-		if option.Config.K8sNamespace != "" {
-			agentLabels[k8sConst.PodNamespaceLabel] = option.Config.K8sNamespace
-		}
-		agentLabels[k8sConst.PodNameLabel] = nodeTypes.GetName()
-		agentLabels[k8sConst.PolicyLabelCluster] = option.Config.ClusterName
-
-		// Set configured agent labels to local node for node registration
-		params.LocalNodeStore.Update(func(ln *node.LocalNode) {
-			ln.Labels = maps.Clone(ln.Labels)
-			maps.Copy(ln.Labels, agentLabels)
-		})
-
-		// This can override node addressing config, so do this before starting IPAM
-		log.WithField(logfields.NodeName, nodeTypes.GetName()).Debug("Calling JoinCluster()")
-		if err := d.nodeDiscovery.JoinCluster(nodeTypes.GetName()); err != nil {
-			return nil, nil, err
-		}
-
-		// Start services watcher
-		serviceStore.JoinClusterServices(d.k8sSvcCache, option.Config.ClusterName)
-	}
 
 	// Start IPAM
 	d.startIPAM()

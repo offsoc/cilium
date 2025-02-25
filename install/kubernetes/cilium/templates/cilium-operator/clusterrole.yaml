@@ -1,3 +1,4 @@
+{{- $secretSyncEnabled := eq (include "secretSyncEnabled" .) "true" -}}
 {{- if and .Values.operator.enabled .Values.serviceAccounts.operator.create .Values.rbac.create }}
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
@@ -90,7 +91,7 @@ rules:
   resources:
   # to check apiserver connectivity
   - namespaces
-{{- if or .Values.ingressController.enabled .Values.gatewayAPI.enabled .Values.bgpControlPlane.enabled .Values.tls.secretSync.enabled }}
+{{- if or .Values.ingressController.enabled .Values.gatewayAPI.enabled .Values.bgpControlPlane.enabled $secretSyncEnabled }}
   - secrets
 {{- end }}
   verbs:
@@ -163,6 +164,9 @@ rules:
   verbs:
   # To synchronize garbage collection of such resources
   - update
+  {{- if (or (eq .Values.identityManagementMode "operator") (eq .Values.identityManagementMode "both")) }}
+  - create
+  {{- end }}
 - apiGroups:
   - cilium.io
   resources:
@@ -235,7 +239,6 @@ rules:
   - ciliumendpoints.cilium.io
   - ciliumendpointslices.cilium.io
   - ciliumenvoyconfigs.cilium.io
-  - ciliumexternalworkloads.cilium.io
   - ciliumidentities.cilium.io
   - ciliumlocalredirectpolicies.cilium.io
   - ciliumnetworkpolicies.cilium.io
@@ -318,11 +321,32 @@ rules:
 - apiGroups:
   - gateway.networking.k8s.io
   resources:
+  - gatewayclasses
+  verbs:
+  - patch
+- apiGroups:
+  - gateway.networking.k8s.io
+  resources:
   - gatewayclasses/status
   - gateways/status
   - httproutes/status
   - grpcroutes/status
   - tlsroutes/status
+  verbs:
+  - update
+  - patch
+- apiGroups:
+  - cilium.io
+  resources:
+  - ciliumgatewayclassconfigs
+  verbs:
+  - get
+  - list
+  - watch
+- apiGroups:
+  - cilium.io
+  resources:
+  - ciliumgatewayclassconfigs/status
   verbs:
   - update
   - patch

@@ -17,7 +17,13 @@ import (
 // PolicyHandler is responsible for handling identity updates into the core
 // policy engine. See SelectorCache.UpdateIdentities() for more details.
 type PolicyHandler interface {
-	UpdateIdentities(added, deleted identity.IdentityMap, wg *sync.WaitGroup)
+	UpdateIdentities(added, deleted identity.IdentityMap, wg *sync.WaitGroup) (mutated bool)
+}
+
+// PolicyUpdater is responsible for triggering regeneration of all endpoints.
+// See pkg/policy/trigger.go for more details.
+type PolicyUpdater interface {
+	TriggerPolicyUpdates(reason string)
 }
 
 // DatapathHandler is responsible for ensuring that policy updates in the
@@ -115,4 +121,41 @@ func (id RequestedIdentity) IsValid() bool {
 
 func (id RequestedIdentity) ID() identity.NumericIdentity {
 	return identity.NumericIdentity(id)
+}
+
+// EndpointFlags represents various flags that can be attached to endpoints in the IPCache
+// This type implements ipcache.IPMetadata
+type EndpointFlags struct {
+	// isInit gets flipped to true on the first intentional flag set
+	// it is a sentinel to distinguish an uninitialized EndpointFlags
+	// from one with all flags set to false
+	isInit bool
+
+	// flagSkipTunnel can be applied to a remote endpoint to signal that
+	// packets destined for said endpoint shall not be forwarded through
+	// an overlay tunnel, regardless of Cilium's configuration.
+	flagSkipTunnel bool
+}
+
+func (e *EndpointFlags) SetSkipTunnel(skip bool) {
+	e.isInit = true
+	e.flagSkipTunnel = skip
+}
+
+func (e EndpointFlags) IsValid() bool {
+	return e.isInit
+}
+
+// Uint8 encoding MUST mimic the one in pkg/maps/ipcache
+// since it will eventually get recast to it
+const (
+	FlagSkipTunnel uint8 = 1 << iota
+)
+
+func (e EndpointFlags) Uint8() uint8 {
+	var flags uint8 = 0
+	if e.flagSkipTunnel {
+		flags = flags | FlagSkipTunnel
+	}
+	return flags
 }

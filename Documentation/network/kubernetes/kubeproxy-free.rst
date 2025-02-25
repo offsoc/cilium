@@ -384,6 +384,7 @@ service type:
       - port: 80
         targetPort: 80
     type: LoadBalancer
+    allocateLoadBalancerNodePorts: false
 
 In the above example only the ``LoadBalancer`` service is created without
 corresponding ``NodePort`` and ``ClusterIP`` services. If the annotation
@@ -492,7 +493,9 @@ The following sizes for ``M`` are supported as ``maglev.tableSize`` Helm option:
 
 For example, a ``maglev.tableSize`` of ``16381`` is suitable for a maximum of ``~160`` backends
 per service. If a higher number of backends are provisioned under this setting, then the
-difference in reassignments on backend changes will increase.
+difference in reassignments on backend changes will increase. Note that changing the table
+size (``M``) triggers a recalculation of the lookup table and can temporarily lead to inconsistent
+backend selection for new traffic until all nodes have converged and completed their agent restart.
 
 The ``maglev.hashSeed`` option is recommended to be set in order for Cilium to not rely on the
 fixed built-in seed. The seed is a base64-encoded 12 byte-random number, and can be
@@ -1153,8 +1156,7 @@ natively supports ``hostPort`` service mapping without having to use the
 Helm CNI chaining option of ``cni.chainingMode=portmap``.
 
 By specifying ``kubeProxyReplacement=true`` the native hostPort support is
-automatically enabled and therefore no further action is required. Otherwise
-``hostPort.enabled=true`` can be used to enable the setting.
+automatically enabled and therefore no further action is required.
 
 If the ``hostPort`` is specified without an additional ``hostIP``, then the
 Pod will be exposed to the outside world with the same local addresses from
@@ -1465,6 +1467,12 @@ given service sent from the same source and to the same service port will be rou
 to the same service endpoints; but two requests for the same service, sent from
 the same source but to different service ports may be routed to distinct service
 endpoints.
+
+Note that if the session affinity feature is used in combination with Maglev
+consistent hashing to select backends, then Maglev will not take the source
+port as input for its hashing in order to respect the user's ClientIP choice
+(see also `GH#26709 <https://github.com/cilium/cilium/issues/26709>`__ for
+further details).
 
 For users who run with kube-proxy (i.e. with Cilium's kube-proxy replacement
 disabled), the ClusterIP service loadbalancing when a request is sent from a pod
@@ -1865,7 +1873,6 @@ For more information, see `this GitHub issue <https://github.com/cilium/cilium/i
 Limitations
 ###########
 
-    * Cilium's eBPF kube-proxy replacement currently cannot be used with :ref:`encryption_ipsec`.
     * Cilium's eBPF kube-proxy replacement relies upon the socket-LB feature
       which uses eBPF cgroup hooks to implement the service translation. Using it with libceph
       deployments currently requires support for the getpeername(2) hook address translation in

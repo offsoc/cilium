@@ -286,6 +286,12 @@ Users (Alphabetically)
       L: https://www.equinix.nl/products/support-services/managed-services/netherlands
       Q: @jonkerj
 
+    * N: EvoCloud
+      D: EvoCloud uses Cilium as a Kubernetes proxy replacement, CNI with Gateway API integration, Cluster mesh with BGP enabled, Network policy and Hubble Observability.
+      U: L4/L7 Networking, L2 Announcement, Network Policies, Kube-proxy replacement, CNI with Gateway API, Hubble for tracing and observability, ClusterMesh and ServiceMesh
+      L: https://github.com/evocloud-dev/evocloud-paas
+      Q: @geanttechnology, @escapevelocity17321
+
     * N: Exoscale
       D: Exoscale is offering Cilium as a CNI option on its managed Kubernetes service named SKS (Scalable Kubernetes Service)
       U: CNI, Networking
@@ -341,6 +347,11 @@ Users (Alphabetically)
       U: Networking, network policy, security, and network visibility
       L: https://gdatasoftware.com
       Q: @farodin91
+
+    * N: Guidewire Software, Inc.
+      D: Guidewire Software, Inc. is using Cilium for the Guidewire Cloud Platform.
+      U: CNI, network policy, and network visibility
+      L: https://www.guidewire.com
 
     * N: IDNIC | Kadabra
       D: IDNIC is the National Internet Registry administering IP addresses for INDONESIA, uses Cilium to powered Kadabra project runing services across multi data centers.
@@ -406,6 +417,12 @@ Users (Alphabetically)
       U: Custom eBPF programs, networking, network policy, kube-proxy replacement
       L: https://youtu.be/WRACr5nXl9U
       Q: @gyutaeb
+
+    * N: KA-NABELL
+      D: KA-NABELL harnesses Cilium to deliver Kubernetes networking with robust security and clear observability.
+      U: CNI/ENI Networking, kube-proxy replacement, Monitoring via Prometheus metrics & Hubble, eBPF, CiliumNetworkPolicy
+      L: https://speakerdeck.com/andoshin11/envoy-external-authztogrpc-extensionwoli-yong-sita-wan-zhang-ranai-microservicesren-zheng-ren-ke-ji-pan?slide=8
+      Q: @kahirokunn
 
     * N: Keploy
       D: Keploy is using the Cilium to capture the network traffic to perform E2E Testing.
@@ -746,6 +763,11 @@ Users (Alphabetically)
       U: Available supported CNI
       L: https://sighup.io, https://github.com/sighupio/fury-kubernetes-networking
       Q: @jnardiello @nutellino
+
+    * N: SINAD
+      D: SINAD uses Cilium and integrates Tetragon (Which is amazing) to their application EzyKube 
+      U: CNI, Networking, Node2Node & Pod2Pod Encryption, Kube-Proxy Replacement, eBPF, security
+      L: https://sinad.io 
 
     * N: SmileDirectClub
       D: SmileDirectClub is using Cilium in manufacturing clusters (self-hosted on vSphere and AWS EC2)

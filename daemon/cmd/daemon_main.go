@@ -56,6 +56,7 @@ import (
 	"github.com/cilium/cilium/pkg/endpointstate"
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/flowdebug"
+	"github.com/cilium/cilium/pkg/fqdn/namemanager"
 	"github.com/cilium/cilium/pkg/hive"
 	hubblecell "github.com/cilium/cilium/pkg/hubble/cell"
 	"github.com/cilium/cilium/pkg/identity"
@@ -250,9 +251,8 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.MarkDeprecated(option.EnableRuntimeDeviceDetection, "Runtime device detection and datapath reconfiguration is now the default and only mode of operation")
 
 	flags.String(option.DatapathMode, defaults.DatapathMode,
-		fmt.Sprintf("Datapath mode name (%s, %s, %s, %s)",
-			datapathOption.DatapathModeVeth, datapathOption.DatapathModeNetkit,
-			datapathOption.DatapathModeNetkitL2, datapathOption.DatapathModeLBOnly))
+		fmt.Sprintf("Datapath mode name (%s, %s, %s)",
+			datapathOption.DatapathModeVeth, datapathOption.DatapathModeNetkit, datapathOption.DatapathModeNetkitL2))
 	option.BindEnv(vp, option.DatapathMode)
 
 	flags.Bool(option.EnableEndpointRoutes, defaults.EnableEndpointRoutes, "Use per endpoint routes instead of routing via cilium_host")
@@ -388,9 +388,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableUnreachableRoutes, false, "Add unreachable routes on pod deletion")
 	option.BindEnv(vp, option.EnableUnreachableRoutes)
 
-	flags.Bool(option.EnableWellKnownIdentities, defaults.EnableWellKnownIdentities, "Enable well-known identities for known Kubernetes components")
-	option.BindEnv(vp, option.EnableWellKnownIdentities)
-
 	flags.Bool(option.EnableIPSecName, defaults.EnableIPSec, "Enable IPsec support")
 	option.BindEnv(vp, option.EnableIPSecName)
 
@@ -477,9 +474,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.String(option.AgentNotReadyNodeTaintKeyName, defaults.AgentNotReadyNodeTaint, "Key of the taint indicating that Cilium is not ready on the node")
 	option.BindEnv(vp, option.AgentNotReadyNodeTaintKeyName)
 
-	flags.Bool(option.JoinClusterName, false, "Join a Cilium cluster via kvstore registration")
-	option.BindEnv(vp, option.JoinClusterName)
-
 	flags.Bool(option.K8sRequireIPv4PodCIDRName, false, "Require IPv4 PodCIDR to be specified in node resource")
 	option.BindEnv(vp, option.K8sRequireIPv4PodCIDRName)
 
@@ -489,17 +483,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Uint(option.K8sServiceCacheSize, defaults.K8sServiceCacheSize, "Cilium service cache size for kubernetes")
 	option.BindEnv(vp, option.K8sServiceCacheSize)
 	flags.MarkHidden(option.K8sServiceCacheSize)
-
-	flags.Int(option.K8sServiceDebounceBufferSize, 128, "Number of distinct services to buffer for event debouncing")
-	option.BindEnv(vp, option.K8sServiceDebounceBufferSize)
-	flags.MarkHidden(option.K8sServiceDebounceBufferSize)
-
-	flags.Duration(option.K8sServiceDebounceWaitTime, 200*time.Millisecond, "The amount of time to wait to debounce service events")
-	option.BindEnv(vp, option.K8sServiceDebounceWaitTime)
-	flags.MarkHidden(option.K8sServiceDebounceWaitTime)
-
-	flags.String(option.K8sWatcherEndpointSelector, defaults.K8sWatcherEndpointSelector, "K8s endpoint watcher will watch for these k8s endpoints")
-	option.BindEnv(vp, option.K8sWatcherEndpointSelector)
 
 	flags.Bool(option.KeepConfig, false, "When restoring state, keeps containers' configuration in place")
 	option.BindEnv(vp, option.KeepConfig)
@@ -605,11 +588,19 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.String(option.LoadBalancerDSRDispatch, option.DSRDispatchOption, "BPF load balancing DSR dispatch method (\"opt\", \"ipip\", \"geneve\")")
 	option.BindEnv(vp, option.LoadBalancerDSRDispatch)
 
+	flags.Bool(option.LoadBalancerNat46X64, false, "BPF load balancing support for NAT46 and NAT64")
+	flags.MarkHidden(option.LoadBalancerNat46X64)
+	option.BindEnv(vp, option.LoadBalancerNat46X64)
+
 	flags.String(option.LoadBalancerRSSv4CIDR, "", "BPF load balancing RSS outer source IPv4 CIDR prefix for IPIP")
 	option.BindEnv(vp, option.LoadBalancerRSSv4CIDR)
 
 	flags.String(option.LoadBalancerRSSv6CIDR, "", "BPF load balancing RSS outer source IPv6 CIDR prefix for IPIP")
 	option.BindEnv(vp, option.LoadBalancerRSSv6CIDR)
+
+	flags.Bool(option.LoadBalancerIPIPSockMark, false, "BPF load balancing logic to force socket marked traffic via IPIP")
+	flags.MarkHidden(option.LoadBalancerIPIPSockMark)
+	option.BindEnv(vp, option.LoadBalancerIPIPSockMark)
 
 	flags.String(option.LoadBalancerAcceleration, option.NodePortAccelerationDisabled, fmt.Sprintf(
 		"BPF load balancing acceleration via XDP (\"%s\", \"%s\")",
@@ -635,10 +626,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 
 	flags.Bool(option.EnableIdentityMark, true, "Enable setting identity mark for local traffic")
 	option.BindEnv(vp, option.EnableIdentityMark)
-
-	flags.Bool(option.EnableHighScaleIPcache, defaults.EnableHighScaleIPcache, "Enable the high scale mode for ipcache")
-	option.BindEnv(vp, option.EnableHighScaleIPcache)
-	flags.MarkDeprecated(option.EnableHighScaleIPcache, "The high-scale mode for ipcache is deprecated and will be removed in v1.18.")
 
 	flags.Bool(option.EnableHostFirewall, false, "Enable host network policies")
 	option.BindEnv(vp, option.EnableHostFirewall)
@@ -1054,6 +1041,10 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.MarkHidden(option.EnableNonDefaultDenyPolicies)
 	option.BindEnv(vp, option.EnableNonDefaultDenyPolicies)
 
+	flags.Bool(option.WireguardTrackAllIPsFallback, defaults.WireguardTrackAllIPsFallback, "Force WireGuard to track all IPs")
+	flags.MarkHidden(option.WireguardTrackAllIPsFallback)
+	option.BindEnv(vp, option.WireguardTrackAllIPsFallback)
+
 	flags.Bool(option.LBSourceRangeAllTypes, false, "Propagate loadbalancerSourceRanges to all corresponding service types")
 	option.BindEnv(vp, option.LBSourceRangeAllTypes)
 
@@ -1063,6 +1054,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.String(option.BootIDFilename, "/proc/sys/kernel/random/boot_id", "Path to filename of the boot ID")
 	flags.MarkHidden(option.BootIDFilename)
 	option.BindEnv(vp, option.BootIDFilename)
+
+	flags.Float64(option.ConnectivityProbeFrequencyRatio, defaults.ConnectivityProbeFrequencyRatio, "Ratio of the connectivity probe frequency vs resource usage, a float in [0, 1]. 0 will give more frequent probing, 1 will give less frequent probing. Probing frequency is dynamically adjusted based on the cluster size.")
+	option.BindEnv(vp, option.ConnectivityProbeFrequencyRatio)
 
 	if err := vp.BindPFlags(flags); err != nil {
 		log.Fatalf("BindPFlags failed: %s", err)
@@ -1295,23 +1289,6 @@ func initEnv(vp *viper.Viper) {
 		if err := probes.HaveNetkit(); err != nil {
 			log.Fatal("netkit devices need kernel 6.7.0 or newer and CONFIG_NETKIT")
 		}
-	case datapathOption.DatapathModeLBOnly:
-		log.Info("Running in LB-only mode")
-		if option.Config.NodePortAcceleration != option.NodePortAccelerationDisabled {
-			option.Config.EnablePMTUDiscovery = true
-		}
-		option.Config.KubeProxyReplacement = option.KubeProxyReplacementFalse
-		option.Config.EnableSocketLB = true
-		option.Config.EnableSocketLBPodConnectionTermination = true
-		option.Config.EnableHostPort = false
-		option.Config.EnableNodePort = true
-		option.Config.EnableExternalIPs = true
-		option.Config.RoutingMode = option.RoutingModeNative
-		option.Config.EnableHealthChecking = false
-		option.Config.EnableIPv4Masquerade = false
-		option.Config.EnableIPv6Masquerade = false
-		option.Config.InstallIptRules = false
-		option.Config.EnableL7Proxy = false
 	default:
 		log.WithField(logfields.DatapathMode, option.Config.DatapathMode).Fatal("Invalid datapath mode")
 	}
@@ -1372,31 +1349,6 @@ func initEnv(vp *viper.Viper) {
 	if option.Config.EnableHostFirewall {
 		if option.Config.EnableIPSec {
 			log.Fatal("IPSec cannot be used with the host firewall.")
-		}
-	}
-
-	if option.Config.EnableHighScaleIPcache {
-		if option.Config.TunnelingEnabled() {
-			log.Fatal("The high-scale IPcache mode requires native routing.")
-		}
-		if option.Config.EnableIPSec {
-			log.Fatal("IPsec is not supported in high scale IPcache mode.")
-		}
-		if option.Config.EnableIPv6 {
-			log.Fatal("The high-scale IPcache mode is not supported with IPv6.")
-		}
-		if !option.Config.EnableWellKnownIdentities {
-			log.Fatal("The high-scale IPcache mode requires well-known identities to be enabled.")
-		}
-		if err := probes.HaveOuterSourceIPSupport(); err != nil {
-			log.WithError(err).Fatal("The high scale IPcache mode needs support in the kernel to set the outer source IP address.")
-		}
-	}
-
-	if err := probes.HaveSKBAdjustRoomL2RoomMACSupport(); err != nil {
-		if option.Config.ServiceNoBackendResponse != option.ServiceNoBackendResponseDrop {
-			log.Warn("The kernel does not support --service-no-backend-response=reject, falling back to --service-no-backend-response=drop")
-			option.Config.ServiceNoBackendResponse = option.ServiceNoBackendResponseDrop
 		}
 	}
 
@@ -1573,7 +1525,7 @@ type daemonParams struct {
 	Shutdowner          hive.Shutdowner
 	Resources           agentK8s.Resources
 	K8sWatcher          *watchers.K8sWatcher
-	K8sSvcCache         *k8s.ServiceCache
+	K8sSvcCache         k8s.ServiceCache
 	CacheStatus         k8sSynced.CacheStatus
 	K8sResourceSynced   *k8sSynced.Resources
 	K8sAPIGroups        *k8sSynced.APIGroups
@@ -1591,7 +1543,7 @@ type daemonParams struct {
 	CNIConfigManager    cni.CNIConfigManager
 	SwaggerSpec         *server.Spec
 	HealthAPISpec       *healthApi.Spec
-	ServiceCache        *k8s.ServiceCache
+	ServiceCache        k8s.ServiceCache
 	ClusterMesh         *clustermesh.ClusterMesh
 	MonitorAgent        monitorAgent.Agent
 	L2Announcer         *l2announcer.L2Announcer
@@ -1630,6 +1582,7 @@ type daemonParams struct {
 	Hubble              hubblecell.HubbleIntegration
 	LRPManager          *redirectpolicy.Manager
 	MaglevConfig        maglev.Config
+	NameManager         namemanager.NameManager
 }
 
 func newDaemonPromise(params daemonParams) promise.Promise[*Daemon] {
@@ -1886,18 +1839,16 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 	// Watches for node neighbors link updates.
 	d.nodeDiscovery.Manager.StartNodeNeighborLinkUpdater(params.NodeNeighbors)
 
-	if option.Config.DatapathMode != datapathOption.DatapathModeLBOnly {
-		if !params.NodeNeighbors.NodeNeighDiscoveryEnabled() {
-			// Remove all non-GC'ed neighbor entries that might have previously set
-			// by a Cilium instance.
-			params.NodeNeighbors.NodeCleanNeighbors(false)
-		} else {
-			// If we came from an agent upgrade, migrate entries.
-			params.NodeNeighbors.NodeCleanNeighbors(true)
-			// Start periodical refresh of the neighbor table from the agent if needed.
-			if option.Config.ARPPingRefreshPeriod != 0 && !option.Config.ARPPingKernelManaged {
-				d.nodeDiscovery.Manager.StartNeighborRefresh(params.NodeNeighbors)
-			}
+	if !params.NodeNeighbors.NodeNeighDiscoveryEnabled() {
+		// Remove all non-GC'ed neighbor entries that might have previously set
+		// by a Cilium instance.
+		params.NodeNeighbors.NodeCleanNeighbors(false)
+	} else {
+		// If we came from an agent upgrade, migrate entries.
+		params.NodeNeighbors.NodeCleanNeighbors(true)
+		// Start periodical refresh of the neighbor table from the agent if needed.
+		if option.Config.ARPPingRefreshPeriod != 0 && !option.Config.ARPPingKernelManaged {
+			d.nodeDiscovery.Manager.StartNeighborRefresh(params.NodeNeighbors)
 		}
 	}
 

@@ -177,6 +177,8 @@ type xdsServer struct {
 	// Exported for testing only!
 	NetworkPolicyMutator xds.AckingResourceMutator
 
+	resourceConfig map[string]*xds.ResourceTypeConfiguration
+
 	// stopFunc contains the function which stops the xDS gRPC server.
 	stopFunc context.CancelFunc
 
@@ -209,13 +211,16 @@ type xdsServerConfig struct {
 	httpRetryTimeout              int
 	httpNormalizePath             bool
 	useFullTLSContext             bool
+	useSDS                        bool
 	proxyXffNumTrustedHopsIngress uint32
 	proxyXffNumTrustedHopsEgress  uint32
+	policyRestoreTimeout          time.Duration
+	metrics                       xds.Metrics
 }
 
 // newXDSServer creates a new xDS GRPC server.
-func newXDSServer(restorerPromise promise.Promise[endpointstate.Restorer], ipCache IPCacheEventSource, localEndpointStore *LocalEndpointStore, config xdsServerConfig, secretManager certificatemanager.SecretManager) (*xdsServer, error) {
-	return &xdsServer{
+func newXDSServer(restorerPromise promise.Promise[endpointstate.Restorer], ipCache IPCacheEventSource, localEndpointStore *LocalEndpointStore, config xdsServerConfig, secretManager certificatemanager.SecretManager) *xdsServer {
+	xdsServer := &xdsServer{
 		restorerPromise:    restorerPromise,
 		listenerCount:      make(map[string]uint),
 		ipCache:            ipCache,
@@ -225,61 +230,62 @@ func newXDSServer(restorerPromise promise.Promise[endpointstate.Restorer], ipCac
 		accessLogPath: getAccessLogSocketPath(config.envoySocketDir),
 		config:        config,
 		secretManager: secretManager,
-	}, nil
+	}
+
+	xdsServer.initializeXdsConfigs()
+
+	return xdsServer
 }
 
-// start configures and starts the xDS GRPC server.
 func (s *xdsServer) start() error {
 	socketListener, err := s.newSocketListener()
 	if err != nil {
 		return fmt.Errorf("failed to create socket listener: %w", err)
 	}
 
-	resourceConfig := s.initializeXdsConfigs()
-
-	s.stopFunc = s.startXDSGRPCServer(socketListener, resourceConfig)
+	s.stopFunc = s.startXDSGRPCServer(socketListener, s.resourceConfig)
 
 	return nil
 }
 
-func (s *xdsServer) initializeXdsConfigs() map[string]*xds.ResourceTypeConfiguration {
+func (s *xdsServer) initializeXdsConfigs() {
 	ldsCache := xds.NewCache()
-	ldsMutator := xds.NewAckingResourceMutatorWrapper(ldsCache)
+	ldsMutator := xds.NewAckingResourceMutatorWrapper(ldsCache, s.config.metrics)
 	ldsConfig := &xds.ResourceTypeConfiguration{
 		Source:      ldsCache,
 		AckObserver: ldsMutator,
 	}
 
 	rdsCache := xds.NewCache()
-	rdsMutator := xds.NewAckingResourceMutatorWrapper(rdsCache)
+	rdsMutator := xds.NewAckingResourceMutatorWrapper(rdsCache, s.config.metrics)
 	rdsConfig := &xds.ResourceTypeConfiguration{
 		Source:      rdsCache,
 		AckObserver: rdsMutator,
 	}
 
 	cdsCache := xds.NewCache()
-	cdsMutator := xds.NewAckingResourceMutatorWrapper(cdsCache)
+	cdsMutator := xds.NewAckingResourceMutatorWrapper(cdsCache, s.config.metrics)
 	cdsConfig := &xds.ResourceTypeConfiguration{
 		Source:      cdsCache,
 		AckObserver: cdsMutator,
 	}
 
 	edsCache := xds.NewCache()
-	edsMutator := xds.NewAckingResourceMutatorWrapper(edsCache)
+	edsMutator := xds.NewAckingResourceMutatorWrapper(edsCache, s.config.metrics)
 	edsConfig := &xds.ResourceTypeConfiguration{
 		Source:      edsCache,
 		AckObserver: edsMutator,
 	}
 
 	sdsCache := xds.NewCache()
-	sdsMutator := xds.NewAckingResourceMutatorWrapper(sdsCache)
+	sdsMutator := xds.NewAckingResourceMutatorWrapper(sdsCache, s.config.metrics)
 	sdsConfig := &xds.ResourceTypeConfiguration{
 		Source:      sdsCache,
 		AckObserver: sdsMutator,
 	}
 
 	npdsCache := xds.NewCache()
-	npdsMutator := xds.NewAckingResourceMutatorWrapper(npdsCache)
+	npdsMutator := xds.NewAckingResourceMutatorWrapper(npdsCache, s.config.metrics)
 	npdsConfig := &xds.ResourceTypeConfiguration{
 		Source:      npdsCache,
 		AckObserver: npdsMutator,
@@ -299,7 +305,7 @@ func (s *xdsServer) initializeXdsConfigs() map[string]*xds.ResourceTypeConfigura
 	s.networkPolicyCache = npdsCache
 	s.NetworkPolicyMutator = npdsMutator
 
-	resourceConfig := map[string]*xds.ResourceTypeConfiguration{
+	s.resourceConfig = map[string]*xds.ResourceTypeConfiguration{
 		ListenerTypeURL:           ldsConfig,
 		RouteTypeURL:              rdsConfig,
 		ClusterTypeURL:            cdsConfig,
@@ -308,13 +314,12 @@ func (s *xdsServer) initializeXdsConfigs() map[string]*xds.ResourceTypeConfigura
 		NetworkPolicyTypeURL:      npdsConfig,
 		NetworkPolicyHostsTypeURL: nphdsConfig,
 	}
-	return resourceConfig
 }
 
 func (s *xdsServer) newSocketListener() (*net.UnixListener, error) {
 	// Make sure sockets dir exists
 	socketsDir, _ := filepath.Split(s.socketPath)
-	os.MkdirAll(GetSocketDir(socketsDir), 0777)
+	os.MkdirAll(GetSocketDir(socketsDir), 0o777)
 
 	// Remove/Unlink the old unix domain socket, if any.
 	_ = os.Remove(s.socketPath)
@@ -392,13 +397,7 @@ func (s *xdsServer) getHttpFilterChainProto(clusterName string, tls bool, isIngr
 		},
 		InternalAddressConfig: &envoy_config_http.HttpConnectionManager_InternalAddressConfig{
 			UnixSockets: false,
-			CidrRanges: []*envoy_config_core.CidrRange{
-				{AddressPrefix: "10.0.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 8}},
-				{AddressPrefix: "172.16.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 12}},
-				{AddressPrefix: "192.168.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 16}},
-				{AddressPrefix: "127.0.0.1", PrefixLen: &wrapperspb.UInt32Value{Value: 32}},
-				{AddressPrefix: "::1", PrefixLen: &wrapperspb.UInt32Value{Value: 128}},
-			},
+			CidrRanges:  GetInternalListenerCIDRs(option.Config.IPv4Enabled(), option.Config.IPv6Enabled()),
 		},
 		StreamIdleTimeout: &durationpb.Duration{}, // 0 == disabled
 		RouteSpecifier: &envoy_config_http.HttpConnectionManager_RouteConfig{
@@ -655,13 +654,7 @@ func (s *xdsServer) AddAdminListener(port uint16, wg *completion.WaitGroup) {
 				UnixSockets: false,
 				// only RFC1918 IP addresses will be considered internal
 				// https://datatracker.ietf.org/doc/html/rfc1918
-				CidrRanges: []*envoy_config_core.CidrRange{
-					{AddressPrefix: "10.0.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 8}},
-					{AddressPrefix: "172.16.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 12}},
-					{AddressPrefix: "192.168.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 16}},
-					{AddressPrefix: "127.0.0.1", PrefixLen: &wrapperspb.UInt32Value{Value: 32}},
-					{AddressPrefix: "::1", PrefixLen: &wrapperspb.UInt32Value{Value: 128}},
-				},
+				CidrRanges: GetInternalListenerCIDRs(option.Config.IPv4Enabled(), option.Config.IPv6Enabled()),
 			},
 			StreamIdleTimeout: &durationpb.Duration{}, // 0 == disabled
 			RouteSpecifier: &envoy_config_http.HttpConnectionManager_RouteConfig{
@@ -713,6 +706,28 @@ func (s *xdsServer) AddAdminListener(port uint16, wg *completion.WaitGroup) {
 	}, false)
 }
 
+func GetInternalListenerCIDRs(ipv4, ipv6 bool) []*envoy_config_core.CidrRange {
+	var cidrRanges []*envoy_config_core.CidrRange
+
+	if ipv4 {
+		cidrRanges = append(cidrRanges,
+			[]*envoy_config_core.CidrRange{
+				{AddressPrefix: "10.0.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 8}},
+				{AddressPrefix: "172.16.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 12}},
+				{AddressPrefix: "192.168.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 16}},
+				{AddressPrefix: "127.0.0.1", PrefixLen: &wrapperspb.UInt32Value{Value: 32}},
+			}...)
+	}
+
+	if ipv6 {
+		cidrRanges = append(cidrRanges, &envoy_config_core.CidrRange{
+			AddressPrefix: "::1",
+			PrefixLen:     &wrapperspb.UInt32Value{Value: 128},
+		})
+	}
+	return cidrRanges
+}
+
 func (s *xdsServer) AddMetricsListener(port uint16, wg *completion.WaitGroup) {
 	if port == 0 {
 		return // 0 == disabled
@@ -734,13 +749,7 @@ func (s *xdsServer) AddMetricsListener(port uint16, wg *completion.WaitGroup) {
 				UnixSockets: false,
 				// only RFC1918 IP addresses will be considered internal
 				// https://datatracker.ietf.org/doc/html/rfc1918
-				CidrRanges: []*envoy_config_core.CidrRange{
-					{AddressPrefix: "10.0.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 8}},
-					{AddressPrefix: "172.16.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 12}},
-					{AddressPrefix: "192.168.0.0", PrefixLen: &wrapperspb.UInt32Value{Value: 16}},
-					{AddressPrefix: "127.0.0.1", PrefixLen: &wrapperspb.UInt32Value{Value: 32}},
-					{AddressPrefix: "::1", PrefixLen: &wrapperspb.UInt32Value{Value: 128}},
-				},
+				CidrRanges: GetInternalListenerCIDRs(option.Config.IPv4Enabled(), option.Config.IPv6Enabled()),
 			},
 			StreamIdleTimeout: &durationpb.Duration{}, // 0 == disabled
 			RouteSpecifier: &envoy_config_http.HttpConnectionManager_RouteConfig{
@@ -906,7 +915,6 @@ func getListenerFilter(isIngress bool, useOriginalSourceAddr bool, proxyPort uin
 		BpfRoot:                  bpf.BPFFSRoot(),
 		IsL7Lb:                   false,
 		ProxyId:                  uint32(proxyPort),
-		PolicyUpdateWarningLimit: durationpb.New(option.Config.FQDNProxyResponseMaxDelay),
 	}
 
 	return &envoy_config_listener.ListenerFilter{
@@ -1371,8 +1379,8 @@ var CiliumXDSConfigSource = &envoy_config_core.ConfigSource{
 // lead Envoy to enforce client TLS between the client pod and the interception point in Envoy. In this case,
 // Secrets will be sent to Envoy via the old, inline-in-NPDS method, and _not_ via SDS, and so this method will
 // return whatever is in the *policy.TLSContext.
-func toEnvoyOriginatingTLSContext(tls *policy.TLSContext, policySecretsNamespace string, useFullTLSContext bool) *cilium.TLSContext {
-	if !tls.FromFile && policySecretsNamespace != "" {
+func toEnvoyOriginatingTLSContext(tls *policy.TLSContext, policySecretsNamespace string, useSDS, useFullTLSContext bool) *cilium.TLSContext {
+	if !tls.FromFile && useSDS && policySecretsNamespace != "" {
 		// If values are not present in these fields, then we should be using SDS,
 		// and Secret should be populated.
 		if tls.Secret.String() != "/" {
@@ -1408,8 +1416,8 @@ func toEnvoyOriginatingTLSContext(tls *policy.TLSContext, policySecretsNamespace
 // lead Envoy to enforce client TLS between the client pod and the interception point in Envoy. In this case,
 // Secrets will be sent to Envoy via the old, inline-in-NPDS method, and _not_ via SDS, and so this method will
 // return whatever is in the *policy.TLSContext.
-func toEnvoyTerminatingTLSContext(tls *policy.TLSContext, policySecretsNamespace string, useFullTLSContext bool) *cilium.TLSContext {
-	if !tls.FromFile && policySecretsNamespace != "" {
+func toEnvoyTerminatingTLSContext(tls *policy.TLSContext, policySecretsNamespace string, useSDS, useFullTLSContext bool) *cilium.TLSContext {
+	if !tls.FromFile && useSDS && policySecretsNamespace != "" {
 		// If the values have been read from Kubernetes, then we should be using SDS,
 		// and Secret should be populated.
 		if tls.Secret.String() != "/" {
@@ -1469,7 +1477,7 @@ func GetEnvoyHTTPRules(secretManager certificatemanager.SecretManager, l7Rules *
 	return nil, true
 }
 
-func getPortNetworkPolicyRule(version *versioned.VersionHandle, sel policy.CachedSelector, wildcard bool, l7Parser policy.L7ParserType, l7Rules *policy.PerSelectorPolicy, useFullTLSContext bool, policySecretsNamespace string) (*cilium.PortNetworkPolicyRule, bool) {
+func getPortNetworkPolicyRule(version *versioned.VersionHandle, sel policy.CachedSelector, wildcard bool, l7Parser policy.L7ParserType, l7Rules *policy.PerSelectorPolicy, useFullTLSContext, useSDS bool, policySecretsNamespace string) (*cilium.PortNetworkPolicyRule, bool) {
 	r := &cilium.PortNetworkPolicyRule{}
 
 	// Optimize the policy if the endpoint selector is a wildcard by
@@ -1504,10 +1512,10 @@ func getPortNetworkPolicyRule(version *versioned.VersionHandle, sel policy.Cache
 	// If secret synchronization is enabled, useFullTLSContext is unused, as SDS handling can handle Secrets with extra
 	// keys correctly.
 	if l7Rules.TerminatingTLS != nil {
-		r.DownstreamTlsContext = toEnvoyTerminatingTLSContext(l7Rules.TerminatingTLS, policySecretsNamespace, useFullTLSContext)
+		r.DownstreamTlsContext = toEnvoyTerminatingTLSContext(l7Rules.TerminatingTLS, policySecretsNamespace, useSDS, useFullTLSContext)
 	}
 	if l7Rules.OriginatingTLS != nil {
-		r.UpstreamTlsContext = toEnvoyOriginatingTLSContext(l7Rules.OriginatingTLS, policySecretsNamespace, useFullTLSContext)
+		r.UpstreamTlsContext = toEnvoyOriginatingTLSContext(l7Rules.OriginatingTLS, policySecretsNamespace, useSDS, useFullTLSContext)
 	}
 
 	if len(l7Rules.ServerNames) > 0 {
@@ -1635,7 +1643,7 @@ func getWildcardNetworkPolicyRule(version *versioned.VersionHandle, selectors po
 	}
 }
 
-func getDirectionNetworkPolicy(ep endpoint.EndpointUpdater, l4Policy policy.L4PolicyMap, policyEnforced bool, useFullTLSContext bool, dir string, policySecretsNamespace string) []*cilium.PortNetworkPolicy {
+func getDirectionNetworkPolicy(ep endpoint.EndpointUpdater, l4Policy policy.L4PolicyMap, policyEnforced bool, useFullTLSContext, useSDS bool, dir string, policySecretsNamespace string) []*cilium.PortNetworkPolicy {
 	// TODO: integrate visibility with enforced policy
 	if !policyEnforced {
 		// Always allow all ports
@@ -1704,7 +1712,7 @@ func getDirectionNetworkPolicy(ep endpoint.EndpointUpdater, l4Policy policy.L4Po
 				// then the proxy may need to drop some allowed l3 due to l7 rules potentially
 				// being different between the selectors.
 				wildcard := nSelectors == 1 || sel.IsWildcard()
-				rule, cs := getPortNetworkPolicyRule(version, sel, wildcard, l4.L7Parser, l7, useFullTLSContext, policySecretsNamespace)
+				rule, cs := getPortNetworkPolicyRule(version, sel, wildcard, l4.L7Parser, l7, useFullTLSContext, useSDS, policySecretsNamespace)
 				if rule != nil {
 					if !cs {
 						canShortCircuit = false
@@ -1770,7 +1778,7 @@ func getDirectionNetworkPolicy(ep endpoint.EndpointUpdater, l4Policy policy.L4Po
 
 // getNetworkPolicy converts a network policy into a cilium.NetworkPolicy.
 func getNetworkPolicy(ep endpoint.EndpointUpdater, ips []string, l4Policy *policy.L4Policy,
-	ingressPolicyEnforced, egressPolicyEnforced, useFullTLSContext bool, policySecretsNamespace string,
+	ingressPolicyEnforced, egressPolicyEnforced, useFullTLSContext, useSDS bool, policySecretsNamespace string,
 ) *cilium.NetworkPolicy {
 	p := &cilium.NetworkPolicy{
 		EndpointIps:      ips,
@@ -1784,8 +1792,8 @@ func getNetworkPolicy(ep endpoint.EndpointUpdater, ips []string, l4Policy *polic
 		ingressMap = l4Policy.Ingress.PortRules
 		egressMap = l4Policy.Egress.PortRules
 	}
-	p.IngressPerPortPolicies = getDirectionNetworkPolicy(ep, ingressMap, ingressPolicyEnforced, useFullTLSContext, "ingress", policySecretsNamespace)
-	p.EgressPerPortPolicies = getDirectionNetworkPolicy(ep, egressMap, egressPolicyEnforced, useFullTLSContext, "egress", policySecretsNamespace)
+	p.IngressPerPortPolicies = getDirectionNetworkPolicy(ep, ingressMap, ingressPolicyEnforced, useFullTLSContext, useSDS, "ingress", policySecretsNamespace)
+	p.EgressPerPortPolicies = getDirectionNetworkPolicy(ep, egressMap, egressPolicyEnforced, useFullTLSContext, useSDS, "egress", policySecretsNamespace)
 
 	return p
 }
@@ -1847,7 +1855,7 @@ func (s *xdsServer) UpdateNetworkPolicy(ep endpoint.EndpointUpdater, policy *pol
 		return nil, func() error { return nil }
 	}
 
-	networkPolicy := getNetworkPolicy(ep, ips, policy, ingressPolicyEnforced, egressPolicyEnforced, s.config.useFullTLSContext, s.secretManager.GetSecretSyncNamespace())
+	networkPolicy := getNetworkPolicy(ep, ips, policy, ingressPolicyEnforced, egressPolicyEnforced, s.config.useFullTLSContext, s.config.useSDS, s.secretManager.GetSecretSyncNamespace())
 
 	// First, validate the policy
 	err := networkPolicy.Validate()

@@ -14,14 +14,14 @@ inputs:
     description: ''
     required: false
     default: ''
-  spot:
-    description: ''
+  addons:
+    description: 'Space-separated list of add-ons to include'
     required: false
-    default: 'true'
+    default: 'coredns kube-proxy vpc-cni'
 runs:
   using: composite
   steps:
-    - name: Create EKS cluster
+    - name: Create EKS cluster with ${{ inputs.addons }}
       shell: bash
       run: |
         cat <<EOF > eks-config.yaml
@@ -36,31 +36,18 @@ runs:
            usage: "${{ github.repository_owner }}-${{ github.event.repository.name }}"
            owner: "${{ inputs.owner }}"
 
-        managedNodeGroups:
-        - name: ng-amd64
-          instanceTypes:
-           - t3.medium
-          desiredCapacity: 1
-          spot: ${{ inputs.spot }}
-          privateNetworking: true
-          volumeType: "gp3"
-          volumeSize: 20
-          taints:
-           - key: "node.cilium.io/agent-not-ready"
-             value: "true"
-             effect: "NoExecute"
-        - name: ng-arm64
-          instanceTypes:
-           - t4g.medium
-          desiredCapacity: 2
-          spot: ${{ inputs.spot }}
-          privateNetworking: true
-          volumeType: "gp3"
-          volumeSize: 20
-          taints:
-           - key: "node.cilium.io/agent-not-ready"
-             value: "true"
-             effect: "NoExecute"
+        vpc:
+          clusterEndpoints:
+            publicAccess: true
+            privateAccess: true
+
+        addonsConfig:
+          disableDefaultAddons: true
+        addons:
         EOF
+
+        for addon in ${{ inputs.addons }}; do
+          echo "- name: $addon" >> eks-config.yaml
+        done
 
         eksctl create cluster -f ./eks-config.yaml

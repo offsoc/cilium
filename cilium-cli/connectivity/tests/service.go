@@ -12,6 +12,7 @@ import (
 
 	"github.com/cilium/cilium/cilium-cli/connectivity/check"
 	"github.com/cilium/cilium/cilium-cli/utils/features"
+	"github.com/cilium/cilium/pkg/versioncheck"
 )
 
 // PodToService sends an HTTP request from all client Pods
@@ -22,6 +23,7 @@ func PodToService(opts ...Option) check.Scenario {
 		opt(options)
 	}
 	return &podToService{
+		ScenarioBase:      check.NewScenarioBase(),
 		sourceLabels:      options.sourceLabels,
 		destinationLabels: options.destinationLabels,
 	}
@@ -29,6 +31,8 @@ func PodToService(opts ...Option) check.Scenario {
 
 // podToService implements a Scenario.
 type podToService struct {
+	check.ScenarioBase
+
 	sourceLabels      map[string]string
 	destinationLabels map[string]string
 }
@@ -74,6 +78,7 @@ func PodToIngress(opts ...Option) check.Scenario {
 		opt(options)
 	}
 	return &podToIngress{
+		ScenarioBase:      check.NewScenarioBase(),
 		sourceLabels:      options.sourceLabels,
 		destinationLabels: options.destinationLabels,
 	}
@@ -81,6 +86,8 @@ func PodToIngress(opts ...Option) check.Scenario {
 
 // podToIngress implements a Scenario.
 type podToIngress struct {
+	check.ScenarioBase
+
 	sourceLabels      map[string]string
 	destinationLabels map[string]string
 }
@@ -118,11 +125,15 @@ func (s *podToIngress) Run(ctx context.Context, t *check.Test) {
 // PodToRemoteNodePort sends an HTTP request from all client Pods
 // to all echo Services' NodePorts, but only to other nodes.
 func PodToRemoteNodePort() check.Scenario {
-	return &podToRemoteNodePort{}
+	return &podToRemoteNodePort{
+		ScenarioBase: check.NewScenarioBase(),
+	}
 }
 
 // podToRemoteNodePort implements a Scenario.
-type podToRemoteNodePort struct{}
+type podToRemoteNodePort struct {
+	check.ScenarioBase
+}
 
 func (s *podToRemoteNodePort) Name() string {
 	return "pod-to-remote-nodeport"
@@ -159,11 +170,15 @@ func (s *podToRemoteNodePort) Run(ctx context.Context, t *check.Test) {
 // to all echo Services' NodePorts, but only on the same node as
 // the client Pods.
 func PodToLocalNodePort() check.Scenario {
-	return &podToLocalNodePort{}
+	return &podToLocalNodePort{
+		ScenarioBase: check.NewScenarioBase(),
+	}
 }
 
 // podToLocalNodePort implements a Scenario.
-type podToLocalNodePort struct{}
+type podToLocalNodePort struct {
+	check.ScenarioBase
+}
 
 func (s *podToLocalNodePort) Name() string {
 	return "pod-to-local-nodeport"
@@ -227,6 +242,13 @@ func curlNodePort(ctx context.Context, s check.Scenario, t *check.Test,
 				}
 			}
 
+			//  Skip IPv6 requests when running on <1.14.0 Cilium with CNPs
+			if features.GetIPFamily(addr.Address) == features.IPFamilyV6 &&
+				versioncheck.MustCompile("<1.14.0")(t.Context().CiliumVersion) &&
+				t.HasNetworkPolicies() {
+				continue
+			}
+
 			// Manually construct an HTTP endpoint to override the destination IP
 			// and port of the request.
 			ep := check.HTTPEndpoint(name, fmt.Sprintf("%s://%s:%d%s", svc.Scheme(), addr.Address, np, svc.Path()))
@@ -252,10 +274,14 @@ func curlNodePort(ctx context.Context, s check.Scenario, t *check.Test,
 // OutsideToNodePort sends an HTTP request from client pod running on a node w/o
 // Cilium to NodePort services.
 func OutsideToNodePort() check.Scenario {
-	return &outsideToNodePort{}
+	return &outsideToNodePort{
+		ScenarioBase: check.NewScenarioBase(),
+	}
 }
 
-type outsideToNodePort struct{}
+type outsideToNodePort struct {
+	check.ScenarioBase
+}
 
 func (s *outsideToNodePort) Name() string {
 	return "outside-to-nodeport"
@@ -282,10 +308,14 @@ func (s *outsideToNodePort) Run(ctx context.Context, t *check.Test) {
 // OutsideToIngressService sends an HTTP request from client pod running on a node w/o
 // Cilium to NodePort services.
 func OutsideToIngressService() check.Scenario {
-	return &outsideToIngressService{}
+	return &outsideToIngressService{
+		ScenarioBase: check.NewScenarioBase(),
+	}
 }
 
-type outsideToIngressService struct{}
+type outsideToIngressService struct {
+	check.ScenarioBase
+}
 
 func (s *outsideToIngressService) Name() string {
 	return "outside-to-ingress-service"

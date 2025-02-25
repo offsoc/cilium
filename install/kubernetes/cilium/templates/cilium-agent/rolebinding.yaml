@@ -1,3 +1,5 @@
+{{- $readSecretsOnlyFromSecretsNamespace := eq (include "readSecretsOnlyFromSecretsNamespace" .) "true" -}}
+
 {{- if and .Values.agent (not .Values.preflight.enabled) }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
@@ -37,6 +39,9 @@ metadata:
   {{- end }}
   labels:
     app.kubernetes.io/part-of: cilium
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -60,6 +65,9 @@ metadata:
   {{- end }}
   labels:
     app.kubernetes.io/part-of: cilium
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -83,6 +91,9 @@ metadata:
   {{- end }}
   labels:
     app.kubernetes.io/part-of: cilium
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -102,6 +113,9 @@ metadata:
   namespace: {{ .Values.bgpControlPlane.secretsNamespace.name | quote }}
   labels:
     app.kubernetes.io/part-of: cilium
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role
@@ -112,15 +126,18 @@ subjects:
   namespace: {{ include "cilium.namespace" . }}
 {{- end}}
 
-{{- if and .Values.operator.enabled .Values.serviceAccounts.operator.create .Values.tls.secretSync.enabled .Values.tls.secretSync.secretsNamespace.name ( eq "k8s" .Values.tls.secretsBackend )}}
+{{- if and $readSecretsOnlyFromSecretsNamespace .Values.tls.secretsNamespace.name }}
 ---
 apiVersion: rbac.authorization.k8s.io/v1
 kind: RoleBinding
 metadata:
   name: cilium-tlsinterception-secrets
-  namespace: {{ .Values.tls.secretSync.secretsNamespace.name | quote }}
+  namespace: {{ .Values.tls.secretsNamespace.name | quote }}
   labels:
     app.kubernetes.io/part-of: cilium
+    {{- with .Values.commonLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
 roleRef:
   apiGroup: rbac.authorization.k8s.io
   kind: Role

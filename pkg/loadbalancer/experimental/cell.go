@@ -8,7 +8,6 @@ import (
 	"github.com/cilium/statedb"
 	"github.com/cilium/stream"
 
-	daemonK8s "github.com/cilium/cilium/daemon/k8s"
 	"github.com/cilium/cilium/pkg/k8s"
 	"github.com/cilium/cilium/pkg/k8s/resource"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
@@ -40,6 +39,13 @@ var Cell = cell.Module(
 
 	// Provide the 'lb/' script commands for debugging and testing.
 	cell.Provide(scriptCommands),
+
+	//
+	// Health server runs an HTTP server for each service on port [HealthCheckNodePort]
+	// (when non-zero) and responds with the number of healthy backends.
+	healthServerCell,
+
+	cell.Invoke(registerNodePortAddressReconciler),
 )
 
 // TablesCell provides the [Writer] API for configuring load-balancing and the
@@ -79,14 +85,12 @@ type resourceIn struct {
 	cell.In
 	ServicesResource  resource.Resource[*slim_corev1.Service]
 	EndpointsResource resource.Resource[*k8s.Endpoints]
-	PodsResource      daemonK8s.LocalPodResource
 }
 
 type StreamsOut struct {
 	cell.Out
 	ServicesStream  stream.Observable[resource.Event[*slim_corev1.Service]]
 	EndpointsStream stream.Observable[resource.Event[*k8s.Endpoints]]
-	PodsStream      stream.Observable[resource.Event[*slim_corev1.Pod]]
 }
 
 // resourcesToStreams extracts the stream.Observable from resource.Resource.
@@ -95,6 +99,5 @@ func resourcesToStreams(in resourceIn) StreamsOut {
 	return StreamsOut{
 		ServicesStream:  in.ServicesResource,
 		EndpointsStream: in.EndpointsResource,
-		PodsStream:      in.PodsResource,
 	}
 }

@@ -131,6 +131,8 @@ var (
 		"ipam.operator.clusterPoolIPv6PodCIDRList": "fd02::/112",
 
 		"extraConfig.max-internal-timer-delay": "5s",
+
+		"connectivityProbeFrequencyRatio": "0",
 	}
 
 	eksChainingHelmOverrides = map[string]string{
@@ -263,10 +265,6 @@ func Init() {
 
 	if config.CiliumTestConfig.HubbleRelayTag != "" {
 		os.Setenv("HUBBLE_RELAY_TAG", config.CiliumTestConfig.HubbleRelayTag)
-	}
-
-	if !config.CiliumTestConfig.ProvisionK8s {
-		os.Setenv("SKIP_K8S_PROVISION", "true")
 	}
 
 	// Copy over envronment variables that are passed in.

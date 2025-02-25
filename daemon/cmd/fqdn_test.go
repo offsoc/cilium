@@ -21,6 +21,7 @@ import (
 	"github.com/cilium/cilium/pkg/fqdn"
 	"github.com/cilium/cilium/pkg/fqdn/dns"
 	"github.com/cilium/cilium/pkg/fqdn/dnsproxy"
+	"github.com/cilium/cilium/pkg/fqdn/namemanager"
 	"github.com/cilium/cilium/pkg/fqdn/re"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/ipcache"
@@ -50,7 +51,6 @@ func setupDaemonFQDNSuite(tb testing.TB) *DaemonFQDNSuite {
 	// Also, node.SetTestLocalNodeStore() panics if it called more than once.
 	notifyOnDNSMsgBenchSetup.Do(func() {
 		// set FQDN related options to defaults in order to avoid a flood of warnings
-		option.Config.DNSProxyLockCount = defaults.DNSProxyLockCount
 		option.Config.DNSProxyLockTimeout = defaults.DNSProxyLockTimeout
 		option.Config.FQDNProxyResponseMaxDelay = defaults.FQDNProxyResponseMaxDelay
 
@@ -72,9 +72,12 @@ func setupDaemonFQDNSuite(tb testing.TB) *DaemonFQDNSuite {
 		PolicyHandler:     d.policy.GetSelectorCache(),
 		DatapathHandler:   d.endpointManager,
 	})
-	d.dnsNameManager = fqdn.NewNameManager(fqdn.Config{
-		MinTTL:  1,
-		Cache:   fqdn.NewDNSCache(0),
+	d.dnsNameManager = namemanager.New(namemanager.ManagerParams{
+		Config: namemanager.NameManagerConfig{
+			MinTTL:            1,
+			DNSProxyLockCount: defaults.DNSProxyLockCount,
+			StateDir:          defaults.StateDir,
+		},
 		IPCache: d.ipcache,
 	})
 	d.policy.GetSelectorCache().SetLocalIdentityNotifier(d.dnsNameManager)
@@ -106,7 +109,7 @@ func BenchmarkNotifyOnDNSMsg(b *testing.B) {
 	dscu := &testpolicy.DummySelectorCacheUser{}
 	selectorsToAdd := api.FQDNSelectorSlice{ciliumIOSel, ciliumIOSelMatchPattern, ebpfIOSel}
 	for _, sel := range selectorsToAdd {
-		ds.d.policy.GetSelectorCache().AddFQDNSelector(dscu, nil, sel)
+		ds.d.policy.GetSelectorCache().AddFQDNSelector(dscu, policy.EmptyStringLabels, sel)
 	}
 
 	const nEndpoints int = 1024
@@ -141,7 +144,7 @@ func BenchmarkNotifyOnDNSMsg(b *testing.B) {
 				// parameter is only used in logging. Not using the endpoint's IP
 				// so we don't spend any time in the benchmark on converting from
 				// net.IP to string.
-				require.NoError(b, ds.d.notifyOnDNSMsg(time.Now(), ep, "10.96.64.8:12345", 0, "10.96.64.1:53", &ciliumdns.Msg{
+				require.NoError(b, ds.d.notifyOnDNSMsg(time.Now(), ep, "10.96.64.8:12345", 0, netip.MustParseAddrPort("10.96.64.1:53"), &ciliumdns.Msg{
 					MsgHdr: ciliumdns.MsgHdr{
 						Response: true,
 					},
@@ -153,7 +156,7 @@ func BenchmarkNotifyOnDNSMsg(b *testing.B) {
 						A:   net.ParseIP("192.0.2.3"),
 					}}}, "udp", true, &dnsproxy.ProxyRequestContext{}))
 
-				require.NoError(b, ds.d.notifyOnDNSMsg(time.Now(), ep, "10.96.64.4:54321", 0, "10.96.64.1:53", &ciliumdns.Msg{
+				require.NoError(b, ds.d.notifyOnDNSMsg(time.Now(), ep, "10.96.64.4:54321", 0, netip.MustParseAddrPort("10.96.64.1:53"), &ciliumdns.Msg{
 					MsgHdr: ciliumdns.MsgHdr{
 						Response: true,
 					},

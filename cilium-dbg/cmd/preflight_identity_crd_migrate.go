@@ -6,9 +6,9 @@ package cmd
 import (
 	"context"
 	"errors"
-	"log/slog"
 	"path"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/cilium/hive/cell"
@@ -64,11 +64,7 @@ func migrateIdentityCmd() *cobra.Command {
 	hive.RegisterFlags(cmd.Flags())
 
 	cmd.Run = func(cmd *cobra.Command, args []string) {
-		// The internal packages log things. Make sure they follow the setup of
-		// the CLI tool.
-		logging.DefaultLogger.SetFormatter(log.Formatter)
-
-		if err := hive.Run(slog.Default()); err != nil {
+		if err := hive.Run(logging.DefaultSlogLogger); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -212,9 +208,10 @@ func initK8s(ctx context.Context, clientset k8sClient.Clientset) (crdBackend all
 
 	// Create a CRD Backend
 	crdBackend, err := identitybackend.NewCRDBackend(identitybackend.CRDBackendConfiguration{
-		Store:   nil,
-		Client:  clientset,
-		KeyFunc: (&cacheKey.GlobalIdentity{}).PutKeyFromMap,
+		Store:    nil,
+		StoreSet: &atomic.Bool{},
+		Client:   clientset,
+		KeyFunc:  (&cacheKey.GlobalIdentity{}).PutKeyFromMap,
 	})
 	if err != nil {
 		log.WithError(err).Fatal("Cannot create CRD identity backend")
