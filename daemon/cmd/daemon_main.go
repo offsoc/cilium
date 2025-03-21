@@ -6,6 +6,7 @@ package cmd
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"math"
 	"os"
 	"path"
@@ -19,6 +20,7 @@ import (
 	"github.com/cilium/ebpf/asm"
 	"github.com/cilium/ebpf/rlimit"
 	"github.com/cilium/hive/cell"
+	"github.com/cilium/hive/job"
 	"github.com/cilium/statedb"
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
@@ -56,6 +58,7 @@ import (
 	"github.com/cilium/cilium/pkg/endpointstate"
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/flowdebug"
+	"github.com/cilium/cilium/pkg/fqdn/defaultdns"
 	"github.com/cilium/cilium/pkg/fqdn/namemanager"
 	"github.com/cilium/cilium/pkg/hive"
 	hubblecell "github.com/cilium/cilium/pkg/hubble/cell"
@@ -75,6 +78,7 @@ import (
 	"github.com/cilium/cilium/pkg/l2announcer"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/labelsfilter"
+	"github.com/cilium/cilium/pkg/loadbalancer/experimental"
 	"github.com/cilium/cilium/pkg/loadinfo"
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
@@ -97,6 +101,7 @@ import (
 	policyDirectory "github.com/cilium/cilium/pkg/policy/directory"
 	"github.com/cilium/cilium/pkg/promise"
 	"github.com/cilium/cilium/pkg/proxy"
+	"github.com/cilium/cilium/pkg/proxy/accesslog"
 	"github.com/cilium/cilium/pkg/rate"
 	"github.com/cilium/cilium/pkg/redirectpolicy"
 	"github.com/cilium/cilium/pkg/service"
@@ -190,9 +195,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 
 	flags.Int(option.ClusterHealthPort, defaults.ClusterHealthPort, "TCP port for cluster-wide network connectivity health API")
 	option.BindEnv(vp, option.ClusterHealthPort)
-
-	flags.StringSlice(option.AgentLabels, []string{}, "Additional labels to identify this agent")
-	option.BindEnv(vp, option.AgentLabels)
 
 	flags.Bool(option.AllowICMPFragNeeded, defaults.AllowICMPFragNeeded, "Allow ICMP Fragmentation Needed type packets for purposes like TCP Path MTU.")
 	option.BindEnv(vp, option.AllowICMPFragNeeded)
@@ -382,6 +384,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableTracing, false, "Enable tracing while determining policy (debugging)")
 	option.BindEnv(vp, option.EnableTracing)
 
+	flags.Bool(option.BPFDistributedLRU, defaults.BPFDistributedLRU, "Enable per-CPU BPF LRU backend memory")
+	option.BindEnv(vp, option.BPFDistributedLRU)
+
 	flags.Bool(option.BPFConntrackAccounting, defaults.BPFConntrackAccounting, "Enable CT accounting for packets and bytes (default false)")
 	option.BindEnv(vp, option.BPFConntrackAccounting)
 
@@ -501,10 +506,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 
 	flags.Duration(option.KVstoreConnectivityTimeout, defaults.KVstoreConnectivityTimeout, "Time after which an incomplete kvstore operation  is considered failed")
 	option.BindEnv(vp, option.KVstoreConnectivityTimeout)
-
-	flags.Bool(option.KVstorePodNetworkSupport, defaults.KVstorePodNetworkSupport, "Enable the support for running the Cilium KVstore in pod network")
-	flags.MarkHidden(option.KVstorePodNetworkSupport)
-	option.BindEnv(vp, option.KVstorePodNetworkSupport)
 
 	flags.Var(option.NewNamedMapOptions(option.KVStoreOpt, &option.Config.KVStoreOpt, nil),
 		option.KVStoreOpt, "Key-value store options e.g. etcd.address=127.0.0.1:4001")
@@ -782,9 +783,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Int(option.NeighMapEntriesGlobalName, option.NATMapEntriesGlobalDefault, "Maximum number of entries for the global BPF neighbor table")
 	option.BindEnv(vp, option.NeighMapEntriesGlobalName)
 
-	flags.Int(option.PolicyMapEntriesName, policymap.MaxEntries, "Maximum number of entries in endpoint policy map (per endpoint)")
-	option.BindEnv(vp, option.PolicyMapEntriesName)
-
 	flags.Duration(option.PolicyMapFullReconciliationIntervalName, 15*time.Minute, "Interval for full reconciliation of endpoint policy map")
 	option.BindEnv(vp, option.PolicyMapFullReconciliationIntervalName)
 	flags.MarkHidden(option.PolicyMapFullReconciliationIntervalName)
@@ -923,9 +921,6 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 
 	flags.Var(option.NewNamedMapOptions(option.BPFMapEventBuffers, &option.Config.BPFMapEventBuffers, option.Config.BPFMapEventBuffersValidator), option.BPFMapEventBuffers, "Configuration for BPF map event buffers: (example: --bpf-map-event-buffers cilium_ipcache=true,1024,1h)")
 	flags.MarkHidden(option.BPFMapEventBuffers)
-
-	flags.Duration(option.CRDWaitTimeout, 5*time.Minute, "Cilium will exit if CRDs are not available within this duration upon startup")
-	option.BindEnv(vp, option.CRDWaitTimeout)
 
 	flags.Bool(option.EgressMultiHomeIPRuleCompat, false,
 		"Offset routing table IDs under ENI IPAM mode to avoid collisions with reserved table IDs. If false, the offset is performed (new scheme), otherwise, the old scheme stays in-place.")
@@ -1461,7 +1456,7 @@ func (d *Daemon) initKVStore(resolver *dial.ServiceResolver) {
 		controller.ControllerParams{
 			Group: cg,
 			DoFunc: func(ctx context.Context) error {
-				kvstore.RunLockGC()
+				kvstore.RunLockGC(logging.DefaultSlogLogger)
 				return nil
 			},
 			RunInterval: defaults.KVStoreStaleLockTimeout,
@@ -1473,13 +1468,13 @@ func (d *Daemon) initKVStore(resolver *dial.ServiceResolver) {
 	// looking at services from k8s and retrieve the service IP from that.
 	// This makes cilium to not depend on kube dns to interact with etcd
 	if d.clientset.IsEnabled() {
-		log := log.WithField(logfields.LogSubsys, "etcd")
+		log := logging.DefaultSlogLogger.With(logfields.LogSubsys, "etcd")
 		goopts.DialOption = []grpc.DialOption{
 			grpc.WithContextDialer(dial.NewContextDialer(log, resolver)),
 		}
 	}
 
-	if err := kvstore.Setup(context.TODO(), option.Config.KVStore, option.Config.KVStoreOpt, goopts); err != nil {
+	if err := kvstore.Setup(context.TODO(), logging.DefaultSlogLogger, option.Config.KVStore, option.Config.KVStoreOpt, goopts); err != nil {
 		addrkey := fmt.Sprintf("%s.address", option.Config.KVStore)
 		addr := option.Config.KVStoreOpt[addrkey]
 
@@ -1516,6 +1511,7 @@ type daemonParams struct {
 
 	CfgResolver promise.Resolver[*option.DaemonConfig]
 
+	Logger              *slog.Logger
 	Lifecycle           cell.Lifecycle
 	Health              cell.Health
 	Clientset           k8sClient.Clientset
@@ -1533,10 +1529,12 @@ type daemonParams struct {
 	NodeHandler         datapath.NodeHandler
 	NodeNeighbors       datapath.NodeNeighbors
 	NodeAddressing      datapath.NodeAddressing
+	PolicyMapFactory    policymap.Factory
 	EndpointManager     endpointmanager.EndpointManager
 	CertManager         certificatemanager.CertificateManager
 	SecretManager       certificatemanager.SecretManager
 	IdentityAllocator   identitycell.CachingIdentityAllocator
+	JobGroup            job.Group
 	Policy              policy.PolicyRepository
 	IPCache             *ipcache.IPCache
 	DirReadStatus       policyDirectory.DirectoryWatcherReadStatus
@@ -1549,11 +1547,13 @@ type daemonParams struct {
 	L2Announcer         *l2announcer.L2Announcer
 	ServiceManager      service.ServiceManager
 	L7Proxy             *proxy.Proxy
+	ProxyAccessLogger   accesslog.ProxyAccessLogger
 	EnvoyXdsServer      envoy.XDSServer
 	DB                  *statedb.DB
 	APILimiterSet       *rate.APILimiterSet
 	AuthManager         *auth.AuthManager
 	Settings            cellSettings
+	Routes              statedb.Table[*datapathTables.Route]
 	Devices             statedb.Table[*datapathTables.Device]
 	NodeAddrs           statedb.Table[datapathTables.NodeAddress]
 	DirectRoutingDevice datapathTables.DirectRoutingDevice
@@ -1583,6 +1583,8 @@ type daemonParams struct {
 	LRPManager          *redirectpolicy.Manager
 	MaglevConfig        maglev.Config
 	NameManager         namemanager.NameManager
+	ExpLBConfig         experimental.Config
+	DNSProxy            defaultdns.Proxy
 }
 
 func newDaemonPromise(params daemonParams) promise.Promise[*Daemon] {
@@ -1732,7 +1734,7 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 	} else {
 		log.Info("Creating host endpoint")
 		err := d.endpointManager.AddHostEndpoint(
-			d.ctx, d, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC)
+			d.ctx, d, d.policyMapFactory, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC)
 		if err != nil {
 			return fmt.Errorf("unable to create host endpoint: %w", err)
 		}
@@ -1748,7 +1750,7 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 			} else {
 				log.Info("Creating ingress endpoint")
 				err := d.endpointManager.AddIngressEndpoint(
-					d.ctx, d, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC)
+					d.ctx, d, d.policyMapFactory, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC)
 				if err != nil {
 					return fmt.Errorf("unable to create ingress endpoint: %w", err)
 				}

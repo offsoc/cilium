@@ -115,9 +115,9 @@ func (s defaultScenario) Name() string {
 
 var ghWorkflowRegexp = regexp.MustCompile("^(?:.+?)/(?:.+?)/(.+?)@.*$")
 
-func (ct *ConnectivityTest) LogOwners(scenarios ...ownedScenario) {
+func (ct *ConnectivityTest) GetOwners(scenarios ...ownedScenario) []string {
 	if !ct.params.LogCodeOwners {
-		return
+		return nil
 	}
 
 	rules := make(map[ownedScenario]*codeowners.Rule)
@@ -126,7 +126,7 @@ func (ct *ConnectivityTest) LogOwners(scenarios ...ownedScenario) {
 		if err != nil || rule == nil || rule.Owners == nil {
 			ct.Fatalf("Failed to find CODEOWNERS for test scenario. Developer BUG?"+
 				"\n\t\tname=%s path=%s err=%s", scenario.Name(), scenario.FilePath(), err)
-			return
+			return nil
 		}
 		rules[scenario] = rule
 	}
@@ -149,20 +149,40 @@ func (ct *ConnectivityTest) LogOwners(scenarios ...ownedScenario) {
 		workflowOwners = workflowRule.Owners
 	}
 
-	ct.Log("    ⛑️ The following owners are responsible for reliability of the testsuite: ")
+	excludeOwners := make(map[string]struct{})
+	for _, owner := range ct.Params().ExcludeCodeOwners {
+		excludeOwners[owner] = struct{}{}
+	}
+
+	var owners []string
 	for scenario, rule := range rules {
 		for _, o := range rule.Owners {
-			ct.Log("        - " + o.String() + " (" + scenario.Name() + ")")
+			owner := o.String()
+			if _, ok := excludeOwners[owner]; ok {
+				continue
+			}
+			owners = append(owners, fmt.Sprintf("%s (%s)", owner, scenario.Name()))
 		}
 		for _, o := range workflowOwners {
 			owner := o.String()
-			switch owner {
-			case "@cilium/github-sec":
-				// Skip
-			default:
-				ct.Log("        - " + owner + " (" + ghWorkflow + ")")
+			if _, ok := excludeOwners[owner]; ok {
+				continue
 			}
+			owners = append(owners, fmt.Sprintf("%s (%s)", owner, ghWorkflow))
 		}
+	}
+	return owners
+}
+
+func (ct *ConnectivityTest) LogOwners(scenarios ...ownedScenario) {
+	owners := ct.GetOwners(scenarios...)
+	if len(owners) == 0 {
+		return
+	}
+
+	ct.Log("    ⛑️ The following owners are responsible for reliability of the testsuite: ")
+	for _, o := range owners {
+		ct.Log("        - " + o)
 	}
 }
 
@@ -316,7 +336,7 @@ func (t *Test) flush() {
 	if _, err := io.Copy(buf, t.logBuf); err != nil {
 		panic(err)
 	}
-	t.ctx.logger.Print(t, buf.String())
+	t.ctx.logger.Print(t, buf.Bytes())
 
 	// Assign a nil buffer so future writes go to user-specified writer.
 	t.logBuf = nil
@@ -477,6 +497,14 @@ func (a *Action) Fatalf(format string, s ...interface{}) {
 
 func timestamp() string {
 	return fmt.Sprintf("[%s] ", time.Now().Format(time.RFC3339))
+}
+
+func timestampBytes() []byte {
+	b := make([]byte, 0, 32) // roughly enough space
+	b = append(b, '[')
+	b = time.Now().AppendFormat(b, time.RFC3339)
+	b = append(b, ']', ' ')
+	return b
 }
 
 type debugWriter struct {

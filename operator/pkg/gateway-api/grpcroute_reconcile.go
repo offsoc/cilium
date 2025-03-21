@@ -29,7 +29,10 @@ import (
 // the resource is valid and accepted. The Accepted resources will be then included
 // in parent Gateway for further processing.
 func (r *grpcRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	scopedLog := r.logger.With(logfields.Controller, grpcRoute, logfields.Resource, req.NamespacedName)
+	scopedLog := r.logger.With(
+		logfields.Controller, grpcRoute,
+		logfields.Resource, req.NamespacedName,
+	)
 	scopedLog.Info("Reconciling GRPCRoute")
 
 	// Fetch the GRPCRoute instance
@@ -83,7 +86,7 @@ func (r *grpcRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 		})
 
 		// run the actual validators
-		for _, fn := range []routechecks.CheckParentFunc{
+		for _, fn := range []routechecks.CheckWithParentFunc{
 			routechecks.CheckGatewayRouteKindAllowed,
 			routechecks.CheckGatewayMatchingPorts,
 			routechecks.CheckGatewayMatchingHostnames,
@@ -99,16 +102,16 @@ func (r *grpcRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (
 				break
 			}
 		}
-	}
 
-	for _, fn := range []routechecks.CheckRuleFunc{
-		routechecks.CheckAgainstCrossNamespaceBackendReferences,
-		routechecks.CheckBackend,
-		routechecks.CheckHasServiceImportSupport,
-		routechecks.CheckBackendIsExistingService,
-	} {
-		if continueCheck, err := fn(i); err != nil || !continueCheck {
-			return r.handleReconcileErrorWithStatus(ctx, fmt.Errorf("failed to apply Backend check: %w", err), gr, original)
+		for _, fn := range []routechecks.CheckWithParentFunc{
+			routechecks.CheckAgainstCrossNamespaceBackendReferences,
+			routechecks.CheckBackend,
+			routechecks.CheckHasServiceImportSupport,
+			routechecks.CheckBackendIsExistingService,
+		} {
+			if continueCheck, err := fn(i, parent); err != nil || !continueCheck {
+				return r.handleReconcileErrorWithStatus(ctx, fmt.Errorf("failed to apply Backend check: %w", err), gr, original)
+			}
 		}
 	}
 

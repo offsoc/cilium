@@ -249,6 +249,9 @@ type Endpoint struct {
 	// the endpoint's labels.
 	SecurityIdentity *identity.Identity `json:"SecLabel"`
 
+	// policyMapFactory is used to create endpoint policy maps
+	policyMapFactory policymap.Factory
+
 	// policyMap is the policy related state of the datapath including
 	// reference to all policy related BPF
 	policyMap *policymap.PolicyMap
@@ -558,9 +561,9 @@ func (e *Endpoint) waitForProxyCompletions(proxyWaitGroup *completion.WaitGroup)
 // NewTestEndpointWithState creates a new endpoint useful for testing purposes
 //
 // Note: This function is intended for testing purposes only and should not be used in production code.
-func NewTestEndpointWithState(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner, ID uint16, state State) *Endpoint {
+func NewTestEndpointWithState(owner regeneration.Owner, policyMapFactory policymap.Factory, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner, ID uint16, state State) *Endpoint {
 	endpointQueueName := "endpoint-" + strconv.FormatUint(uint64(ID), 10)
-	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, ctMapGC, ID, "")
+	ep := createEndpoint(owner, policyMapFactory, policyGetter, namedPortsGetter, proxy, allocator, ctMapGC, ID, "")
 	ep.SetPropertyValue(PropertyFakeEndpoint, true)
 	ep.state = state
 	ep.eventQueue = eventqueue.NewEventQueueBuffered(endpointQueueName, option.Config.EndpointQueueSize)
@@ -572,9 +575,10 @@ func NewTestEndpointWithState(owner regeneration.Owner, policyGetter policyRepoG
 	return ep
 }
 
-func createEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner, ID uint16, ifName string) *Endpoint {
+func createEndpoint(owner regeneration.Owner, policyMapFactory policymap.Factory, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner, ID uint16, ifName string) *Endpoint {
 	ep := &Endpoint{
 		owner:            owner,
+		policyMapFactory: policyMapFactory,
 		policyGetter:     policyGetter,
 		namedPortsGetter: namedPortsGetter,
 		ID:               ID,
@@ -590,7 +594,7 @@ func createEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, nam
 		state:            "",
 		status:           NewEndpointStatus(),
 		hasBPFProgram:    make(chan struct{}),
-		desiredPolicy:    policy.NewEndpointPolicy(policyGetter.GetPolicyRepository()),
+		desiredPolicy:    policy.NewEndpointPolicy(logging.DefaultSlogLogger, policyGetter.GetPolicyRepository()),
 		controllers:      controller.NewManager(),
 		regenFailedChan:  make(chan struct{}, 1),
 		allocator:        allocator,
@@ -635,8 +639,8 @@ func (e *Endpoint) initDNSHistoryTrigger() {
 }
 
 // CreateIngressEndpoint creates the endpoint corresponding to Cilium Ingress.
-func CreateIngressEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner) (*Endpoint, error) {
-	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, ctMapGC, 0, "")
+func CreateIngressEndpoint(owner regeneration.Owner, policyMapFactory policymap.Factory, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner) (*Endpoint, error) {
+	ep := createEndpoint(owner, policyMapFactory, policyGetter, namedPortsGetter, proxy, allocator, ctMapGC, 0, "")
 	ep.DatapathConfiguration = NewDatapathConfiguration()
 
 	ep.isIngress = true
@@ -666,13 +670,13 @@ func CreateIngressEndpoint(owner regeneration.Owner, policyGetter policyRepoGett
 }
 
 // CreateHostEndpoint creates the endpoint corresponding to the host.
-func CreateHostEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner) (*Endpoint, error) {
+func CreateHostEndpoint(owner regeneration.Owner, policyMapFactory policymap.Factory, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, proxy EndpointProxy, allocator cache.IdentityAllocator, ctMapGC ctmap.GCRunner) (*Endpoint, error) {
 	iface, err := safenetlink.LinkByName(defaults.HostDevice)
 	if err != nil {
 		return nil, err
 	}
 
-	ep := createEndpoint(owner, policyGetter, namedPortsGetter, proxy, allocator, ctMapGC, 0, defaults.HostDevice)
+	ep := createEndpoint(owner, policyMapFactory, policyGetter, namedPortsGetter, proxy, allocator, ctMapGC, 0, defaults.HostDevice)
 	ep.isHost = true
 	ep.mac = mac.MAC(iface.Attrs().HardwareAddr)
 	ep.nodeMAC = mac.MAC(iface.Attrs().HardwareAddr)
@@ -691,6 +695,10 @@ func (e *Endpoint) GetID() uint64 {
 
 // GetLabels returns the labels.
 func (e *Endpoint) GetLabels() labels.Labels {
+	if err := e.rlockAlive(); err != nil {
+		return nil
+	}
+	defer e.runlock()
 	if e.SecurityIdentity == nil {
 		return labels.Labels{}
 	}
@@ -698,8 +706,7 @@ func (e *Endpoint) GetLabels() labels.Labels {
 	return e.SecurityIdentity.Labels
 }
 
-// GetSecurityIdentity returns the security identity of the endpoint. It assumes
-// the endpoint's mutex is held.
+// GetSecurityIdentity returns the security identity of the endpoint.
 func (e *Endpoint) GetSecurityIdentity() (*identity.Identity, error) {
 	if err := e.rlockAlive(); err != nil {
 		return nil, err
@@ -921,9 +928,10 @@ func FilterEPDir(dirFiles []os.DirEntry) []string {
 //
 // Note that the parse'd endpoint's identity is only partially restored. The
 // caller must call `SetIdentity()` to make the returned endpoint's identity useful.
-func parseEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, epJSON []byte) (*Endpoint, error) {
+func parseEndpoint(owner regeneration.Owner, policyMapFactory policymap.Factory, policyGetter policyRepoGetter, namedPortsGetter namedPortsGetter, epJSON []byte) (*Endpoint, error) {
 	ep := Endpoint{
 		owner:            owner,
+		policyMapFactory: policyMapFactory,
 		namedPortsGetter: namedPortsGetter,
 		policyGetter:     policyGetter,
 	}
@@ -938,7 +946,7 @@ func parseEndpoint(owner regeneration.Owner, policyGetter policyRepoGetter, name
 
 	// Initialize fields to values which are non-nil that are not serialized.
 	ep.hasBPFProgram = make(chan struct{})
-	ep.desiredPolicy = policy.NewEndpointPolicy(policyGetter.GetPolicyRepository())
+	ep.desiredPolicy = policy.NewEndpointPolicy(logging.DefaultSlogLogger, policyGetter.GetPolicyRepository())
 	ep.realizedPolicy = ep.desiredPolicy
 	ep.forcePolicyCompute = true
 	ep.controllers = controller.NewManager()
@@ -1221,12 +1229,12 @@ func (e *Endpoint) leaveLocked(conf DeleteConfig) []error {
 	// Endpoint with desiredPolicy computed can get deleted while queueing for regeneration,
 	// must mark the policy as 'Ready' so that Detach does not complain about it.
 	e.desiredPolicy.Ready()
-	e.desiredPolicy.Detach()
+	e.desiredPolicy.Detach(logging.DefaultSlogLogger)
 	// Passing a new map of nil will purge all redirects
 	e.removeOldRedirects(nil, e.desiredPolicy.Redirects)
 
 	if e.realizedPolicy != e.desiredPolicy {
-		e.realizedPolicy.Detach()
+		e.realizedPolicy.Detach(logging.DefaultSlogLogger)
 		// Passing a new map of nil will purge all redirects
 		e.removeOldRedirects(nil, e.realizedPolicy.Redirects)
 	}
@@ -1652,7 +1660,10 @@ func (e *Endpoint) UpdateProxyStatistics(proxyType, l4Protocol string, port, pro
 
 	proxyStats, ok := e.proxyStatistics[key]
 	if !ok {
-		e.getLogger().WithField(logfields.L4PolicyID, key).Debug("Proxy stats not found when updating")
+		if l := e.getLogger(); l.Logger.IsLevelEnabled(logrus.DebugLevel) {
+			l.WithField(logfields.L4PolicyID, key).Debug("Proxy stats not found when updating")
+		}
+
 		return
 	}
 
@@ -1949,7 +1960,7 @@ func (e *Endpoint) IsInit() bool {
 }
 
 // InitWithIngressLabels initializes the endpoint with reserved:ingress.
-// It should only be used for the host endpoint.
+// It should only be used for the ingress endpoint.
 func (e *Endpoint) InitWithIngressLabels(ctx context.Context, launchTime time.Duration) {
 	if !e.isIngress {
 		return
@@ -1963,7 +1974,7 @@ func (e *Endpoint) InitWithIngressLabels(ctx context.Context, launchTime time.Du
 	defer cancel()
 	e.UpdateLabels(newCtx, labels.LabelSourceAny, epLabels, epLabels, true)
 	if errors.Is(newCtx.Err(), context.DeadlineExceeded) {
-		log.WithError(newCtx.Err()).Warning("Timed out while updating security identify for host endpoint")
+		log.WithError(newCtx.Err()).Warning("Timed out while updating security identify for ingress endpoint")
 	}
 }
 

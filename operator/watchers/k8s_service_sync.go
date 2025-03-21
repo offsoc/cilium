@@ -8,8 +8,6 @@ import (
 	"log/slog"
 	"sync"
 
-	log "github.com/sirupsen/logrus"
-
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/k8s"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
@@ -18,12 +16,13 @@ import (
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	serviceStore "github.com/cilium/cilium/pkg/service/store"
 )
 
 var (
-	K8sSvcCache = k8s.NewServiceCache(nil, nil, k8s.NewSVCMetricsNoop())
+	K8sSvcCache = k8s.NewServiceCache(logging.DefaultSlogLogger, nil, nil, k8s.NewSVCMetricsNoop())
 
 	kvs store.SyncStore
 )
@@ -39,10 +38,10 @@ func k8sServiceHandler(ctx context.Context, cinfo cmtypes.ClusterInfo, logger *s
 		logger.Debug("Kubernetes service definition changed",
 			logfields.K8sSvcName, event.ID.Name,
 			logfields.K8sNamespace, event.ID.Namespace,
-			"action", event.Action,
-			"service", event.Service,
-			"endpoints", event.Endpoints,
-			"shared", event.Service.Shared,
+			logfields.Action, event.Action,
+			logfields.Service, event.Service,
+			logfields.Endpoints, event.Endpoints,
+			logfields.Shared, event.Service.Shared,
 		)
 
 		if !event.Service.Shared {
@@ -123,7 +122,7 @@ func StartSynchronizingServices(ctx context.Context, wg *sync.WaitGroup, cfg Ser
 		// Wait for kvstore
 		<-kvstoreReady
 
-		log.Info("Starting to synchronize Kubernetes services to kvstore")
+		logger.Info("Starting to synchronize Kubernetes services to kvstore")
 		k8sServiceHandler(ctx, cfg.ClusterInfo, logger)
 	}()
 
@@ -145,7 +144,7 @@ func StartSynchronizingServices(ctx context.Context, wg *sync.WaitGroup, cfg Ser
 			swg.Stop()
 			swg.Wait()
 
-			log.Info("Initial list of services successfully received from Kubernetes")
+			logger.Info("Initial list of services successfully received from Kubernetes")
 			kvs.Synced(ctx, cfg.SyncCallback)
 		}
 

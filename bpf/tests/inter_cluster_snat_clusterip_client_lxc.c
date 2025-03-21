@@ -151,7 +151,7 @@ SETUP("tc", "01_lxc_to_overlay_syn")
 int lxc_to_overlay_syn_setup(struct __ctx_buff *ctx)
 {
 
-	lb_v4_add_service(FRONTEND_IP, FRONTEND_PORT, 1, 1);
+	lb_v4_add_service(FRONTEND_IP, FRONTEND_PORT, IPPROTO_TCP, 1, 1);
 	lb_v4_add_backend(FRONTEND_IP, FRONTEND_PORT, 1, 1,
 			  BACKEND_IP, BACKEND_PORT, IPPROTO_TCP,
 			  BACKEND_CLUSTER_ID);
@@ -234,7 +234,7 @@ int lxc_to_overlay_syn_check(struct __ctx_buff *ctx)
 	tuple.nexthdr = IPPROTO_TCP;
 	tuple.flags = TUPLE_F_SERVICE;
 
-	entry = map_lookup_elem(&CT_MAP_TCP4, &tuple);
+	entry = map_lookup_elem(&cilium_ct4_global, &tuple);
 	if (!entry)
 		test_fatal("couldn't find service conntrack entry");
 

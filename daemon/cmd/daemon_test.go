@@ -26,6 +26,7 @@ import (
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/envoy"
+	"github.com/cilium/cilium/pkg/fqdn/defaultdns"
 	fqdnproxy "github.com/cilium/cilium/pkg/fqdn/proxy"
 	"github.com/cilium/cilium/pkg/fqdn/restore"
 	"github.com/cilium/cilium/pkg/hive"
@@ -35,7 +36,9 @@ import (
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/labelsfilter"
+	"github.com/cilium/cilium/pkg/loadbalancer/experimental"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
+	"github.com/cilium/cilium/pkg/maps/policymap"
 	"github.com/cilium/cilium/pkg/metrics"
 	monitorAgent "github.com/cilium/cilium/pkg/monitor/agent"
 	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
@@ -45,7 +48,6 @@ import (
 	policycell "github.com/cilium/cilium/pkg/policy/cell"
 	policyTypes "github.com/cilium/cilium/pkg/policy/types"
 	"github.com/cilium/cilium/pkg/promise"
-	"github.com/cilium/cilium/pkg/proxy"
 	"github.com/cilium/cilium/pkg/testutils"
 	testidentity "github.com/cilium/cilium/pkg/testutils/identity"
 	"github.com/cilium/cilium/pkg/types"
@@ -99,8 +101,6 @@ func TestMain(m *testing.M) {
 		os.Exit(m.Run())
 	}
 
-	proxy.DefaultDNSProxy = fqdnproxy.MockFQDNProxy{}
-
 	time.Local = time.UTC
 
 	os.Exit(m.Run())
@@ -134,7 +134,11 @@ func setupDaemonSuite(tb testing.TB) *DaemonSuite {
 			func() *option.DaemonConfig { return option.Config },
 			func() cnicell.CNIConfigManager { return &fakecni.FakeCNIConfigManager{} },
 			func() ctmap.GCRunner { return ctmap.NewFakeGCRunner() },
+			func() policymap.Factory { return nil },
 			k8sSynced.RejectedCRDSyncPromise,
+			func() *experimental.TestConfig {
+				return &experimental.TestConfig{}
+			},
 		),
 		fakeDatapath.Cell,
 		prefilter.Cell,
@@ -142,6 +146,7 @@ func setupDaemonSuite(tb testing.TB) *DaemonSuite {
 		ControlPlane,
 		metrics.Cell,
 		store.Cell,
+		defaultdns.Cell,
 		cell.Invoke(func(p promise.Promise[*Daemon]) {
 			daemonPromise = p
 		}),
@@ -165,6 +170,7 @@ func setupDaemonSuite(tb testing.TB) *DaemonSuite {
 	ds.d, err = daemonPromise.Await(ctx)
 	require.NoError(tb, err)
 
+	ds.d.dnsProxy.Set(fqdnproxy.MockFQDNProxy{})
 	kvstore.Client().DeletePrefix(ctx, kvstore.BaseKeyPrefix)
 
 	ds.d.policy.GetSelectorCache().SetLocalIdentityNotifier(testidentity.NewDummyIdentityNotifier())
@@ -334,6 +340,7 @@ func (ds *DaemonSuite) updatePolicy(upd *policyTypes.PolicyUpdate) {
 	ds.PolicyImporter.UpdatePolicy(upd)
 	<-dc
 }
+
 func TestMemoryMap(t *testing.T) {
 	pid := os.Getpid()
 	m := memoryMap(pid)

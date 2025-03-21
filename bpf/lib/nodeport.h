@@ -868,9 +868,11 @@ nodeport_rev_dnat_ingress_ipv6(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	struct ipv6hdr *ip6;
 	__u32 tunnel_endpoint __maybe_unused = 0;
 	__u32 dst_sec_identity __maybe_unused = 0;
+	__u32 src_sec_identity __maybe_unused = SECLABEL;
 	__be16 src_port __maybe_unused = 0;
 	bool allow_neigh_map = true;
 	int ifindex = 0;
+	__u32 monitor = 0;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip6))
 		return DROP_INVALID;
@@ -887,9 +889,10 @@ nodeport_rev_dnat_ingress_ipv6(struct __ctx_buff *ctx, struct trace_ctx *trace,
 
 	ret = ct_lazy_lookup6(get_ct_map6(&tuple), &tuple, ctx, l4_off,
 			      CT_INGRESS, SCOPE_REVERSE, CT_ENTRY_NODEPORT,
-			      &ct_state, &trace->monitor);
+			      &ct_state, &monitor);
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
+		trace->monitor = monitor;
 		ret = ipv6_l3(ctx, ETH_HLEN, NULL, NULL, METRIC_EGRESS);
 		if (unlikely(ret != CTX_ACT_OK))
 			return ret;
@@ -912,6 +915,7 @@ nodeport_rev_dnat_ingress_ipv6(struct __ctx_buff *ctx, struct trace_ctx *trace,
 			info = lookup_ip6_remote_endpoint(dst, 0);
 			if (info && info->tunnel_endpoint && !info->flag_skip_tunnel) {
 				tunnel_endpoint = info->tunnel_endpoint;
+				src_sec_identity = REMOTE_NODE_ID;
 				dst_sec_identity = info->sec_identity;
 				goto encap_redirect;
 			}
@@ -921,14 +925,27 @@ nodeport_rev_dnat_ingress_ipv6(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		goto fib_lookup;
 	}
 out:
+#if defined(ENABLE_EGRESS_GATEWAY_COMMON) && (defined(IS_BPF_XDP) || defined(IS_BPF_HOST))
+	/* The gateway node needs to manually steer any reply traffic
+	 * for a remote pod into the tunnel (to avoid iptables potentially
+	 * dropping or accidentally SNATing the packets).
+	 */
+	if (egress_gw_reply_needs_redirect_hook_v6(ip6, &tunnel_endpoint, &dst_sec_identity)) {
+		trace->reason = TRACE_REASON_CT_REPLY;
+		src_sec_identity = WORLD_ID;
+		goto encap_redirect;
+	}
+#endif /* ENABLE_EGRESS_GATEWAY_COMMON */
+
 	return CTX_ACT_OK;
 
-#ifdef TUNNEL_MODE
+#if (defined(ENABLE_EGRESS_GATEWAY_COMMON) && (defined(IS_BPF_XDP) || defined(IS_BPF_HOST))) ||	\
+    defined(TUNNEL_MODE)
 encap_redirect:
 	src_port = tunnel_gen_src_port_v6(&tuple);
 
 	ret = nodeport_add_tunnel_encap(ctx, IPV4_DIRECT_ROUTING, src_port,
-					tunnel_endpoint, SECLABEL, dst_sec_identity,
+					tunnel_endpoint, src_sec_identity, dst_sec_identity,
 					trace->reason, trace->monitor, &ifindex);
 	if (IS_ERR(ret))
 		return ret;
@@ -966,7 +983,8 @@ fib_lookup:
 			       (union v6addr *)&ip6->daddr);
 	}
 
-#ifdef TUNNEL_MODE
+#if (defined(ENABLE_EGRESS_GATEWAY_COMMON) && (defined(IS_BPF_XDP) || defined(IS_BPF_HOST))) ||	\
+    defined(TUNNEL_MODE)
 fib_redirect:
 #endif
 	return fib_redirect(ctx, true, &fib_params, allow_neigh_map, ext_err, &ifindex);
@@ -1047,7 +1065,8 @@ int tail_nodeport_nat_ingress_ipv6(struct __ctx_buff *ctx)
 
 	ctx_snat_done_set(ctx);
 
-#if !defined(ENABLE_DSR) || (defined(ENABLE_DSR) && defined(ENABLE_DSR_HYBRID))
+#if !defined(ENABLE_DSR) || (defined(ENABLE_DSR) && defined(ENABLE_DSR_HYBRID)) ||	\
+    (defined(ENABLE_EGRESS_GATEWAY_COMMON) && (defined(IS_BPF_XDP) || defined(IS_BPF_HOST)))
 
 # if defined(ENABLE_HOST_FIREWALL) && defined(IS_BPF_HOST)
 	ret = ipv6_host_policy_ingress(ctx, &src_id, &trace, &ext_err);
@@ -1236,7 +1255,7 @@ static __always_inline int nodeport_svc_lb6(struct __ctx_buff *ctx,
 		return DROP_IS_CLUSTER_IP;
 
 #if defined(ENABLE_L7_LB)
-	if (lb6_svc_is_l7loadbalancer(svc) && svc->l7_lb_proxy_port > 0) {
+	if (lb6_svc_is_l7_loadbalancer(svc)) {
 # if !defined(IS_BPF_XDP)
 		__be16 proxy_port = (__be16)svc->l7_lb_proxy_port;
 
@@ -1254,23 +1273,26 @@ static __always_inline int nodeport_svc_lb6(struct __ctx_buff *ctx,
 		*punt_to_stack = true;
 #  endif /* ENABLE_TPROXY */
 # endif /* IS_BPF_XDP */
-
 		return CTX_ACT_OK;
 	}
 #endif
 	ret = lb6_local(get_ct_map6(tuple), ctx, l3_off, l4_off,
 			key, tuple, svc, &ct_state_svc,
 			nodeport_xlate6(svc, tuple), ext_err, 0);
+	if (IS_ERR(ret)) {
 #ifdef SERVICE_NO_BACKEND_RESPONSE
-	if (ret == DROP_NO_SERVICE) {
-		edt_set_aggregate(ctx, 0);
-		ret = tail_call_internal(ctx, CILIUM_CALL_IPV6_NO_SERVICE,
-					 ext_err);
-	}
+		if (ret == DROP_NO_SERVICE) {
+			edt_set_aggregate(ctx, 0);
+			ret = tail_call_internal(ctx, CILIUM_CALL_IPV6_NO_SERVICE,
+						 ext_err);
+		}
 #endif
-
-	if (IS_ERR(ret))
+		if (ret == LB_PUNT_TO_STACK) {
+			*punt_to_stack = true;
+			return CTX_ACT_OK;
+		}
 		return ret;
+	}
 
 	backend_local = __lookup_ip6_endpoint(&tuple->daddr);
 	if (!backend_local && lb6_svc_is_hostport(svc))
@@ -2109,6 +2131,7 @@ nodeport_rev_dnat_ingress_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 	bool allow_neigh_map = true;
 	bool has_l4_header;
 	__u32 *vrf_id __maybe_unused = NULL;
+	__u32 monitor = 0;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -2144,9 +2167,10 @@ nodeport_rev_dnat_ingress_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 
 	ret = ct_lazy_lookup4(get_ct_map4(&tuple), &tuple, ctx, ipv4_is_fragment(ip4),
 			      l4_off, has_l4_header, CT_INGRESS, SCOPE_REVERSE,
-			      CT_ENTRY_NODEPORT, &ct_state, &trace->monitor);
+			      CT_ENTRY_NODEPORT, &ct_state, &monitor);
 	if (ret == CT_REPLY) {
 		trace->reason = TRACE_REASON_CT_REPLY;
+		trace->monitor = monitor;
 		ret = lb4_rev_nat(ctx, l3_off, l4_off, ct_state.rev_nat_index, false,
 				  &tuple, has_l4_header);
 		if (IS_ERR(ret))
@@ -2164,6 +2188,7 @@ nodeport_rev_dnat_ingress_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 			info = lookup_ip4_remote_endpoint(ip4->daddr, 0);
 			if (info && info->tunnel_endpoint && !info->flag_skip_tunnel) {
 				tunnel_endpoint = info->tunnel_endpoint;
+				src_sec_identity = REMOTE_NODE_ID;
 				dst_sec_identity = info->sec_identity;
 			}
 		}
@@ -2526,7 +2551,7 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		return DROP_IS_CLUSTER_IP;
 
 #if defined(ENABLE_L7_LB)
-	if (lb4_svc_is_l7loadbalancer(svc) && svc->l7_lb_proxy_port > 0) {
+	if (lb4_svc_is_l7_loadbalancer(svc)) {
 		/* We cannot redirect from the XDP layer to cilium_host.
 		 * Therefore, let the bpf_host to handle the L7 ingress
 		 * request.
@@ -2551,7 +2576,6 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		*punt_to_stack = true;
 #  endif /* ENABLE_TPROXY */
 # endif /* IS_BPF_XDP */
-
 		return CTX_ACT_OK;
 	}
 #endif
@@ -2563,6 +2587,8 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		ret = lb4_local(get_ct_map4(tuple), ctx, is_fragment, l3_off, l4_off,
 				key, tuple, svc, &ct_state_svc, has_l4_header,
 				nodeport_xlate4(svc, tuple), &cluster_id, ext_err, 0);
+	}
+	if (IS_ERR(ret)) {
 #ifdef SERVICE_NO_BACKEND_RESPONSE
 		if (ret == DROP_NO_SERVICE) {
 			/* Packet is TX'ed back out, avoid EDT false-positives: */
@@ -2571,9 +2597,12 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 						 ext_err);
 		}
 #endif
-	}
-	if (IS_ERR(ret))
+		if (ret == LB_PUNT_TO_STACK) {
+			*punt_to_stack = true;
+			return CTX_ACT_OK;
+		}
 		return ret;
+	}
 
 	backend_local = __lookup_ip4_endpoint(tuple->daddr);
 	if (!backend_local && lb4_svc_is_hostport(svc))

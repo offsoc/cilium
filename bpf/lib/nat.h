@@ -124,7 +124,8 @@ struct {
 	__type(value, struct ipv4_nat_entry);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, SNAT_MAPPING_IPV4_SIZE);
-} SNAT_MAPPING_IPV4 __section_maps_btf;
+	__uint(map_flags, LRU_MEM_FLAVOR);
+} cilium_snat_v4_external __section_maps_btf;
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
@@ -132,7 +133,7 @@ struct {
 	__type(value, __u32);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, SNAT_COLLISION_RETRIES + 1);
-} SNAT_ALLOC_RETRIES_IPV4 __section_maps_btf;
+} cilium_snat_v4_alloc_retries __section_maps_btf;
 
 #ifdef ENABLE_CLUSTER_AWARE_ADDRESSING
 struct per_cluster_snat_mapping_ipv4_inner_map {
@@ -155,9 +156,9 @@ struct {
 	__uint(max_entries, 256);
 	__array(values, struct per_cluster_snat_mapping_ipv4_inner_map);
 #ifndef BPF_TEST
-} PER_CLUSTER_SNAT_MAPPING_IPV4 __section_maps_btf;
+} cilium_per_cluster_snat_v4_external __section_maps_btf;
 #else
-} PER_CLUSTER_SNAT_MAPPING_IPV4 __section_maps_btf = {
+} cilium_per_cluster_snat_v4_external __section_maps_btf = {
 	.values = {
 		[1] = &per_cluster_snat_mapping_ipv4_1,
 		[2] = &per_cluster_snat_mapping_ipv4_2,
@@ -174,7 +175,7 @@ struct {
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, 16384);
 	__uint(map_flags, BPF_F_NO_PREALLOC);
-} IP_MASQ_AGENT_IPV4 __section_maps_btf;
+} cilium_ipmasq_v4 __section_maps_btf;
 #endif
 
 static __always_inline void *
@@ -182,15 +183,15 @@ get_cluster_snat_map_v4(__u32 cluster_id __maybe_unused)
 {
 #if defined(ENABLE_CLUSTER_AWARE_ADDRESSING) && defined(ENABLE_INTER_CLUSTER_SNAT)
 	if (cluster_id != 0 && cluster_id != CLUSTER_ID)
-		return map_lookup_elem(&PER_CLUSTER_SNAT_MAPPING_IPV4, &cluster_id);
+		return map_lookup_elem(&cilium_per_cluster_snat_v4_external, &cluster_id);
 #endif
-	return &SNAT_MAPPING_IPV4;
+	return &cilium_snat_v4_external;
 }
 
 static __always_inline
 struct ipv4_nat_entry *snat_v4_lookup(const struct ipv4_ct_tuple *tuple)
 {
-	return __snat_lookup(&SNAT_MAPPING_IPV4, tuple);
+	return __snat_lookup(&cilium_snat_v4_external, tuple);
 }
 
 static __always_inline void
@@ -254,7 +255,7 @@ static __always_inline int snat_v4_new_mapping(struct __ctx_buff *ctx, void *map
 					       (__u16)get_prandom_u32());
 	}
 
-	retries_hist = map_lookup_elem(&SNAT_ALLOC_RETRIES_IPV4, &(__u32){retries});
+	retries_hist = map_lookup_elem(&cilium_snat_v4_alloc_retries, &(__u32){retries});
 	if (retries_hist)
 		++*retries_hist;
 
@@ -263,7 +264,7 @@ static __always_inline int snat_v4_new_mapping(struct __ctx_buff *ctx, void *map
 	goto out;
 
 create_nat_entry:
-	retries_hist = map_lookup_elem(&SNAT_ALLOC_RETRIES_IPV4, &(__u32){retries});
+	retries_hist = map_lookup_elem(&cilium_snat_v4_alloc_retries, &(__u32){retries});
 	if (retries_hist)
 		++*retries_hist;
 
@@ -542,7 +543,7 @@ snat_v4_create_dsr(const struct ipv4_ct_tuple *tuple,
 	state.to_saddr = to_saddr;
 	state.to_sport = to_sport;
 
-	ret = map_update_elem(&SNAT_MAPPING_IPV4, &tmp, &state, 0);
+	ret = map_update_elem(&cilium_snat_v4_external, &tmp, &state, 0);
 	if (ret) {
 		*ext_err = (__s8)ret;
 		return DROP_NAT_NO_MAPPING;
@@ -697,7 +698,7 @@ snat_v4_needs_masquerade(struct __ctx_buff *ctx __maybe_unused,
 
 		pfx.lpm.prefixlen = 32;
 		memcpy(pfx.lpm.data, &tuple->daddr, sizeof(pfx.addr));
-		if (map_lookup_elem(&IP_MASQ_AGENT_IPV4, &pfx))
+		if (map_lookup_elem(&cilium_ipmasq_v4, &pfx))
 			return NAT_PUNT_TO_STACK;
 	}
 #endif
@@ -1117,6 +1118,8 @@ struct ipv6_nat_target {
 	const __u16 max_port; /* host endianness */
 	bool from_local_endpoint;
 	bool needs_ct;
+	bool egress_gateway; /* NAT is needed because of an egress gateway policy */
+	__u32 ifindex; /* Obtained from EGW policy */
 };
 
 #if defined(ENABLE_IPV6) && defined(ENABLE_NODEPORT)
@@ -1126,14 +1129,15 @@ struct {
 	__type(value, struct ipv6_nat_entry);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, SNAT_MAPPING_IPV6_SIZE);
-} SNAT_MAPPING_IPV6 __section_maps_btf;
+	__uint(map_flags, LRU_MEM_FLAVOR);
+} cilium_snat_v6_external __section_maps_btf;
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PERCPU_ARRAY);
 	__type(key, __u32);
 	__type(value, __u32);
 	__uint(max_entries, SNAT_COLLISION_RETRIES + 1);
-} SNAT_ALLOC_RETRIES_IPV6 __section_maps_btf;
+} cilium_snat_v6_alloc_retries __section_maps_btf;
 
 #ifdef ENABLE_CLUSTER_AWARE_ADDRESSING
 struct {
@@ -1148,7 +1152,7 @@ struct {
 		__type(value, struct ipv6_nat_entry);
 		__uint(max_entries, SNAT_MAPPING_IPV6_SIZE);
 	});
-} PER_CLUSTER_SNAT_MAPPING_IPV6 __section_maps_btf;
+} cilium_per_cluster_snat_v6_external __section_maps_btf;
 #endif
 
 #ifdef ENABLE_IP_MASQ_AGENT_IPV6
@@ -1159,7 +1163,7 @@ struct {
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, 16384);
 	__uint(map_flags, BPF_F_NO_PREALLOC);
-} IP_MASQ_AGENT_IPV6 __section_maps_btf;
+} cilium_ipmasq_v6 __section_maps_btf;
 #endif
 
 static __always_inline void *
@@ -1167,15 +1171,15 @@ get_cluster_snat_map_v6(__u32 cluster_id __maybe_unused)
 {
 #if defined(ENABLE_CLUSTER_AWARE_ADDRESSING) && defined(ENABLE_INTER_CLUSTER_SNAT)
 	if (cluster_id != 0 && cluster_id != CLUSTER_ID)
-		return map_lookup_elem(&PER_CLUSTER_SNAT_MAPPING_IPV6, &cluster_id);
+		return map_lookup_elem(&cilium_per_cluster_snat_v6_external, &cluster_id);
 #endif
-	return &SNAT_MAPPING_IPV6;
+	return &cilium_snat_v6_external;
 }
 
 static __always_inline
 struct ipv6_nat_entry *snat_v6_lookup(const struct ipv6_ct_tuple *tuple)
 {
-	return __snat_lookup(&SNAT_MAPPING_IPV6, tuple);
+	return __snat_lookup(&cilium_snat_v6_external, tuple);
 }
 
 static __always_inline void
@@ -1228,7 +1232,7 @@ static __always_inline int snat_v6_new_mapping(struct __ctx_buff *ctx,
 	for (retries = 0; retries < SNAT_COLLISION_RETRIES; retries++) {
 		rtuple.dport = bpf_htons(port);
 
-		if (__snat_create(&SNAT_MAPPING_IPV6, &rtuple, &rstate) == 0)
+		if (__snat_create(&cilium_snat_v6_external, &rtuple, &rstate) == 0)
 			goto create_nat_entry;
 
 		port = __snat_clamp_port_range(target->min_port,
@@ -1237,7 +1241,7 @@ static __always_inline int snat_v6_new_mapping(struct __ctx_buff *ctx,
 					       (__u16)get_prandom_u32());
 	}
 
-	retries_hist = map_lookup_elem(&SNAT_ALLOC_RETRIES_IPV6, &(__u32){retries});
+	retries_hist = map_lookup_elem(&cilium_snat_v6_alloc_retries, &(__u32){retries});
 	if (retries_hist)
 		++*retries_hist;
 
@@ -1245,16 +1249,16 @@ static __always_inline int snat_v6_new_mapping(struct __ctx_buff *ctx,
 	goto out;
 
 create_nat_entry:
-	retries_hist = map_lookup_elem(&SNAT_ALLOC_RETRIES_IPV6, &(__u32){retries});
+	retries_hist = map_lookup_elem(&cilium_snat_v6_alloc_retries, &(__u32){retries});
 	if (retries_hist)
 		++*retries_hist;
 
 	ostate->to_sport = rtuple.dport;
 	ostate->common.created = rstate.common.created;
 
-	ret = __snat_create(&SNAT_MAPPING_IPV6, otuple, ostate);
+	ret = __snat_create(&cilium_snat_v6_external, otuple, ostate);
 	if (ret < 0) {
-		map_delete_elem(&SNAT_MAPPING_IPV6, &rtuple); /* rollback */
+		map_delete_elem(&cilium_snat_v6_external, &rtuple); /* rollback */
 		if (ext_err)
 			*ext_err = (__s8)ret;
 		ret = DROP_NAT_NO_MAPPING;
@@ -1325,7 +1329,7 @@ snat_v6_nat_handle_mapping(struct __ctx_buff *ctx,
 				rstate.to_dport = tuple->sport;
 				rstate.common.needs_ct = needs_ct;
 				rstate.common.created = bpf_mono_now();
-				ret = __snat_create(&SNAT_MAPPING_IPV6, &rtuple, &rstate);
+				ret = __snat_create(&cilium_snat_v6_external, &rtuple, &rstate);
 				if (ret < 0) {
 					if (ext_err)
 						*ext_err = (__s8)ret;
@@ -1337,13 +1341,13 @@ snat_v6_nat_handle_mapping(struct __ctx_buff *ctx,
 		}
 
 		/* See comment in snat_v4_nat_handle_mapping */
-		ret = __snat_delete(&SNAT_MAPPING_IPV6, tuple);
+		ret = __snat_delete(&cilium_snat_v6_external, tuple);
 		if (IS_ERR(ret))
 			return ret;
 
 		*state = snat_v6_lookup(&rtuple);
 		if (*state)
-			__snat_delete(&SNAT_MAPPING_IPV6, &rtuple);
+			__snat_delete(&cilium_snat_v6_external, &rtuple);
 	}
 
 	*state = tmp;
@@ -1440,6 +1444,11 @@ snat_v6_nat_can_skip(const struct ipv6_nat_target *target,
 {
 	__u16 sport = bpf_ntohs(tuple->sport);
 
+#if defined(ENABLE_EGRESS_GATEWAY_COMMON) && defined(IS_BPF_HOST)
+	if (target->egress_gateway)
+		return false;
+#endif
+
 	return (!target->from_local_endpoint && sport < NAT_MIN_EGRESS);
 }
 
@@ -1469,7 +1478,7 @@ snat_v6_create_dsr(const struct ipv6_ct_tuple *tuple, union v6addr *to_saddr,
 	ipv6_addr_copy(&state.to_saddr, to_saddr);
 	state.to_sport = to_sport;
 
-	ret = map_update_elem(&SNAT_MAPPING_IPV6, &tmp, &state, 0);
+	ret = map_update_elem(&cilium_snat_v6_external, &tmp, &state, 0);
 	if (ret) {
 		*ext_err = (__s8)ret;
 		return DROP_NAT_NO_MAPPING;
@@ -1533,6 +1542,22 @@ snat_v6_needs_masquerade(struct __ctx_buff *ctx __maybe_unused,
 		}
 	}
 
+/* Check if the packet matches an egress NAT policy and so needs to be SNAT'ed. */
+#if defined(ENABLE_EGRESS_GATEWAY_COMMON)
+	if (egress_gw_snat_needed_hook_v6(&tuple->saddr, &tuple->daddr, &target->addr,
+					  &target->ifindex)) {
+		if (ipv6_addr_equals(&target->addr, &EGRESS_GATEWAY_NO_EGRESS_IP_V6))
+			return DROP_NO_EGRESS_IP;
+
+		target->egress_gateway = true;
+		/* If the endpoint is local, then the connection is already tracked. */
+		if (!local_ep)
+			target->needs_ct = true;
+
+		return NAT_NEEDED;
+	}
+#endif
+
 # ifdef IPV6_SNAT_EXCLUSION_DST_CIDR
 	{
 		union v6addr excl_cidr_mask = IPV6_SNAT_EXCLUSION_DST_CIDR_MASK;
@@ -1559,7 +1584,7 @@ snat_v6_needs_masquerade(struct __ctx_buff *ctx __maybe_unused,
 		memcpy(pfx.lpm.data + 4, &tuple->daddr.p2, 4);
 		memcpy(pfx.lpm.data + 8, &tuple->daddr.p3, 4);
 		memcpy(pfx.lpm.data + 12, &tuple->daddr.p4, 4);
-		if (map_lookup_elem(&IP_MASQ_AGENT_IPV6, &pfx))
+		if (map_lookup_elem(&cilium_ipmasq_v6, &pfx))
 			return NAT_PUNT_TO_STACK;
 	}
 #endif
@@ -1580,6 +1605,78 @@ snat_v6_needs_masquerade(struct __ctx_buff *ctx __maybe_unused,
 #endif /* ENABLE_MASQUERADE_IPV6 && IS_BPF_HOST */
 
 	return NAT_PUNT_TO_STACK;
+}
+
+static __always_inline __maybe_unused int
+snat_v6_nat_handle_icmp_error(struct __ctx_buff *ctx, __u64 off)
+{
+	__u32 inner_l3_off = (__u32)(off + sizeof(struct icmp6hdr));
+	struct ipv6_ct_tuple tuple = {};
+	struct ipv6_nat_entry *state;
+	struct ipv6hdr ip6;
+	__u16 port_off;
+	__u32 icmpoff;
+	int hdrlen;
+	int ret;
+
+	/* According to the RFC 5508, any networking equipment that is
+	 * responding with an ICMP Error packet should embed the original
+	 * packet in its response.
+	 */
+	if (ctx_load_bytes(ctx, inner_l3_off, &ip6, sizeof(ip6)) < 0)
+		return DROP_INVALID;
+
+	/* From the embedded IP headers we should be able to determine
+	 * corresponding protocol, IP src/dst of the packet sent to resolve
+	 * the NAT session.
+	 */
+	tuple.nexthdr = ip6.nexthdr;
+	ipv6_addr_copy(&tuple.saddr, (union v6addr *)&ip6.daddr);
+	ipv6_addr_copy(&tuple.daddr, (union v6addr *)&ip6.saddr);
+	tuple.flags = NAT_DIR_EGRESS;
+
+	hdrlen = ipv6_hdrlen_offset(ctx, &tuple.nexthdr, inner_l3_off);
+	if (hdrlen < 0)
+		return hdrlen;
+
+	icmpoff = inner_l3_off + hdrlen;
+
+	switch (tuple.nexthdr) {
+	case IPPROTO_TCP:
+	case IPPROTO_UDP:
+#ifdef ENABLE_SCTP
+	case IPPROTO_SCTP:
+#endif /* ENABLE_SCTP */
+		/* No reasons to handle IP fragmentation for this case as it is
+		 * expected that DF isn't set for this particular context.
+		 */
+		if (l4_load_ports(ctx, icmpoff, &tuple.dport) < 0)
+			return DROP_INVALID;
+
+		port_off = TCP_DPORT_OFF;
+		break;
+	case IPPROTO_ICMPV6:
+		return DROP_UNKNOWN_ICMP6_CODE;
+	default:
+		return DROP_UNKNOWN_L4;
+	}
+	state = snat_v6_lookup(&tuple);
+	if (!state)
+		return NAT_PUNT_TO_STACK;
+
+	/* We found SNAT entry to NAT embedded packet. The destination addr
+	 * should be NATed according to the entry.
+	 */
+	ret = snat_v6_rewrite_headers(ctx, tuple.nexthdr, inner_l3_off, icmpoff,
+				      &tuple.saddr, &state->to_saddr, IPV6_DADDR_OFF,
+				      tuple.sport, state->to_sport, port_off);
+	if (IS_ERR(ret))
+		return ret;
+
+	/* Rewrite outer headers. No port rewrite needed. */
+	return snat_v6_rewrite_headers(ctx, IPPROTO_ICMPV6, ETH_HLEN, (int)off,
+				       &tuple.saddr, &state->to_saddr, IPV6_SADDR_OFF,
+				       0, 0, 0);
 }
 
 static __always_inline int
@@ -1650,6 +1747,11 @@ snat_v6_nat(struct __ctx_buff *ctx, struct ipv6_ct_tuple *tuple, int off,
 			port_off = offsetof(struct icmp6hdr,
 					    icmp6_dataun.u_echo.identifier);
 			break;
+		case ICMPV6_DEST_UNREACH:
+			if (icmp6hdr.icmp6_code > ICMPV6_REJECT_ROUTE)
+				return DROP_UNKNOWN_ICMP6_CODE;
+
+			return snat_v6_nat_handle_icmp_error(ctx, off);
 		default:
 			return DROP_NAT_UNSUPP_PROTO;
 		}

@@ -5,12 +5,12 @@ package k8s
 
 import (
 	"fmt"
+	"log/slog"
 	"maps"
 	"net"
 	"net/netip"
 	"strings"
 
-	"github.com/sirupsen/logrus"
 	v1 "k8s.io/api/core/v1"
 
 	"github.com/cilium/cilium/pkg/annotation"
@@ -119,6 +119,17 @@ func getAnnotationServiceSourceRangesPolicy(svc *slim_corev1.Service) loadbalanc
 	return loadbalancer.SVCSourceRangesPolicyAllow
 }
 
+func getAnnotationServiceProxyDelegation(svc *slim_corev1.Service) loadbalancer.SVCProxyDelegation {
+	if value, ok := annotation.Get(svc, annotation.ServiceProxyDelegation); ok {
+		tmp := loadbalancer.SVCProxyDelegation(strings.ToLower(value))
+		if tmp == loadbalancer.SVCProxyDelegationDelegateIfLocal {
+			return tmp
+		}
+	}
+
+	return loadbalancer.SVCProxyDelegationNone
+}
+
 // isValidServiceFrontendIP returns true if the provided service frontend IP address type
 // is supported in cilium configuration.
 func isValidServiceFrontendIP(netIP net.IP) bool {
@@ -139,7 +150,7 @@ func isValidServiceFrontendIP(netIP net.IP) bool {
 // latter two, one can set the annotation with the value "LoadBalancer".
 type exposeSvcType slim_corev1.ServiceType
 
-func newSvcExposureType(svc *slim_corev1.Service) (*exposeSvcType, error) {
+func NewSvcExposureType(svc *slim_corev1.Service) (*exposeSvcType, error) {
 	typ, isSet := svc.Annotations[annotation.ServiceTypeExposure]
 	if !isSet {
 		return nil, nil
@@ -160,8 +171,8 @@ func newSvcExposureType(svc *slim_corev1.Service) (*exposeSvcType, error) {
 	return &expType, nil
 }
 
-// canExpose checks whether a given service type can be provisioned.
-func (e *exposeSvcType) canExpose(t slim_corev1.ServiceType) bool {
+// CanExpose checks whether a given service type can be provisioned.
+func (e *exposeSvcType) CanExpose(t slim_corev1.ServiceType) bool {
 	if e == nil {
 		return true
 	}
@@ -178,19 +189,23 @@ func ParseServiceID(svc *slim_corev1.Service) ServiceID {
 }
 
 // ParseService parses a Kubernetes service and returns a Service.
-func ParseService(svc *slim_corev1.Service, nodePortAddrs []netip.Addr) (ServiceID, *Service) {
-	scopedLog := log.WithFields(logrus.Fields{
-		logfields.K8sSvcName:    svc.ObjectMeta.Name,
-		logfields.K8sNamespace:  svc.ObjectMeta.Namespace,
-		logfields.K8sAPIVersion: svc.TypeMeta.APIVersion,
-		logfields.K8sSvcType:    svc.Spec.Type,
-	})
+func ParseService(logger *slog.Logger, svc *slim_corev1.Service, nodePortAddrs []netip.Addr) (ServiceID, *Service) {
+	scopedLog := logger.With(
+		logfields.K8sSvcName, svc.ObjectMeta.Name,
+		logfields.K8sNamespace, svc.ObjectMeta.Namespace,
+		logfields.K8sAPIVersion, svc.TypeMeta.APIVersion,
+		logfields.K8sSvcType, svc.Spec.Type,
+	)
 	var loadBalancerIPs []string
 
 	svcID := ParseServiceID(svc)
-	expType, err := newSvcExposureType(svc)
+	expType, err := NewSvcExposureType(svc)
 	if err != nil {
-		scopedLog.WithError(err).Warnf("Ignoring %q annotation", annotation.ServiceTypeExposure)
+		scopedLog.Warn(
+			"Ignoring annotation",
+			logfields.Error, err,
+			logfields.Annotation, annotation.ServiceTypeExposure,
+		)
 	}
 
 	var svcType loadbalancer.SVCType
@@ -209,7 +224,9 @@ func ParseService(svc *slim_corev1.Service, nodePortAddrs []netip.Addr) (Service
 		return ServiceID{}, nil
 
 	default:
-		scopedLog.Warn("Ignoring k8s service: unsupported type")
+		scopedLog.Warn(
+			"Ignoring k8s service: unsupported type",
+		)
 		return ServiceID{}, nil
 	}
 
@@ -218,7 +235,7 @@ func ParseService(svc *slim_corev1.Service, nodePortAddrs []netip.Addr) (Service
 	}
 
 	var clusterIPs []net.IP
-	if expType.canExpose(slim_corev1.ServiceTypeClusterIP) {
+	if expType.CanExpose(slim_corev1.ServiceTypeClusterIP) {
 		if len(svc.Spec.ClusterIPs) == 0 {
 			if clsIP := net.ParseIP(svc.Spec.ClusterIP); clsIP != nil {
 				clusterIPs = []net.IP{clsIP}
@@ -254,7 +271,7 @@ func ParseService(svc *slim_corev1.Service, nodePortAddrs []netip.Addr) (Service
 		intTrafficPolicy = loadbalancer.SVCTrafficPolicyCluster
 	}
 
-	if expType.canExpose(slim_corev1.ServiceTypeLoadBalancer) {
+	if expType.CanExpose(slim_corev1.ServiceTypeLoadBalancer) {
 		for _, ip := range svc.Status.LoadBalancer.Ingress {
 			if ip.IP != "" && (ip.IPMode == nil || *ip.IPMode == slim_corev1.LoadBalancerIPModeVIP) {
 				loadBalancerIPs = append(loadBalancerIPs, ip.IP)
@@ -273,6 +290,7 @@ func ParseService(svc *slim_corev1.Service, nodePortAddrs []netip.Addr) (Service
 		svc.GetNamespace(), svcType)
 
 	svcInfo.SourceRangesPolicy = getAnnotationServiceSourceRangesPolicy(svc)
+	svcInfo.ProxyDelegation = getAnnotationServiceProxyDelegation(svc)
 	svcInfo.IncludeExternal = getAnnotationIncludeExternal(svc)
 	svcInfo.ServiceAffinity = getAnnotationServiceAffinity(svc)
 	svcInfo.Shared = getAnnotationShared(svc)
@@ -283,8 +301,12 @@ func ParseService(svc *slim_corev1.Service, nodePortAddrs []netip.Addr) (Service
 
 		svcInfo.ForwardingMode, err = getAnnotationServiceForwardingMode(svc)
 		if err != nil {
-			scopedLog.WithError(err).Warnf("Ignoring %q annotation, applying global configuration: %v",
-				annotation.ServiceForwardingMode, svcInfo.ForwardingMode)
+			scopedLog.Warn(
+				"Ignoring annotation, applying global configuration",
+				logfields.Error, err,
+				logfields.Annotation, annotation.ServiceForwardingMode,
+				logfields.GlobalConfiguration, svcInfo.ForwardingMode,
+			)
 		}
 	}
 
@@ -294,8 +316,12 @@ func ParseService(svc *slim_corev1.Service, nodePortAddrs []netip.Addr) (Service
 
 		svcInfo.LoadBalancerAlgorithm, err = getAnnotationServiceLoadBalancingAlgorithm(svc)
 		if err != nil {
-			scopedLog.WithError(err).Warnf("Ignoring %q annotation, applying global configuration: %v",
-				annotation.ServiceLoadBalancingAlgorithm, svcInfo.LoadBalancerAlgorithm)
+			scopedLog.Warn(
+				"Ignoring annotation, applying global configuration",
+				logfields.Error, err,
+				logfields.Annotation, annotation.ServiceLoadBalancingAlgorithm,
+				logfields.GlobalConfiguration, svcInfo.LoadBalancerAlgorithm,
+			)
 		}
 	}
 
@@ -308,8 +334,11 @@ func ParseService(svc *slim_corev1.Service, nodePortAddrs []netip.Addr) (Service
 			svcInfo.SessionAffinityTimeoutSec = uint32(v1.DefaultClientIPServiceAffinitySeconds)
 		}
 		if svcInfo.SessionAffinityTimeoutSec > defaults.SessionAffinityTimeoutMaxFallback {
-			scopedLog.Warnf("Clamping maximum possible session affinity timeout from %d to %d seconds",
-				svcInfo.SessionAffinityTimeoutSec, defaults.SessionAffinityTimeoutMaxFallback)
+			scopedLog.Warn(
+				"Clamping maximum possible session affinity timeout (seconds)",
+				logfields.From, svcInfo.SessionAffinityTimeoutSec,
+				logfields.To, defaults.SessionAffinityTimeoutMaxFallback,
+			)
 			svcInfo.SessionAffinityTimeoutSec = defaults.SessionAffinityTimeoutMaxFallback
 		}
 	}
@@ -336,7 +365,7 @@ func ParseService(svc *slim_corev1.Service, nodePortAddrs []netip.Addr) (Service
 			svcInfo.Ports[portName] = p
 		}
 
-		if expType.canExpose(slim_corev1.ServiceTypeNodePort) &&
+		if expType.CanExpose(slim_corev1.ServiceTypeNodePort) &&
 			(svc.Spec.Type == slim_corev1.ServiceTypeNodePort || svc.Spec.Type == slim_corev1.ServiceTypeLoadBalancer) {
 
 			if option.Config.EnableNodePort {
@@ -464,6 +493,10 @@ type Service struct {
 	// SourceRangesPolicy controls whether the specified loadBalancerSourceRanges
 	// CIDR set defines an allow- or deny-list.
 	SourceRangesPolicy loadbalancer.SVCSourceRangesPolicy
+
+	// ProxyDelegation controls what packets should be delegated and pushed up to
+	// a user space proxy unmodified from its original.
+	ProxyDelegation loadbalancer.SVCProxyDelegation
 
 	// HealthCheckNodePort defines on which port the node runs a HTTP health
 	// check server which may be used by external loadbalancers to determine
@@ -675,13 +708,9 @@ func (s *Service) UniquePorts() map[string]bool {
 func NewClusterService(id ServiceID, k8sService *Service, k8sEndpoints *Endpoints) serviceStore.ClusterService {
 	svc := serviceStore.NewClusterService(id.Name, id.Namespace)
 
-	for key, value := range k8sService.Labels {
-		svc.Labels[key] = value
-	}
+	maps.Copy(svc.Labels, k8sService.Labels)
 
-	for key, value := range k8sService.Selector {
-		svc.Selector[key] = value
-	}
+	maps.Copy(svc.Selector, k8sService.Selector)
 
 	portConfig := serviceStore.PortConfiguration{}
 	for portName, port := range k8sService.Ports {

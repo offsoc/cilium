@@ -16,15 +16,14 @@ import (
 	"github.com/cilium/cilium/pkg/endpoint"
 	"github.com/cilium/cilium/pkg/fqdn"
 	"github.com/cilium/cilium/pkg/fqdn/dnsproxy"
+	fqdnproxy "github.com/cilium/cilium/pkg/fqdn/proxy"
 	"github.com/cilium/cilium/pkg/fqdn/re"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
-	"github.com/cilium/cilium/pkg/proxy"
 	"github.com/cilium/cilium/pkg/proxy/accesslog"
-	"github.com/cilium/cilium/pkg/proxy/logger"
 	proxytypes "github.com/cilium/cilium/pkg/proxy/types"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/u8proto"
@@ -95,20 +94,22 @@ func (d *Daemon) bootstrapFQDN(possibleEndpoints map[uint16]*endpoint.Endpoint, 
 		ConcurrencyLimit:       option.Config.DNSProxyConcurrencyLimit,
 		ConcurrencyGracePeriod: option.Config.DNSProxyConcurrencyProcessingGracePeriod,
 	}
-	proxy.DefaultDNSProxy, err = dnsproxy.StartDNSProxy(dnsProxyConfig, d.lookupEPByIP, d.ipcache.LookupSecIDByIP, d.ipcache.LookupByIdentity,
+	var dnsProxy fqdnproxy.DNSProxier
+	dnsProxy, err = dnsproxy.StartDNSProxy(dnsProxyConfig, d.lookupEPByIP, d.ipcache.LookupSecIDByIP, d.ipcache.LookupByIdentity,
 		d.notifyOnDNSMsg)
+	d.dnsProxy.Set(dnsProxy)
 	if err == nil {
 		// Increase the ProxyPort reference count so that it will never get released.
-		err = d.l7Proxy.SetProxyPort(proxytypes.DNSProxyName, proxytypes.ProxyTypeDNS, proxy.DefaultDNSProxy.GetBindPort(), false)
-		if err == nil && port == proxy.DefaultDNSProxy.GetBindPort() {
+		err = d.l7Proxy.SetProxyPort(proxytypes.DNSProxyName, proxytypes.ProxyTypeDNS, dnsProxy.GetBindPort(), false)
+		if err == nil && port == dnsProxy.GetBindPort() {
 			log.Infof("Reusing previous DNS proxy port: %d", port)
 		}
-		proxy.DefaultDNSProxy.SetRejectReply(option.Config.FQDNRejectResponse)
+		dnsProxy.SetRejectReply(option.Config.FQDNRejectResponse)
 		// Restore old rules
 		for _, possibleEP := range possibleEndpoints {
 			// Upgrades from old ciliums have this nil
 			if possibleEP.DNSRules != nil || possibleEP.DNSRulesV2 != nil {
-				proxy.DefaultDNSProxy.RestoreRules(possibleEP)
+				dnsProxy.RestoreRules(possibleEP)
 			}
 		}
 	}
@@ -230,7 +231,7 @@ func (d *Daemon) notifyOnDNSMsg(
 	// We determine the direction based on the DNS packet. The observation
 	// point is always Egress, however.
 	var flowType accesslog.FlowType
-	var addrInfo logger.AddressingInfo
+	var addrInfo accesslog.AddressingInfo
 	serverAddrPortStr := serverAddrPort.String()
 	if msg.Response {
 		flowType = accesslog.TypeResponse
@@ -309,6 +310,10 @@ func (d *Daemon) notifyOnDNSMsg(
 				option.DNSProxyLockCount, option.DNSProxyLockTimeout)
 		}
 
+		logDebug := log.Logger.IsLevelEnabled(logrus.DebugLevel)
+		if logDebug {
+			log.WithField(logfields.EndpointID, ep.ID).Debug("Recording DNS lookup in endpoint specific cache")
+		}
 		// This must happen before the NameManager update below, to ensure that
 		// this data is included in the serialized Endpoint object.
 		// We also need to add to the cache before we purge any matching zombies
@@ -316,32 +321,31 @@ func (d *Daemon) notifyOnDNSMsg(
 		// consistent if a regeneration happens between the two steps. If an update
 		// doesn't happen in the case, we play it safe and don't purge the zombie
 		// in case of races.
-		log.WithField(logfields.EndpointID, ep.ID).Debug("Recording DNS lookup in endpoint specific cache")
 		if updated := ep.DNSHistory.Update(lookupTime, qname, responseIPs, int(TTL)); updated {
 			ep.DNSZombies.ForceExpireByNameIP(lookupTime, qname, responseIPs...)
 			ep.SyncEndpointHeaderFile()
 		}
 
-		log.WithFields(logrus.Fields{
-			"qname": qname,
-			"ips":   responseIPs,
-		}).Debug("Updating DNS name in cache from response to query")
+		if logDebug {
+			log.WithFields(logrus.Fields{
+				"qname": qname,
+				"ips":   responseIPs,
+			}).Debug("Updating DNS name in cache from response to query")
+		}
 
 		updateCtx, updateCancel := context.WithTimeout(d.ctx, option.Config.FQDNProxyResponseMaxDelay)
 		defer updateCancel()
 		updateStart := time.Now()
 
-		dpUpdates := d.dnsNameManager.UpdateGenerateDNS(updateCtx, lookupTime, map[string]*fqdn.DNSIPRecords{
-			qname: {
-				IPs: responseIPs,
-				TTL: int(TTL),
-			},
+		dpUpdates := d.dnsNameManager.UpdateGenerateDNS(updateCtx, lookupTime, qname, &fqdn.DNSIPRecords{
+			IPs: responseIPs,
+			TTL: int(TTL),
 		})
 
 		stat.PolicyGenerationTime.End(true)
 		stat.DataplaneTime.Start()
 
-		if err := dpUpdates.Wait(); err != nil {
+		if err := <-dpUpdates; err != nil {
 			log.Warning("Timed out waiting for datapath updates of FQDN IP information; returning response. Consider increasing --tofqdns-proxy-response-max-delay if this keeps happening.")
 			metrics.ProxyDatapathUpdateTimeout.Inc()
 		}
@@ -349,18 +353,24 @@ func (d *Daemon) notifyOnDNSMsg(
 		// Policy updates for this name have been pushed out; we can release the lock.
 		d.dnsNameManager.UnlockName(qname)
 
-		log.WithFields(logrus.Fields{
-			logfields.Duration:   time.Since(updateStart),
-			logfields.EndpointID: ep.GetID(),
-			"qname":              qname,
-		}).Debug("Waited for endpoints to regenerate due to a DNS response")
+		if logDebug {
+			log.WithFields(logrus.Fields{
+				logfields.Duration:   time.Since(updateStart),
+				logfields.EndpointID: ep.GetID(),
+				"qname":              qname,
+			}).Debug("Waited for endpoints to regenerate due to a DNS response")
+		}
 
 		endMetric()
 	}
 
 	stat.ProcessingTime.End(true)
 
-	ep.UpdateProxyStatistics("fqdn", strings.ToUpper(protocol), serverAddrPort.Port(), proxy.DefaultDNSProxy.GetBindPort(), false, !msg.Response, verdict)
+	bindPort := uint16(0)
+	if dnsProxy := d.dnsProxy.Get(); dnsProxy != nil {
+		bindPort = dnsProxy.GetBindPort()
+	}
+	ep.UpdateProxyStatistics("fqdn", strings.ToUpper(protocol), serverAddrPort.Port(), bindPort, false, !msg.Response, verdict)
 
 	// Ensure that there are no early returns from this function before the
 	// code below, otherwise the log record will not be made.
@@ -369,11 +379,13 @@ func (d *Daemon) notifyOnDNSMsg(
 	// requests because an identity isn't in the local cache yet.
 	logContext, lcncl := context.WithTimeout(d.ctx, 10*time.Millisecond)
 	defer lcncl()
-	record := logger.NewLogRecord(flowType, false,
-		func(lr *logger.LogRecord) { lr.LogRecord.TransportProtocol = accesslog.TransportProtocol(protoID) },
-		logger.LogTags.Verdict(verdict, reason),
-		logger.LogTags.Addressing(logContext, addrInfo),
-		logger.LogTags.DNS(&accesslog.LogRecordDNS{
+	record := d.proxyAccessLogger.NewLogRecord(flowType, false,
+		func(lr *accesslog.LogRecord, _ accesslog.EndpointInfoRegistry) {
+			lr.TransportProtocol = accesslog.TransportProtocol(protoID)
+		},
+		accesslog.LogTags.Verdict(verdict, reason),
+		accesslog.LogTags.Addressing(logContext, addrInfo),
+		accesslog.LogTags.DNS(&accesslog.LogRecordDNS{
 			Query:             qname,
 			IPs:               responseIPs,
 			TTL:               TTL,
@@ -384,7 +396,7 @@ func (d *Daemon) notifyOnDNSMsg(
 			AnswerTypes:       recordTypes,
 		}),
 	)
-	record.Log()
+	d.proxyAccessLogger.Log(record)
 
 	return nil
 }

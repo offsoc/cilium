@@ -177,6 +177,10 @@ data:
   debug-verbose: "{{ .Values.debug.verbose }}"
 {{- end }}
 
+{{- if hasKey .Values.debug "metricsSamplingInterval" }}
+  metrics-sampling-interval: "{{ .Values.debug.metricsSamplingInterval }}"
+{{- end }}
+
 {{- if ne (int .Values.healthPort) 9879 }}
   # Set the TCP port for the agent health status API. This is not the port used
   # for cilium-health.
@@ -443,6 +447,11 @@ data:
   # policy map (per endpoint)
   bpf-policy-map-max: "{{ .Values.bpf.policyMapMax | int }}"
 {{- end }}
+{{- if hasKey .Values.bpf "policyStatsMapMax" }}
+  # bpf-policy-stats-map-max specifies the maximum number of entries in global
+  # policy stats map
+  bpf-policy-stats-map-max: "{{ .Values.bpf.policyStatsMapMax | int }}"
+{{- end }}
 {{- if hasKey .Values.bpf "lbMapMax" }}
   # bpf-lb-map-max specifies the maximum number of entries in bpf lb service,
   # backend and affinity maps.
@@ -461,6 +470,7 @@ data:
   bpf-lb-mode-annotation: {{ .Values.bpf.lbModeAnnotation | quote }}
 {{- end }}
 
+  bpf-distributed-lru: {{ .Values.bpf.distributedLRU.enabled | quote }}
   bpf-events-drop-enabled: {{ .Values.bpf.events.drop.enabled | quote }}
   bpf-events-policy-verdict-enabled: {{ .Values.bpf.events.policyVerdict.enabled | quote }}
   bpf-events-trace-enabled: {{ .Values.bpf.events.trace.enabled | quote }}
@@ -530,9 +540,6 @@ data:
   enable-endpoint-routes: "true"
   {{- end }}
   auto-create-cilium-node-resource: "true"
-{{- if .Values.eni.updateEC2AdapterLimitViaAPI }}
-  update-ec2-adapter-limit-via-api: "true"
-{{- end }}
 {{- if .Values.eni.awsReleaseExcessIPs }}
   aws-release-excess-ips: "true"
 {{- end }}
@@ -855,6 +862,9 @@ data:
 {{- if hasKey .Values.k8s "requireIPv6PodCIDR" }}
   k8s-require-ipv6-pod-cidr: {{ .Values.k8s.requireIPv6PodCIDR | quote }}
 {{- end }}
+{{- if hasKey .Values.k8s "apiServerURLs" }}
+  k8s-api-server-urls: {{ .Values.k8s.apiServerURLs | quote }}
+{{- end }}
 {{- if and .Values.endpointRoutes .Values.endpointRoutes.enabled }}
   enable-endpoint-routes: {{ .Values.endpointRoutes.enabled | quote }}
 {{- end }}
@@ -932,9 +942,8 @@ data:
   operator-api-serve-addr: {{ $defaultOperatorApiServeAddr | quote }}
 {{- end }}
 
-{{- if .Values.hubble.enabled }}
-  # Enable Hubble gRPC service.
   enable-hubble: {{ .Values.hubble.enabled | quote }}
+{{- if .Values.hubble.enabled }}
   # UNIX domain socket for Hubble server to listen to.
   hubble-socket-path: {{ .Values.hubble.socketPath | quote }}
 {{- if hasKey .Values.hubble "eventQueueSize" }}
@@ -1171,7 +1180,11 @@ data:
 
 {{- if .Values.l2podAnnouncements.enabled }}
   enable-l2-pod-announcements: {{ .Values.l2podAnnouncements.enabled | quote }}
+  {{- if .Values.l2podAnnouncements.interfacePattern }}
+  l2-pod-announcements-interface-pattern: {{ .Values.l2podAnnouncements.interfacePattern | quote }}
+  {{- else }}
   l2-pod-announcements-interface: {{ .Values.l2podAnnouncements.interface | quote }}
+  {{- end }}
 {{- end }}
 
 {{- if .Values.bgpControlPlane.enabled }}

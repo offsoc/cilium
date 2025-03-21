@@ -66,7 +66,7 @@ env:
   contextName2: kind-cluster2-${{ github.run_id }}
 
   # renovate: datasource=github-releases depName=cert-manager/cert-manager
-  CERT_MANAGER_VERSION: v1.17.0
+  CERT_MANAGER_VERSION: v1.17.1
 
 jobs:
   echo-inputs:
@@ -100,7 +100,7 @@ jobs:
       - name: Wait for images
         uses: ./.github/actions/wait-for-images
         with:
-          SHA: ${{ inputs.SHA }}
+          SHA: ${{ inputs.SHA || github.sha }}
           images: cilium-ci operator-generic-ci hubble-relay-ci clustermesh-apiserver-ci cilium-cli-ci
 
   installation-and-connectivity:
@@ -326,6 +326,8 @@ jobs:
           fi
 
           CONNECTIVITY_TEST_DEFAULTS="--hubble=false \
+            --log-code-owners --code-owners=${CILIUM_CLI_CODE_OWNERS_PATHS} \
+            --exclude-code-owners=${CILIUM_CLI_EXCLUDE_OWNERS} \
             --flow-validation=disabled \
             --test-concurrency=5 \
             --multi-cluster=${{ env.contextName2 }} \
@@ -387,11 +389,13 @@ jobs:
           wait: 0 # The control-plane never becomes ready, since no CNI is present
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@1432ef0e4e0cd766f5c1ee0544759d7a31cd32b2 # v0.17.0
+        uses: cilium/cilium-cli@0caa9e5cbfe3a80a1fd6bbc1f5f9926da35b0373 # v0.18.2
         with:
           skip-build: ${{ env.CILIUM_CLI_SKIP_BUILD }}
           image-repo: ${{ env.CILIUM_CLI_IMAGE_REPO }}
           image-tag: ${{ steps.vars.outputs.sha }}
+          repository: ${{ env.CILIUM_CLI_RELEASE_REPO }}
+          release-version: ${{ env.CILIUM_CLI_VERSION }}
 
       - name: Label one of the nodes as external to the cluster
         run: |
@@ -573,7 +577,6 @@ jobs:
       - name: Run connectivity test (${{ join(matrix.*, ', ') }})
         run: |
           cilium --context ${{ env.contextName1 }} connectivity test ${{ steps.vars.outputs.connectivity_test_defaults }} \
-          --log-code-owners \
           --junit-file "cilium-junits/${{ env.job_name }} (${{ join(matrix.*, ', ') }}).xml" \
           --junit-property github_job_step="Run connectivity test (${{ join(matrix.*, ', ') }})"
 
@@ -621,21 +624,21 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ !success() }}
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: cilium-sysdumps-${{ matrix.name }}
           path: cilium-sysdump-*.zip
 
       - name: Upload JUnits [junit]
         if: ${{ always() }}
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: cilium-junits-${{ matrix.name }}
           path: cilium-junits/*.xml
 
       - name: Upload features tested
         if: ${{ always() }}
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: features-tested-${{ matrix.name }}
           path: ${{ env.job_name }}*.json

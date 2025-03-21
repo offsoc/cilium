@@ -81,7 +81,6 @@ func (m *manager) defines() (defines.Map, error) {
 
 	if m.Enabled() {
 		cDefinesMap["ENABLE_BANDWIDTH_MANAGER"] = "1"
-		cDefinesMap["THROTTLE_MAP"] = bwmap.MapName
 		cDefinesMap["THROTTLE_MAP_SIZE"] = fmt.Sprintf("%d", bwmap.MapSize)
 	}
 
@@ -233,7 +232,7 @@ func setBaselineSysctls(p bandwidthManagerParams) error {
 		scopedLog := p.Log.With(
 			logfields.SysParamName, strings.Join(setting.name, "."),
 			logfields.SysParamValue, currentValue,
-			"baselineValue", setting.val,
+			logfields.SysParamBaselineValue, setting.val,
 		)
 
 		if currentValue >= setting.val {

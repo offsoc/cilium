@@ -12,7 +12,7 @@ cilium-agent [flags]
 
 ```
       --agent-health-port int                                     TCP port for agent health status API (default 9879)
-      --agent-labels strings                                      Additional labels to identify this agent
+      --agent-labels strings                                      Additional labels to identify this agent in monitor events
       --agent-liveness-update-interval duration                   Interval at which the agent updates liveness time for the datapath (default 1s)
       --agent-not-ready-taint-key string                          Key of the taint indicating that Cilium is not ready on the node (default "node.cilium.io/agent-not-ready")
       --allocator-list-timeout duration                           Timeout for listing allocator state before exiting (default 3m0s)
@@ -35,6 +35,7 @@ cilium-agent [flags]
       --bpf-ct-timeout-service-any duration                       Timeout for service entries in non-TCP CT table (default 1m0s)
       --bpf-ct-timeout-service-tcp duration                       Timeout for established service entries in TCP CT table (default 2h13m20s)
       --bpf-ct-timeout-service-tcp-grace duration                 Timeout for graceful shutdown of service entries in TCP CT table (default 1m0s)
+      --bpf-distributed-lru                                       Enable per-CPU BPF LRU backend memory
       --bpf-events-drop-enabled                                   Expose 'drop' events for Cilium monitor and/or Hubble (default true)
       --bpf-events-policy-verdict-enabled                         Expose 'policy verdict' events for Cilium monitor and/or Hubble (default true)
       --bpf-events-trace-enabled                                  Expose 'trace' events for Cilium monitor and/or Hubble (default true)
@@ -60,6 +61,7 @@ cilium-agent [flags]
       --bpf-neigh-global-max int                                  Maximum number of entries for the global BPF neighbor table (default 524288)
       --bpf-node-map-max uint32                                   Sets size of node bpf map which will be the max number of unique Node IPs in the cluster (default 16384)
       --bpf-policy-map-max int                                    Maximum number of entries in endpoint policy map (per endpoint) (default 16384)
+      --bpf-policy-stats-map-max int                              Maximum number of entries in bpf policy stats map (default 65536)
       --bpf-root string                                           Path to BPF filesystem
       --bpf-sock-rev-map-max int                                  Maximum number of entries for the SockRevNAT BPF map (default 262144)
       --certificates-directory string                             Root directory to find certificates specified in L7 TLS policy enforcement (default "/var/run/cilium/certs")
@@ -216,6 +218,7 @@ cilium-agent [flags]
       --http-request-timeout uint                                 Time after which a forwarded HTTP request is considered failed unless completed (in seconds); Use 0 for unlimited (default 3600)
       --http-retry-count uint                                     Number of retries performed after a forwarded request attempt fails (default 3)
       --http-retry-timeout uint                                   Time after which a forwarded but uncompleted request is retried (connection failures are retried immediately); defaults to 0 (never)
+      --http-stream-idle-timeout uint                             Set Envoy the amount of time that the connection manager will allow a stream to exist with no upstream or downstream activity. Default 300s (default 300)
       --hubble-disable-tls                                        Allow Hubble server to run on the given listen address without TLS.
       --hubble-drop-events                                        Emit packet drop Events related to pods (alpha)
       --hubble-drop-events-interval duration                      Minimum time between emitting same events (default 2m0s)
@@ -283,7 +286,7 @@ cilium-agent [flags]
       --ipv6-pod-subnets strings                                  List of IPv6 pod subnets to preconfigure for encryption
       --ipv6-range string                                         Per-node IPv6 endpoint prefix, e.g. fd02:1:1::/96 (default "auto")
       --ipv6-service-range string                                 Kubernetes IPv6 services CIDR if not inside cluster prefix (default "auto")
-      --k8s-api-server string                                     Kubernetes API server URL
+      --k8s-api-server-urls strings                               Kubernetes API server URLs
       --k8s-client-burst int                                      Burst value allowed for the K8s client (default 20)
       --k8s-client-connection-keep-alive duration                 Configures the keep alive duration of K8s client connections. K8 client is disabled if the value is set to 0 (default 30s)
       --k8s-client-connection-timeout duration                    Configures the timeout of K8s client connections. K8s client is disabled if the value is set to 0 (default 30s)
@@ -306,7 +309,7 @@ cilium-agent [flags]
       --l2-announcements-lease-duration duration                  Duration of inactivity after which a new leader is selected (default 15s)
       --l2-announcements-renew-deadline duration                  Interval at which the leader renews a lease (default 5s)
       --l2-announcements-retry-period duration                    Timeout after a renew failure, before the next retry (default 2s)
-      --l2-pod-announcements-interface string                     Interface used for sending gratuitous arp messages
+      --l2-pod-announcements-interface-pattern string             Regex matching interfaces used for sending gratuitous arp messages
       --label-prefix-file string                                  Valid label prefixes file path
       --labels strings                                            List of label prefixes used to determine identity of an endpoint
       --lib-dir string                                            Directory path to store runtime build environment (default "/var/lib/cilium")
@@ -325,6 +328,7 @@ cilium-agent [flags]
       --mesh-auth-spiffe-trust-domain string                      The trust domain for the SPIFFE identity. (default "spiffe.cilium")
       --mesh-auth-spire-admin-socket string                       The path for the SPIRE admin agent Unix socket.
       --metrics strings                                           Metrics that should be enabled or disabled from the default metric list. (+metric_foo to enable metric_foo, -metric_bar to disable metric_bar)
+      --metrics-sampling-interval duration                        Set the internal metrics sampling interval (default 5m0s)
       --monitor-aggregation string                                Level of monitor aggregation for traces from the datapath (default "None")
       --monitor-aggregation-flags strings                         TCP flags that trigger monitor reports when monitor aggregation is enabled (default [syn,fin,rst])
       --monitor-aggregation-interval duration                     Monitor report interval when monitor aggregation is enabled (default 5s)

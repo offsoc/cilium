@@ -233,7 +233,7 @@ int overlay_to_lxc_syn_check(struct __ctx_buff *ctx)
 	tuple.nexthdr = IPPROTO_TCP;
 	tuple.flags   = TUPLE_F_IN;
 
-	entry = map_lookup_elem(&CT_MAP_TCP4, &tuple);
+	entry = map_lookup_elem(&cilium_ct4_global, &tuple);
 	if (!entry)
 		test_fatal("couldn't find ingress conntrack entry");
 
@@ -255,7 +255,8 @@ int lxc_to_overlay_synack_pktgen(struct __ctx_buff *ctx)
 SETUP("tc", "02_lxc_to_overlay_synack")
 int lxc_to_overlay_synack_setup(struct __ctx_buff *ctx)
 {
-	ipcache_v4_add_entry(CLIENT_NODE_IP, 0, REMOTE_NODE_ID, 0, 0);
+	ipcache_v4_add_entry_with_flags(CLIENT_NODE_IP, 0, REMOTE_NODE_ID,
+					CLIENT_NODE_IP, 0, true);
 
 	tail_call_static(ctx, entry_call_map, FROM_CONTAINER);
 
@@ -330,7 +331,7 @@ int lxc_to_overlay_ack_check(struct __ctx_buff *ctx)
 	tuple.nexthdr = IPPROTO_TCP;
 	tuple.flags   = TUPLE_F_IN;
 
-	entry = map_lookup_elem(&CT_MAP_TCP4, &tuple);
+	entry = map_lookup_elem(&cilium_ct4_global, &tuple);
 	if (!entry)
 		test_fatal("couldn't find egress conntrack entry");
 
@@ -429,7 +430,7 @@ int overlay_to_lxc_ack_check(struct __ctx_buff *ctx)
 	tuple.nexthdr = IPPROTO_TCP;
 	tuple.flags   = TUPLE_F_IN;
 
-	entry = map_lookup_elem(&CT_MAP_TCP4, &tuple);
+	entry = map_lookup_elem(&cilium_ct4_global, &tuple);
 	if (!entry)
 		test_fatal("couldn't find ingress conntrack entry");
 

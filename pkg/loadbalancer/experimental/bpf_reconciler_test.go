@@ -6,7 +6,6 @@ package experimental
 import (
 	"context"
 	"fmt"
-	"iter"
 	"net/netip"
 	"slices"
 	"strings"
@@ -73,37 +72,41 @@ var baseFrontend = Frontend{
 		ServiceName: testServiceName,
 		PortName:    "", // Ignored, backends already resolved.
 	},
-	Backends: func(yield func(*Backend, statedb.Revision) bool) {},
+	Backends: func(yield func(BackendParams, statedb.Revision) bool) {},
 	Status:   reconciler.StatusPending(),
 }
 
-var emptyInstances = func() part.Map[BackendInstanceKey, BackendInstance] {
+var emptyInstances = func() part.Map[BackendInstanceKey, BackendParams] {
 	part.RegisterKeyType(BackendInstanceKey.Key)
-	return part.Map[BackendInstanceKey, BackendInstance]{}
+	return part.Map[BackendInstanceKey, BackendParams]{}
 }()
 
-var baseBackend = Backend{
-	L3n4Addr: backend1,
-	NodeName: "",
-	ZoneID:   0,
-	Instances: emptyInstances.Set(
-		BackendInstanceKey{testServiceName, 0},
-		BackendInstance{
-			PortName: "",
-			Weight:   0,
-			State:    loadbalancer.BackendStateActive,
-		},
-	),
-}
-
+var baseBackend = newTestBackend(backend1, loadbalancer.BackendStateActive)
 var nextBackendRevision = statedb.Revision(1)
 
-func concatBe(bes iter.Seq2[*Backend, statedb.Revision], be *Backend, rev statedb.Revision) iter.Seq2[*Backend, statedb.Revision] {
-	return func(yield func(*Backend, statedb.Revision) bool) {
+func concatBe(bes backendsSeq2, be BackendParams, rev statedb.Revision) backendsSeq2 {
+	return func(yield func(BackendParams, statedb.Revision) bool) {
 		if !yield(be, rev) {
 			return
 		}
 		bes(yield)
+	}
+}
+
+func newTestBackend(addr loadbalancer.L3n4Addr, state loadbalancer.BackendState) Backend {
+	return Backend{
+		Address: addr,
+		Instances: emptyInstances.Set(
+			BackendInstanceKey{testServiceName, 0},
+			BackendParams{
+				Address:   addr,
+				NodeName:  "",
+				ZoneID:    0,
+				PortNames: nil,
+				Weight:    0,
+				State:     state,
+			},
+		),
 	}
 }
 
@@ -114,7 +117,7 @@ func newTestCase(name string, mod func(*Service, *Frontend) (delete bool, bes []
 	delete, bes := mod(&svc, &fe)
 	fe.service = &svc
 	for _, be := range bes {
-		fe.Backends = concatBe(fe.Backends, &be, nextBackendRevision)
+		fe.Backends = concatBe(fe.Backends, *be.GetInstance(svc.Name), nextBackendRevision)
 		nextBackendRevision++
 	}
 	return testCase{
@@ -164,9 +167,7 @@ var clusterIPTestCases = []testCase{
 			"SVC: ID=1 ADDR=<auto>/TCP SLOT=0 LBALG=random AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
 			"SVC: ID=1 ADDR=<auto>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
 		},
-		[]MapDump{
-			"MAGLEV: ID=1 INNER=[1(1021)]",
-		},
+		nil,
 	),
 
 	newTestCase(
@@ -174,9 +175,9 @@ var clusterIPTestCases = []testCase{
 		func(svc *Service, fe *Frontend) (delete bool, bes []Backend) {
 			fe.Type = ClusterIP
 			fe.Address = autoAddr
-			be1, be2 := baseBackend, baseBackend
-			be1.L3n4Addr = backend1
-			be2.L3n4Addr = backend2
+			be1, be2 :=
+				newTestBackend(backend1, loadbalancer.BackendStateActive),
+				newTestBackend(backend2, loadbalancer.BackendStateActive)
 			return false, []Backend{be1, be2}
 		},
 		[]MapDump{
@@ -187,9 +188,7 @@ var clusterIPTestCases = []testCase{
 			"SVC: ID=1 ADDR=<auto>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
 			"SVC: ID=1 ADDR=<auto>/TCP SLOT=2 BEID=2 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
 		},
-		[]MapDump{
-			"MAGLEV: ID=1 INNER=[1(511), 2(510)]",
-		},
+		nil,
 	),
 
 	newTestCase(
@@ -274,9 +273,9 @@ var quarantineTestCases = []testCase{
 		func(svc *Service, fe *Frontend) (delete bool, bes []Backend) {
 			fe.Type = ClusterIP
 			fe.Address = autoAddr
-			be1, be2 := baseBackend, baseBackend
-			be1.L3n4Addr = backend1
-			be2.L3n4Addr = backend2
+			be1, be2 :=
+				newTestBackend(backend1, loadbalancer.BackendStateActive),
+				newTestBackend(backend2, loadbalancer.BackendStateActive)
 			return false, []Backend{be1, be2}
 		},
 		[]MapDump{
@@ -287,9 +286,7 @@ var quarantineTestCases = []testCase{
 			"SVC: ID=1 ADDR=<auto>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
 			"SVC: ID=1 ADDR=<auto>/TCP SLOT=2 BEID=2 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
 		},
-		[]MapDump{
-			"MAGLEV: ID=1 INNER=[1(511), 2(510)]",
-		},
+		nil,
 	),
 
 	newTestCase(
@@ -297,10 +294,9 @@ var quarantineTestCases = []testCase{
 		func(svc *Service, fe *Frontend) (delete bool, bes []Backend) {
 			fe.Type = ClusterIP
 			fe.Address = autoAddr
-			be1, be2 := baseBackend, baseBackend
-			be1.L3n4Addr = backend1
-			be2.L3n4Addr = backend2
-			be1.State = loadbalancer.BackendStateQuarantined
+			be1, be2 :=
+				newTestBackend(backend1, loadbalancer.BackendStateQuarantined),
+				newTestBackend(backend2, loadbalancer.BackendStateActive)
 			return false, []Backend{be1, be2}
 		},
 		[]MapDump{
@@ -311,9 +307,7 @@ var quarantineTestCases = []testCase{
 			"SVC: ID=1 ADDR=<auto>/TCP SLOT=1 BEID=2 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
 			"SVC: ID=1 ADDR=<auto>/TCP SLOT=2 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
 		},
-		[]MapDump{
-			"MAGLEV: ID=1 INNER=[2(1021)]",
-		},
+		nil,
 	),
 
 	newTestCase(
@@ -335,9 +329,9 @@ var nodePortTestCases = []testCase{
 		func(svc *Service, fe *Frontend) (delete bool, bes []Backend) {
 			fe.Type = NodePort
 			fe.Address = zeroAddr
-			be1, be2 := baseBackend, baseBackend
-			be1.L3n4Addr = backend1
-			be2.L3n4Addr = backend2
+			be1, be2 :=
+				newTestBackend(backend1, loadbalancer.BackendStateActive),
+				newTestBackend(backend2, loadbalancer.BackendStateActive)
 			return false, []Backend{be1, be2}
 		},
 
@@ -354,7 +348,6 @@ var nodePortTestCases = []testCase{
 			"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=2 BEID=2 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal",
 		},
 		[]MapDump{
-			"MAGLEV: ID=1 INNER=[1(511), 2(510)]",
 			"MAGLEV: ID=2 INNER=[1(511), 2(510)]",
 		},
 	),
@@ -388,7 +381,6 @@ var hostPortTestCases = []testCase{
 			"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=HostPort+Local+InternalLocal",
 		},
 		[]MapDump{
-			"MAGLEV: ID=1 INNER=[1(1021)]",
 			"MAGLEV: ID=2 INNER=[1(1021)]",
 		},
 	),
@@ -451,10 +443,7 @@ var proxyTestCases = []testCase{
 			"SVC: ID=1 ADDR=<auto>/TCP SLOT=0 L7Proxy=2570 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable+l7-load-balancer",
 			"SVC: ID=1 ADDR=<auto>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable+l7-load-balancer",
 		},
-		// TODO: Looking at lb4_service in pkg/maps/lbmap/ipv4.go, is there a point in supporting Maglev when L7Proxy is enabled?
-		[]MapDump{
-			"MAGLEV: ID=1 INNER=[1(1021)]",
-		},
+		nil,
 	),
 	newTestCase(
 		"L7Proxy_cleanup",
@@ -635,17 +624,12 @@ var externalIPTestCases = []testCase{
 }
 
 var localRedirectTestCases = []testCase{
-	// TODO: The LocalRedirect mechanism needs to be thought through.
-	// One option is to implement it the same way as L7 redirect with a boolean
-	// field to enable it. Need to figure out how to query for the backends though.
-	// Could either play with the "-local" suffix, or just have a boolean in Backend
-	// to mark it as the "local redirect backend" and then just filter for these on
-	// the fly (if Frontend.LocalRedirect set, take the redirect backends that reference the service,
-	// otherwise non-redirect backends).
+	// If a frontend has a redirect set to another service it will have the "LocalRedirect" flag.
 	newTestCase(
 		"LocalRedirect",
 		func(svc *Service, fe *Frontend) (delete bool, bes []Backend) {
-			fe.Type = LocalRedirect
+			fe.Type = ClusterIP
+			fe.RedirectTo = &loadbalancer.ServiceName{Name: "foo", Namespace: "bar"}
 			fe.Address = autoAddr
 			return false, []Backend{}
 		},
@@ -672,10 +656,9 @@ var sessionAffinityTestCases = []testCase{
 			fe.Address = zeroAddr
 			svc.SessionAffinity = true
 			svc.SessionAffinityTimeout = time.Second
-
-			be1, be2 := baseBackend, baseBackend
-			be1.L3n4Addr = backend1
-			be2.L3n4Addr = backend2
+			be1, be2 :=
+				newTestBackend(backend1, loadbalancer.BackendStateActive),
+				newTestBackend(backend2, loadbalancer.BackendStateActive)
 			return false, []Backend{be1, be2}
 		},
 
@@ -696,7 +679,6 @@ var sessionAffinityTestCases = []testCase{
 			"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=2 BEID=2 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+sessionAffinity",
 		},
 		[]MapDump{
-			"MAGLEV: ID=1 INNER=[1(511), 2(510)]",
 			"MAGLEV: ID=2 INNER=[1(511), 2(510)]",
 		},
 	),
@@ -708,11 +690,9 @@ var sessionAffinityTestCases = []testCase{
 			fe.Address = zeroAddr
 			svc.SessionAffinity = true
 			svc.SessionAffinityTimeout = time.Second
-
-			be1, be2 := baseBackend, baseBackend
-			be1.L3n4Addr = backend1
-			be2.L3n4Addr = backend2
-			be1.State = loadbalancer.BackendStateQuarantined
+			be1, be2 :=
+				newTestBackend(backend1, loadbalancer.BackendStateQuarantined),
+				newTestBackend(backend2, loadbalancer.BackendStateActive)
 			return false, []Backend{be1, be2}
 		},
 
@@ -731,7 +711,6 @@ var sessionAffinityTestCases = []testCase{
 			"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=2 BEID=1 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+sessionAffinity",
 		},
 		[]MapDump{
-			"MAGLEV: ID=1 INNER=[2(1021)]",
 			"MAGLEV: ID=2 INNER=[2(1021)]",
 		},
 	),
@@ -768,7 +747,6 @@ var sessionAffinityTestCases = []testCase{
 			"SVC: ID=4 ADDR=<nodePort>/TCP SLOT=1 BEID=3 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+sessionAffinity",
 		},
 		[]MapDump{
-			"MAGLEV: ID=3 INNER=[3(1021)]",
 			"MAGLEV: ID=4 INNER=[3(1021)]",
 		},
 	),
@@ -792,7 +770,6 @@ var sessionAffinityTestCases = []testCase{
 			"SVC: ID=4 ADDR=<nodePort>/TCP SLOT=1 BEID=3 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal",
 		},
 		[]MapDump{
-			"MAGLEV: ID=3 INNER=[3(1021)]",
 			"MAGLEV: ID=4 INNER=[3(1021)]",
 		},
 	),
@@ -834,10 +811,10 @@ var perServiceAlgorithmCases = []setWithAlgo{
 	{
 		testCaseSet: []testCase{
 			newTestCase(
-				"ClusterIP_1_backend_explicitMaglev",
+				"NodePort_1_backend_explicitMaglev",
 				func(svc *Service, fe *Frontend) (delete bool, bes []Backend) {
-					fe.Type = ClusterIP
-					fe.Address = autoAddr
+					fe.Type = NodePort
+					fe.Address = zeroAddr
 					if svc.Annotations == nil {
 						svc.Annotations = make(map[string]string)
 					}
@@ -846,17 +823,20 @@ var perServiceAlgorithmCases = []setWithAlgo{
 				},
 				[]MapDump{
 					"BE: ID=1 ADDR=10.1.0.1:80/TCP STATE=active",
-					"REV: ID=1 ADDR=<auto>",
-					"SVC: ID=1 ADDR=<auto>/TCP SLOT=0 LBALG=maglev AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
-					"SVC: ID=1 ADDR=<auto>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
+					"REV: ID=1 ADDR=<zero>",
+					"REV: ID=2 ADDR=<nodePort>",
+					"SVC: ID=1 ADDR=<zero>/TCP SLOT=0 LBALG=maglev AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+non-routable",
+					"SVC: ID=1 ADDR=<zero>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+non-routable",
+					"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=0 LBALG=maglev AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal",
+					"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal",
 				},
 				[]MapDump{
-					"MAGLEV: ID=1 INNER=[1(1021)]",
+					"MAGLEV: ID=2 INNER=[1(1021)]",
 				},
 			),
 			newTestCase(
-				"ClusterIPs_explicitMaglev_cleanup",
-				deleteFrontend(autoAddr, ClusterIP),
+				"NodePorts_explicitMaglev_cleanup",
+				deleteFrontend(zeroAddr, NodePort),
 				[]MapDump{},
 				nil,
 			),
@@ -866,23 +846,26 @@ var perServiceAlgorithmCases = []setWithAlgo{
 	{
 		testCaseSet: []testCase{
 			newTestCase(
-				"ClusterIP_1_backend_noExplicitMaglev",
+				"NodePort_1_backend_noExplicitMaglev",
 				func(svc *Service, fe *Frontend) (delete bool, bes []Backend) {
-					fe.Type = ClusterIP
-					fe.Address = autoAddr
+					fe.Type = NodePort
+					fe.Address = zeroAddr
 					return false, []Backend{baseBackend}
 				},
 				[]MapDump{
 					"BE: ID=1 ADDR=10.1.0.1:80/TCP STATE=active",
-					"REV: ID=1 ADDR=<auto>",
-					"SVC: ID=1 ADDR=<auto>/TCP SLOT=0 LBALG=random AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
-					"SVC: ID=1 ADDR=<auto>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
+					"REV: ID=1 ADDR=<zero>",
+					"REV: ID=2 ADDR=<nodePort>",
+					"SVC: ID=1 ADDR=<zero>/TCP SLOT=0 LBALG=random AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+non-routable",
+					"SVC: ID=1 ADDR=<zero>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+non-routable",
+					"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=0 LBALG=random AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal",
+					"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal",
 				},
 				nil,
 			),
 			newTestCase(
-				"ClusterIPs_noExplicitMaglev_cleanup",
-				deleteFrontend(autoAddr, ClusterIP),
+				"NodePorts_noExplicitMaglev_cleanup",
+				deleteFrontend(zeroAddr, NodePort),
 				[]MapDump{},
 				nil,
 			),
@@ -892,10 +875,10 @@ var perServiceAlgorithmCases = []setWithAlgo{
 	{
 		testCaseSet: []testCase{
 			newTestCase(
-				"ClusterIP_1_backend_explicitRandom",
+				"NodePort_1_backend_explicitRandom",
 				func(svc *Service, fe *Frontend) (delete bool, bes []Backend) {
-					fe.Type = ClusterIP
-					fe.Address = autoAddr
+					fe.Type = NodePort
+					fe.Address = zeroAddr
 					if svc.Annotations == nil {
 						svc.Annotations = make(map[string]string)
 					}
@@ -904,15 +887,18 @@ var perServiceAlgorithmCases = []setWithAlgo{
 				},
 				[]MapDump{
 					"BE: ID=1 ADDR=10.1.0.1:80/TCP STATE=active",
-					"REV: ID=1 ADDR=<auto>",
-					"SVC: ID=1 ADDR=<auto>/TCP SLOT=0 LBALG=random AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
-					"SVC: ID=1 ADDR=<auto>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
+					"REV: ID=1 ADDR=<zero>",
+					"REV: ID=2 ADDR=<nodePort>",
+					"SVC: ID=1 ADDR=<zero>/TCP SLOT=0 LBALG=random AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+non-routable",
+					"SVC: ID=1 ADDR=<zero>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+non-routable",
+					"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=0 LBALG=random AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal",
+					"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal",
 				},
 				nil,
 			),
 			newTestCase(
-				"ClusterIPs_explicitRandom_cleanup",
-				deleteFrontend(autoAddr, ClusterIP),
+				"NodePorts_explicitRandom_cleanup",
+				deleteFrontend(zeroAddr, NodePort),
 				[]MapDump{},
 				nil,
 			),
@@ -922,25 +908,28 @@ var perServiceAlgorithmCases = []setWithAlgo{
 	{
 		testCaseSet: []testCase{
 			newTestCase(
-				"ClusterIP_1_backend_noExplicitRandom",
+				"NodePort_1_backend_noExplicitRandom",
 				func(svc *Service, fe *Frontend) (delete bool, bes []Backend) {
-					fe.Type = ClusterIP
-					fe.Address = autoAddr
+					fe.Type = NodePort
+					fe.Address = zeroAddr
 					return false, []Backend{baseBackend}
 				},
 				[]MapDump{
 					"BE: ID=1 ADDR=10.1.0.1:80/TCP STATE=active",
-					"REV: ID=1 ADDR=<auto>",
-					"SVC: ID=1 ADDR=<auto>/TCP SLOT=0 LBALG=maglev AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
-					"SVC: ID=1 ADDR=<auto>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=ClusterIP+Local+InternalLocal+non-routable",
+					"REV: ID=1 ADDR=<zero>",
+					"REV: ID=2 ADDR=<nodePort>",
+					"SVC: ID=1 ADDR=<zero>/TCP SLOT=0 LBALG=maglev AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+non-routable",
+					"SVC: ID=1 ADDR=<zero>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal+non-routable",
+					"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=0 LBALG=maglev AFFTimeout=0 COUNT=1 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal",
+					"SVC: ID=2 ADDR=<nodePort>/TCP SLOT=1 BEID=1 COUNT=0 QCOUNT=0 FLAGS=NodePort+Local+InternalLocal",
 				},
 				[]MapDump{
-					"MAGLEV: ID=1 INNER=[1(1021)]",
+					"MAGLEV: ID=2 INNER=[1(1021)]",
 				},
 			),
 			newTestCase(
-				"ClusterIPs_noExplicitMaglev_cleanup",
-				deleteFrontend(autoAddr, ClusterIP),
+				"NodePorts_noExplicitMaglev_cleanup",
+				deleteFrontend(zeroAddr, NodePort),
 				[]MapDump{},
 				nil,
 			),
@@ -960,30 +949,34 @@ func TestBPFOps(t *testing.T) {
 	maglev, err := maglev.New(maglevCfg, lc)
 	require.NoError(t, err, "maglev.New")
 
+	// Enable features.
+	extCfg := ExternalConfig{
+		LBMapsConfig: LBMapsConfig{
+			MaxSockRevNatMapEntries:  1000,
+			ServiceMapMaxEntries:     1000,
+			BackendMapMaxEntries:     1000,
+			RevNatMapMaxEntries:      1000,
+			AffinityMapMaxEntries:    1000,
+			SourceRangeMapMaxEntries: 1000,
+			MaglevMapMaxEntries:      1000,
+		},
+
+		EnableIPv4:           true,
+		EnableIPv6:           true,
+		KubeProxyReplacement: true,
+	}
+
 	var lbmaps LBMaps
 	if testutils.IsPrivileged() {
 		r := &BPFLBMaps{
-			Pinned: false,
-			Cfg: LBMapsConfig{
-				MaxSockRevNatMapEntries:  1000,
-				ServiceMapMaxEntries:     1000,
-				BackendMapMaxEntries:     1000,
-				RevNatMapMaxEntries:      1000,
-				AffinityMapMaxEntries:    1000,
-				SourceRangeMapMaxEntries: 1000,
-				MaglevMapMaxEntries:      1000,
-			},
+			Pinned:    false,
+			Cfg:       extCfg,
 			MaglevCfg: maglevCfg,
 		}
 		lc.Append(r)
 		lbmaps = r
 	} else {
 		lbmaps = NewFakeLBMaps()
-	}
-
-	// Enable features.
-	extCfg := ExternalConfig{
-		EnableSessionAffinity: true,
 	}
 
 	cfg := DefaultConfig
@@ -1079,7 +1072,7 @@ func TestBPFOps(t *testing.T) {
 		require.Empty(t, ops.serviceIDAlloc.entities, "Frontend ID allocations remain")
 		require.Empty(t, ops.backendStates, "Backend state remain")
 		require.Empty(t, ops.backendReferences, "Backend references remain")
-		require.Empty(t, ops.nodePortAddrByService, "NodePort addrs state remain")
+		require.Empty(t, ops.nodePortAddrByPort, "NodePort addrs state remain")
 	}
 
 	for _, testCaseSet := range testCases {

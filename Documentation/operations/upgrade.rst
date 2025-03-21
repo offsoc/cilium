@@ -293,20 +293,35 @@ communicating via the proxy must reconnect to re-establish connections.
 1.18 Upgrade Notes
 ------------------
 * ``cilium-dbg bpf policy`` now prints ``ANY`` and not ``reserved:unknown`` for a bpf policy entry that allows any peer identity.
+* The ``v2alpha1`` version of ``CiliumBGPClusterConfig``, ``CiliumBGPPeerConfig``, ``CiliumBGPAdvertisement``, ``CiliumBGPNodeConfig`` and
+  ``CiliumBGPNodeConfigOverride`` CRDs was deprecated in favor of the ``v2`` version. Change ``apiVersion: cilium.io/v2alpha1``
+  to ``apiVersion: cilium.io/v2`` for these CRDs in all your BGP configs. The previously deprecated field
+  ``spec.transport.localPort`` in ``CiliumBGPPeerConfig`` has been removed and will be ignored if it was configured in the ``v2alpha1`` version.
+
 
 Removed Options
 ~~~~~~~~~~~~~~~
 
 * The previously deprecated high-scale mode for ipcache has been removed.
 * The previously deprecated hubble-relay flag ``--dial-timeout`` has been removed.
-* The previously deprecated External Workflows feature has been removed.
+* The previously deprecated External Workloads feature has been removed. To remove stale resources, run ``kubectl delete crd ciliumexternalworkloads.cilium.io``. In addition, you might want to delete a K8s secret used by External Workloads. Run ``kubectl -n kube-system get secrets`` to find one.
 * The previously deprecated ``--datapath-mode=lb-only`` for plain Docker mode has been removed.
+* The ``update-ec2-adapter-limit-via-api`` CLI flag for the operator has been removed since the operator will only and always use the 
+  EC2API to update the EC2 instance limit.
+* The ``aws-instance-limit-mapping`` CLI flag for the operator has been removed since the operator will only and always use the
+  EC2API to update the EC2 instance limit.
 
 Deprecated Options
 ~~~~~~~~~~~~~~~~~~
 
 * Operator flag ``ces-slice-mode`` has been deprecated and will be removed in Cilium 1.19.
   CiliumEndpointSlice batching mode defaults to first-come-first-serve mode.
+* The flag value ``--datapath-mode=lb-only`` for plain Docker mode has been migrated into
+  ``--bpf-lb-only`` and will be removed in Cilium 1.19.
+* ``k8s-api-server``: This option has been deprecated in favor of ``k8s-api-server-urls``
+  and will be removed in Cilium 1.19.
+* ``--l2-pod-announcements-interface`` has been deprecated in favor of 
+  ``--l2-pod-announcements-interface-pattern`` and will be removed in Cilium 1.19.
 
 Helm Options
 ~~~~~~~~~~~~
@@ -323,9 +338,17 @@ Helm Options
   ``k8sClientExponentialBackoff.backoffMaxDurationSeconds``. Users who were already setting these
   using ``extraEnv`` should either remove them from ``extraEnv`` or set ``k8sClientExponentialBackoff.enabled=false``.
 * The deprecated Helm option ``hubble.relay.dialTimeout`` has been removed.
+* ``k8s.apiServerURLs`` has been introduced to specify multiple Kubernetes API servers so that the agent can fail over
+  to an active instance.
+* ``eni.updateEC2AdapterLimitViaAPI`` is removed since the operator will only and always use the EC2API to update the EC2 instance limit.
+* The Helm option ``l2PodAnnouncements.interface`` has been deprecated in favor of ``l2PodAnnouncements.interfacePattern``
+  and will be removed in Cilium 1.19.
 
 Agent Options
 ~~~~~~~~~~~~~
+
+``k8s-api-server-urls``: This option specifies a list of URLs for Kubernetes API server instances to support high availability
+for the servers. The agent will fail over to an active instance in case of connectivity failures at runtime.
 
 Bugtool Options
 ~~~~~~~~~~~~~~~
@@ -348,6 +371,9 @@ Changed Metrics
 * ``doublewrite_identity_crd_only_count`` has been renamed to ``doublewrite_crd_only_identities``
 * ``doublewrite_identity_kvstore_only_count`` has been renamed to ``doublewrite_kvstore_only_identities``
 * The type of the ``cilium_agent_bootstrap_seconds`` metric has been changed from histogram to gauge.
+* ``cilium_agent_bgp_control_plane_reconcile_error_count`` has been renamed to ``cilium_agent_bgp_control_plane_reconcile_errors_total``.
+* ``cilium_operator_bgp_control_plane_cluster_config_error_count`` has been renamed to ``cilium_operator_bgp_control_plane_reconcile_errors_total``
+  and its label ``bgp_cluster_config`` has been replaced with labels ``resource_kind`` and ``resource_name``.
 
 Deprecated Metrics
 ~~~~~~~~~~~~~~~~~~

@@ -84,23 +84,26 @@ func (r *httpRouteReconciler) referencedBackendService(rawObj client.Object) []s
 		return nil
 	}
 	var backendServices []string
-	for _, rule := range route.Spec.Rules {
-		for _, backend := range rule.BackendRefs {
-			namespace := helpers.NamespaceDerefOr(backend.Namespace, route.Namespace)
-			backendServiceName, err := helpers.GetBackendServiceName(r.Client, namespace, backend.BackendObjectReference)
-			if err != nil {
-				r.logger.Error("Failed to get backend service name",
-					logfields.Controller, "httpRoute",
-					logfields.Resource, client.ObjectKeyFromObject(rawObj),
-					logfields.Error, err)
-				continue
+
+	if r.hasMatchingGatewayParent()(route) {
+		for _, rule := range route.Spec.Rules {
+			for _, backend := range rule.BackendRefs {
+				namespace := helpers.NamespaceDerefOr(backend.Namespace, route.Namespace)
+				backendServiceName, err := helpers.GetBackendServiceName(r.Client, namespace, backend.BackendObjectReference)
+				if err != nil {
+					r.logger.Error("Failed to get backend service name",
+						logfields.Controller, logfields.HTTPRoute,
+						logfields.Resource, client.ObjectKeyFromObject(rawObj),
+						logfields.Error, err)
+					continue
+				}
+				backendServices = append(backendServices,
+					types.NamespacedName{
+						Namespace: helpers.NamespaceDerefOr(backend.Namespace, route.Namespace),
+						Name:      backendServiceName,
+					}.String(),
+				)
 			}
-			backendServices = append(backendServices,
-				types.NamespacedName{
-					Namespace: helpers.NamespaceDerefOr(backend.Namespace, route.Namespace),
-					Name:      backendServiceName,
-				}.String(),
-			)
 		}
 	}
 	return backendServices
@@ -112,17 +115,20 @@ func (r *httpRouteReconciler) referencedBackendServiceImport(rawObj client.Objec
 		return nil
 	}
 	var backendServiceImports []string
-	for _, rule := range hr.Spec.Rules {
-		for _, backend := range rule.BackendRefs {
-			if !helpers.IsServiceImport(backend.BackendObjectReference) {
-				continue
+
+	if r.hasMatchingGatewayParent()(hr) {
+		for _, rule := range hr.Spec.Rules {
+			for _, backend := range rule.BackendRefs {
+				if !helpers.IsServiceImport(backend.BackendObjectReference) {
+					continue
+				}
+				backendServiceImports = append(backendServiceImports,
+					types.NamespacedName{
+						Namespace: helpers.NamespaceDerefOr(backend.Namespace, hr.Namespace),
+						Name:      string(backend.Name),
+					}.String(),
+				)
 			}
-			backendServiceImports = append(backendServiceImports,
-				types.NamespacedName{
-					Namespace: helpers.NamespaceDerefOr(backend.Namespace, hr.Namespace),
-					Name:      string(backend.Name),
-				}.String(),
-			)
 		}
 	}
 	return backendServiceImports
@@ -146,7 +152,6 @@ func (r *httpRouteReconciler) referencedGateway(rawObj client.Object) []string {
 }
 
 func (r *httpRouteReconciler) hasMatchingGatewayParent() func(object client.Object) bool {
-	hasMatchingControllerFn := hasMatchingController(context.Background(), r.Client, controllerName, r.logger)
 	return func(obj client.Object) bool {
 		hr, ok := obj.(*gatewayv1.HTTPRoute)
 		if !ok {
@@ -154,23 +159,32 @@ func (r *httpRouteReconciler) hasMatchingGatewayParent() func(object client.Obje
 		}
 
 		for _, parent := range hr.Spec.ParentRefs {
-			if !helpers.IsGateway(parent) {
-				continue
-			}
-			gw := &gatewayv1.Gateway{}
-			if err := r.Client.Get(context.Background(), types.NamespacedName{
-				Namespace: helpers.NamespaceDerefOr(parent.Namespace, hr.Namespace),
-				Name:      string(parent.Name),
-			}, gw); err != nil {
-				continue
-			}
-			if hasMatchingControllerFn(gw) {
+			if r.parentIsMatchingGateway(parent, hr.Namespace) {
 				return true
 			}
 		}
 
 		return false
 	}
+}
+
+func (r *httpRouteReconciler) parentIsMatchingGateway(parent gatewayv1.ParentReference, namespace string) bool {
+	hasMatchingControllerFn := hasMatchingController(context.Background(), r.Client, controllerName, r.logger)
+	if !helpers.IsGateway(parent) {
+		return false
+	}
+	gw := &gatewayv1.Gateway{}
+	if err := r.Client.Get(context.Background(), types.NamespacedName{
+		Namespace: helpers.NamespaceDerefOr(parent.Namespace, namespace),
+		Name:      string(parent.Name),
+	}, gw); err != nil {
+		return false
+	}
+	if hasMatchingControllerFn(gw) {
+		return true
+	}
+
+	return false
 }
 
 // enqueueRequestForBackendService makes sure that HTTP Routes are reconciled
@@ -197,7 +211,10 @@ func (r *httpRouteReconciler) enqueueRequestForGateway() handler.EventHandler {
 
 func (r *httpRouteReconciler) enqueueFromIndex(index string) handler.MapFunc {
 	return func(ctx context.Context, o client.Object) []reconcile.Request {
-		scopedLog := r.logger.With(logfields.Controller, httpRoute, logfields.Resource, client.ObjectKeyFromObject(o))
+		scopedLog := r.logger.With(
+			logfields.Controller, httpRoute,
+			logfields.Resource, client.ObjectKeyFromObject(o),
+		)
 		hrList := &gatewayv1.HTTPRouteList{}
 
 		if err := r.Client.List(ctx, hrList, &client.ListOptions{
@@ -216,7 +233,7 @@ func (r *httpRouteReconciler) enqueueFromIndex(index string) handler.MapFunc {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: route,
 			})
-			scopedLog.Info("Enqueued HTTPRoute for resource", "httpRoute", route)
+			scopedLog.Info("Enqueued HTTPRoute for resource", logfields.HTTPRoute, route)
 		}
 		return requests
 	}
@@ -224,7 +241,10 @@ func (r *httpRouteReconciler) enqueueFromIndex(index string) handler.MapFunc {
 
 func (r *httpRouteReconciler) enqueueAll() handler.MapFunc {
 	return func(ctx context.Context, o client.Object) []reconcile.Request {
-		scopedLog := r.logger.With(logfields.Controller, httpRoute, logfields.Resource, client.ObjectKeyFromObject(o))
+		scopedLog := r.logger.With(
+			logfields.Controller, httpRoute,
+			logfields.Resource, client.ObjectKeyFromObject(o),
+		)
 		hrList := &gatewayv1.HTTPRouteList{}
 
 		if err := r.Client.List(ctx, hrList, &client.ListOptions{}); err != nil {
@@ -241,7 +261,7 @@ func (r *httpRouteReconciler) enqueueAll() handler.MapFunc {
 			requests = append(requests, reconcile.Request{
 				NamespacedName: route,
 			})
-			scopedLog.Info("Enqueued HTTPRoute for resource", "httpRoute", route)
+			scopedLog.Info("Enqueued HTTPRoute for resource", logfields.HTTPRoute, route)
 		}
 		return requests
 	}

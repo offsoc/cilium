@@ -11,10 +11,11 @@ import (
 	"github.com/cilium/cilium/pkg/controller"
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/envoy"
-	monitoragent "github.com/cilium/cilium/pkg/monitor/agent"
+	"github.com/cilium/cilium/pkg/fqdn/defaultdns"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
-	"github.com/cilium/cilium/pkg/proxy/logger"
-	"github.com/cilium/cilium/pkg/proxy/logger/endpoint"
+	"github.com/cilium/cilium/pkg/proxy/accesslog"
+	"github.com/cilium/cilium/pkg/proxy/accesslog/endpoint"
 	"github.com/cilium/cilium/pkg/proxy/proxyports"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/trigger"
@@ -33,6 +34,7 @@ var Cell = cell.Module(
 	cell.ProvidePrivate(endpoint.NewEndpointInfoRegistry),
 	cell.ProvidePrivate(proxyports.NewProxyPorts),
 	cell.Config(proxyports.ProxyPortsConfig{}),
+	accesslog.Cell,
 )
 
 type proxyParams struct {
@@ -41,8 +43,6 @@ type proxyParams struct {
 	Lifecycle             cell.Lifecycle
 	Logger                *slog.Logger
 	ProxyPorts            *proxyports.ProxyPorts
-	EndpointInfoRegistry  logger.EndpointInfoRegistry
-	MonitorAgent          monitoragent.Agent
 	EnvoyProxyIntegration *envoyProxyIntegration
 	DNSProxyIntegration   *dnsProxyIntegration
 }
@@ -51,12 +51,10 @@ func newProxy(params proxyParams) *Proxy {
 	if !option.Config.EnableL7Proxy {
 		params.Logger.Info("L7 proxies are disabled")
 		if option.Config.EnableEnvoyConfig {
-			params.Logger.Warn("CiliumEnvoyConfig functionality isn't enabled when L7 proxies are disabled", "flag", option.EnableEnvoyConfig)
+			params.Logger.Warn("CiliumEnvoyConfig functionality isn't enabled when L7 proxies are disabled", logfields.Flag, option.EnableEnvoyConfig)
 		}
 		return nil
 	}
-
-	configureProxyLogger(params.EndpointInfoRegistry, params.MonitorAgent, option.Config.AgentLabels)
 
 	p := createProxy(params.Logger, params.ProxyPorts, params.EnvoyProxyIntegration, params.DNSProxyIntegration)
 
@@ -118,19 +116,12 @@ func newEnvoyProxyIntegration(params envoyProxyIntegrationParams) *envoyProxyInt
 	}
 }
 
-func newDNSProxyIntegration() *dnsProxyIntegration {
+func newDNSProxyIntegration(dnsProxy defaultdns.Proxy) *dnsProxyIntegration {
 	if !option.Config.EnableL7Proxy {
 		return nil
 	}
 
-	return &dnsProxyIntegration{}
-}
-
-func configureProxyLogger(eir logger.EndpointInfoRegistry, monitorAgent monitoragent.Agent, agentLabels []string) {
-	logger.SetEndpointInfoRegistry(eir)
-	logger.SetNotifier(logger.NewMonitorAgentLogRecordNotifier(monitorAgent))
-
-	if len(agentLabels) > 0 {
-		logger.SetMetadata(agentLabels)
+	return &dnsProxyIntegration{
+		dnsProxy: dnsProxy,
 	}
 }

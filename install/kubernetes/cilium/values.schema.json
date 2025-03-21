@@ -527,6 +527,14 @@
         "disableExternalIPMitigation": {
           "type": "boolean"
         },
+        "distributedLRU": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "enableTCX": {
           "type": "boolean"
         },
@@ -634,6 +642,12 @@
           ]
         },
         "policyMapMax": {
+          "type": [
+            "null",
+            "integer"
+          ]
+        },
+        "policyStatsMapMax": {
           "type": [
             "null",
             "integer"
@@ -1089,6 +1103,12 @@
                             "null",
                             "array"
                           ]
+                        },
+                        "scrapeTimeout": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
                         }
                       },
                       "type": "object"
@@ -1112,6 +1132,12 @@
                             "null",
                             "array"
                           ]
+                        },
+                        "scrapeTimeout": {
+                          "type": [
+                            "null",
+                            "string"
+                          ]
                         }
                       },
                       "type": "object"
@@ -1129,6 +1155,12 @@
                       "type": [
                         "null",
                         "array"
+                      ]
+                    },
+                    "scrapeTimeout": {
+                      "type": [
+                        "null",
+                        "string"
                       ]
                     }
                   },
@@ -1578,6 +1610,12 @@
         "enabled": {
           "type": "boolean"
         },
+        "metricsSamplingInterval": {
+          "type": [
+            "null",
+            "string"
+          ]
+        },
         "verbose": {
           "type": [
             "null",
@@ -1805,9 +1843,6 @@
         "subnetTagsFilter": {
           "items": {},
           "type": "array"
-        },
-        "updateEC2AdapterLimitViaAPI": {
-          "type": "boolean"
         }
       },
       "type": "object"
@@ -2172,6 +2207,9 @@
                     "anyOf": [
                       {
                         "properties": {
+                          "action": {
+                            "type": "string"
+                          },
                           "replacement": {
                             "type": "string"
                           },
@@ -2193,6 +2231,12 @@
                     ]
                   },
                   "type": "array"
+                },
+                "scrapeTimeout": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "type": "object"
@@ -2267,6 +2311,9 @@
             }
           },
           "type": "object"
+        },
+        "streamIdleTimeoutDurationSeconds": {
+          "type": "integer"
         },
         "terminationGracePeriodSeconds": {
           "type": "integer"
@@ -2737,6 +2784,9 @@
                     "anyOf": [
                       {
                         "properties": {
+                          "action": {
+                            "type": "string"
+                          },
                           "replacement": {
                             "type": "string"
                           },
@@ -2758,6 +2808,12 @@
                     ]
                   },
                   "type": "array"
+                },
+                "scrapeTimeout": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 },
                 "tlsConfig": {
                   "type": "object"
@@ -3070,6 +3126,12 @@
                       "type": [
                         "null",
                         "array"
+                      ]
+                    },
+                    "scrapeTimeout": {
+                      "type": [
+                        "null",
+                        "string"
                       ]
                     }
                   },
@@ -4602,6 +4664,12 @@
                     "null",
                     "array"
                   ]
+                },
+                "scrapeTimeout": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "type": "object"
@@ -4984,6 +5052,9 @@
                 "anyOf": [
                   {
                     "properties": {
+                      "action": {
+                        "type": "string"
+                      },
                       "replacement": {
                         "type": "string"
                       },
@@ -5005,6 +5076,12 @@
                 ]
               },
               "type": "array"
+            },
+            "scrapeTimeout": {
+              "type": [
+                "null",
+                "string"
+              ]
             },
             "trustCRDsExist": {
               "type": "boolean"

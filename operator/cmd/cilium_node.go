@@ -17,6 +17,7 @@ import (
 
 	operatorK8s "github.com/cilium/cilium/operator/k8s"
 	operatorOption "github.com/cilium/cilium/operator/option"
+	"github.com/cilium/cilium/pkg/annotation"
 	"github.com/cilium/cilium/pkg/ipam/allocator"
 	cilium_v2 "github.com/cilium/cilium/pkg/k8s/apis/cilium.io/v2"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
@@ -26,6 +27,7 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/labels"
 	"github.com/cilium/cilium/pkg/k8s/utils"
 	"github.com/cilium/cilium/pkg/kvstore/store"
+	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	nodeStore "github.com/cilium/cilium/pkg/node/store"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
@@ -99,10 +101,11 @@ func (s *ciliumNodeSynchronizer) Start(ctx context.Context, wg *sync.WaitGroup, 
 
 			log.Info("Starting to synchronize CiliumNode custom resources to KVStore")
 
-			ciliumNodeKVStore, err = store.JoinSharedStore(store.Configuration{
-				Prefix:     nodeStore.NodeStorePrefix,
-				KeyCreator: nodeStore.KeyCreator,
-			})
+			ciliumNodeKVStore, err = store.JoinSharedStore(logging.DefaultSlogLogger,
+				store.Configuration{
+					Prefix:     nodeStore.NodeStorePrefix,
+					KeyCreator: nodeStore.KeyCreator,
+				})
 
 			if err != nil {
 				log.WithError(err).Fatal("Unable to setup node watcher")
@@ -147,6 +150,11 @@ func (s *ciliumNodeSynchronizer) Start(ctx context.Context, wg *sync.WaitGroup, 
 				return nil
 			},
 			func(node *cilium_v2.CiliumNode) error {
+				value, ok := node.Annotations[annotation.IPAMIgnore]
+				if ok && strings.ToLower(value) == "true" {
+					return nil
+				}
+
 				// node is deep copied before it is stored in pkg/aws/eni
 				s.nodeManager.Upsert(node)
 				return nil
@@ -185,17 +193,6 @@ func (s *ciliumNodeSynchronizer) Start(ctx context.Context, wg *sync.WaitGroup, 
 				return nil
 			},
 			func(node *cilium_v2.CiliumNode) error {
-				// This fallback update logic is not required when the kvstore
-				// is running outside of pod network, as the agent is always
-				// assumed to be able to connect to the kvstore (otherwise
-				// connectivity to that node is broken anyways), and keep it
-				// up-to-date. Hence, let's skip it, given that it causes
-				// unnecessary churn and load on both etcd and all watching
-				// agents, especially upon operator restart.
-				if option.Config.KVstorePodNetworkSupport {
-					nodeNew := nodeTypes.ParseCiliumNode(node)
-					return ciliumNodeKVStore.UpdateKeySync(ctx, &nodeNew, false)
-				}
 				return nil
 			})
 	}
@@ -220,8 +217,8 @@ func (s *ciliumNodeSynchronizer) Start(ctx context.Context, wg *sync.WaitGroup, 
 				}
 			},
 			UpdateFunc: func(oldObj, newObj interface{}) {
-				if oldNode := informer.CastInformerEvent[cilium_v2.CiliumNode](oldObj); oldNode != nil {
-					if newNode := informer.CastInformerEvent[cilium_v2.CiliumNode](newObj); newNode != nil {
+				if oldNode := informer.CastInformerEvent[cilium_v2.CiliumNode](logging.DefaultSlogLogger, oldObj); oldNode != nil {
+					if newNode := informer.CastInformerEvent[cilium_v2.CiliumNode](logging.DefaultSlogLogger, newObj); newNode != nil {
 						if oldNode.DeepEqual(newNode) {
 							return
 						}

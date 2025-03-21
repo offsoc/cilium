@@ -6,6 +6,7 @@ package k8s
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/sirupsen/logrus"
@@ -14,6 +15,7 @@ import (
 	"github.com/cilium/cilium/pkg/k8s"
 	k8sConst "github.com/cilium/cilium/pkg/k8s/constants"
 	"github.com/cilium/cilium/pkg/k8s/resource"
+	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/node"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
@@ -36,6 +38,10 @@ func retrieveNodeInformation(ctx context.Context, log logrus.FieldLogger, localN
 
 	if option.Config.IPAM == ipamOption.IPAMClusterPool {
 		for event := range localCiliumNodeResource.Events(ctx) {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				log.WithField(logfields.NodeName, nodeTypes.GetName()).Error("Timeout while waiting for CiliumNode resource: API server connection issue")
+				break
+			}
 			if event.Kind == resource.Upsert {
 				no := nodeTypes.ParseCiliumNode(event.Object)
 				n = &no
@@ -51,8 +57,12 @@ func retrieveNodeInformation(ctx context.Context, log logrus.FieldLogger, localN
 		}
 	} else {
 		for event := range localNodeResource.Events(ctx) {
+			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+				log.WithField(logfields.NodeName, nodeTypes.GetName()).Error("Timeout while waiting for Node resource: API server connection issue")
+				break
+			}
 			if event.Kind == resource.Upsert {
-				n = k8s.ParseNode(event.Object, source.Unspec)
+				n = k8s.ParseNode(logging.DefaultSlogLogger, event.Object, source.Unspec)
 				log.WithField(logfields.NodeName, n.Name).Info("Retrieved node information from kubernetes node")
 				if err := waitForCIDR(); err != nil {
 					log.WithError(err).Warning("Waiting for k8s node information")

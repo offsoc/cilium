@@ -26,7 +26,10 @@ import (
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.12.2/pkg/reconcile
 func (r *tlsRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	scopedLog := r.logger.With(logfields.Controller, tlsRoute, logfields.Resource, req.NamespacedName)
+	scopedLog := r.logger.With(
+		logfields.Controller, tlsRoute,
+		logfields.Resource, req.NamespacedName,
+	)
 	scopedLog.Info("Reconciling TLSRoute")
 
 	// Fetch the TLSRoute instance
@@ -81,7 +84,7 @@ func (r *tlsRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 		})
 
 		// run the actual validators
-		for _, fn := range []routechecks.CheckParentFunc{
+		for _, fn := range []routechecks.CheckWithParentFunc{
 			routechecks.CheckGatewayRouteKindAllowed,
 			routechecks.CheckGatewayMatchingPorts,
 			routechecks.CheckGatewayMatchingHostnames,
@@ -97,23 +100,22 @@ func (r *tlsRouteReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 				break
 			}
 		}
-	}
 
-	// backend validators
+		// backend validators
+		for _, fn := range []routechecks.CheckWithParentFunc{
+			routechecks.CheckAgainstCrossNamespaceBackendReferences,
+			routechecks.CheckBackend,
+			routechecks.CheckHasServiceImportSupport,
+			routechecks.CheckBackendIsExistingService,
+		} {
+			continueCheck, err := fn(i, parent)
+			if err != nil {
+				return r.handleReconcileErrorWithStatus(ctx, fmt.Errorf("failed to apply Gateway check: %w", err), tr, original)
+			}
 
-	for _, fn := range []routechecks.CheckRuleFunc{
-		routechecks.CheckAgainstCrossNamespaceBackendReferences,
-		routechecks.CheckBackend,
-		routechecks.CheckHasServiceImportSupport,
-		routechecks.CheckBackendIsExistingService,
-	} {
-		continueCheck, err := fn(i)
-		if err != nil {
-			return r.handleReconcileErrorWithStatus(ctx, fmt.Errorf("failed to apply Gateway check: %w", err), tr, original)
-		}
-
-		if !continueCheck {
-			break
+			if !continueCheck {
+				break
+			}
 		}
 	}
 

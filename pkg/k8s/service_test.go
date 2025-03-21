@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/cilium/hive/hivetest"
 	"github.com/stretchr/testify/require"
 	corev1 "k8s.io/api/core/v1"
 
@@ -307,7 +308,7 @@ func TestParseServiceWithServiceTypeExposure(t *testing.T) {
 		option.Config.EnableNodePort = oldNodePort
 	}()
 
-	_, svc := ParseService(k8sSvc, addrs)
+	_, svc := ParseService(hivetest.Logger(t), k8sSvc, addrs)
 	require.Len(t, svc.FrontendIPs, 1)
 	require.Len(t, svc.NodePorts, 1)
 	require.Len(t, svc.LoadBalancerIPs, 1)
@@ -315,7 +316,7 @@ func TestParseServiceWithServiceTypeExposure(t *testing.T) {
 	// Expose only ClusterIP
 
 	k8sSvc.Annotations[annotation.ServiceTypeExposure] = "ClusterIP"
-	_, svc = ParseService(k8sSvc, addrs)
+	_, svc = ParseService(hivetest.Logger(t), k8sSvc, addrs)
 	require.Len(t, svc.FrontendIPs, 1)
 	require.Empty(t, svc.NodePorts)
 	require.Empty(t, svc.LoadBalancerIPs)
@@ -324,7 +325,7 @@ func TestParseServiceWithServiceTypeExposure(t *testing.T) {
 	// Expose only NodePort
 
 	k8sSvc.Annotations[annotation.ServiceTypeExposure] = "NodePort"
-	_, svc = ParseService(k8sSvc, addrs)
+	_, svc = ParseService(hivetest.Logger(t), k8sSvc, addrs)
 	require.Empty(t, svc.FrontendIPs)
 	require.Len(t, svc.NodePorts, 1)
 	require.Empty(t, svc.LoadBalancerIPs)
@@ -333,7 +334,7 @@ func TestParseServiceWithServiceTypeExposure(t *testing.T) {
 	// Expose only LoadBalancer
 
 	k8sSvc.Annotations[annotation.ServiceTypeExposure] = "LoadBalancer"
-	_, svc = ParseService(k8sSvc, addrs)
+	_, svc = ParseService(hivetest.Logger(t), k8sSvc, addrs)
 	require.Empty(t, svc.FrontendIPs)
 	require.Empty(t, svc.NodePorts)
 	require.Len(t, svc.LoadBalancerIPs, 1)
@@ -342,7 +343,7 @@ func TestParseServiceWithServiceTypeExposure(t *testing.T) {
 	// Expose all
 
 	delete(k8sSvc.Annotations, annotation.ServiceTypeExposure)
-	_, svc = ParseService(k8sSvc, addrs)
+	_, svc = ParseService(hivetest.Logger(t), k8sSvc, addrs)
 	require.Len(t, svc.FrontendIPs, 1)
 	require.Len(t, svc.NodePorts, 1)
 	require.Len(t, svc.LoadBalancerIPs, 1)
@@ -377,7 +378,7 @@ func TestParseService(t *testing.T) {
 		},
 	}
 
-	id, svc := ParseService(k8sSvc, nil)
+	id, svc := ParseService(hivetest.Logger(t), k8sSvc, nil)
 	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
 	require.EqualValues(t, &Service{
 		ExtTrafficPolicy:         loadbalancer.SVCTrafficPolicyCluster,
@@ -389,6 +390,7 @@ func TestParseService(t *testing.T) {
 		NodePorts:                map[loadbalancer.FEPortName]NodePortToFrontend{},
 		LoadBalancerSourceRanges: map[string]*cidr.CIDR{},
 		SourceRangesPolicy:       loadbalancer.SVCSourceRangesPolicyAllow,
+		ProxyDelegation:          loadbalancer.SVCProxyDelegationNone,
 		Type:                     loadbalancer.SVCTypeClusterIP,
 		ForwardingMode:           loadbalancer.SVCForwardingModeSNAT,
 		LoadBalancerAlgorithm:    loadbalancer.SVCLoadBalancingAlgorithmRandom,
@@ -402,7 +404,7 @@ func TestParseService(t *testing.T) {
 		},
 	}
 
-	id, svc = ParseService(k8sSvc, nil)
+	id, svc = ParseService(hivetest.Logger(t), k8sSvc, nil)
 	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
 	require.EqualValues(t, &Service{
 		IsHeadless:               true,
@@ -413,6 +415,7 @@ func TestParseService(t *testing.T) {
 		NodePorts:                map[loadbalancer.FEPortName]NodePortToFrontend{},
 		LoadBalancerSourceRanges: map[string]*cidr.CIDR{},
 		SourceRangesPolicy:       loadbalancer.SVCSourceRangesPolicyAllow,
+		ProxyDelegation:          loadbalancer.SVCProxyDelegationNone,
 		Type:                     loadbalancer.SVCTypeClusterIP,
 		ForwardingMode:           loadbalancer.SVCForwardingModeSNAT,
 		LoadBalancerAlgorithm:    loadbalancer.SVCLoadBalancingAlgorithmRandom,
@@ -427,7 +430,7 @@ func TestParseService(t *testing.T) {
 	}
 	k8sSvc.ObjectMeta.Labels[corev1.IsHeadlessService] = ""
 
-	id, svc = ParseService(k8sSvc, nil)
+	id, svc = ParseService(hivetest.Logger(t), k8sSvc, nil)
 	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
 	require.EqualValues(t, &Service{
 		IsHeadless:               true,
@@ -439,6 +442,7 @@ func TestParseService(t *testing.T) {
 		NodePorts:                map[loadbalancer.FEPortName]NodePortToFrontend{},
 		LoadBalancerSourceRanges: map[string]*cidr.CIDR{},
 		SourceRangesPolicy:       loadbalancer.SVCSourceRangesPolicyAllow,
+		ProxyDelegation:          loadbalancer.SVCProxyDelegationNone,
 		Type:                     loadbalancer.SVCTypeClusterIP,
 		ForwardingMode:           loadbalancer.SVCForwardingModeSNAT,
 		LoadBalancerAlgorithm:    loadbalancer.SVCLoadBalancingAlgorithmRandom,
@@ -455,7 +459,7 @@ func TestParseService(t *testing.T) {
 		},
 	}
 
-	id, svc = ParseService(k8sSvc, nil)
+	id, svc = ParseService(hivetest.Logger(t), k8sSvc, nil)
 	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
 	require.EqualValues(t, &Service{
 		FrontendIPs:              []net.IP{net.ParseIP("127.0.0.1")},
@@ -466,6 +470,7 @@ func TestParseService(t *testing.T) {
 		NodePorts:                map[loadbalancer.FEPortName]NodePortToFrontend{},
 		LoadBalancerSourceRanges: map[string]*cidr.CIDR{},
 		SourceRangesPolicy:       loadbalancer.SVCSourceRangesPolicyAllow,
+		ProxyDelegation:          loadbalancer.SVCProxyDelegationNone,
 		Type:                     loadbalancer.SVCTypeNodePort,
 		ForwardingMode:           loadbalancer.SVCForwardingModeSNAT,
 		LoadBalancerAlgorithm:    loadbalancer.SVCLoadBalancingAlgorithmRandom,
@@ -536,7 +541,7 @@ func TestParseService(t *testing.T) {
 	defer func() {
 		option.Config.LoadBalancerAlgorithmAnnotation = oldLbAlg
 	}()
-	id, svc = ParseService(k8sSvc, addrs)
+	id, svc = ParseService(hivetest.Logger(t), k8sSvc, addrs)
 	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
 	require.EqualValues(t, &Service{
 		FrontendIPs: []net.IP{net.ParseIP("127.0.0.1")},
@@ -560,6 +565,7 @@ func TestParseService(t *testing.T) {
 		Type:                     loadbalancer.SVCTypeLoadBalancer,
 		TopologyAware:            true,
 		SourceRangesPolicy:       loadbalancer.SVCSourceRangesPolicyAllow,
+		ProxyDelegation:          loadbalancer.SVCProxyDelegationNone,
 		ForwardingMode:           loadbalancer.SVCForwardingModeSNAT,
 		Annotations:              map[string]string{"service.kubernetes.io/topology-aware-hints": "auto"},
 		LoadBalancerAlgorithm:    loadbalancer.SVCLoadBalancingAlgorithmMaglev,
@@ -600,7 +606,7 @@ func TestParseService(t *testing.T) {
 			},
 		},
 	}
-	id, svc = ParseService(k8sSvc, addrs)
+	id, svc = ParseService(hivetest.Logger(t), k8sSvc, addrs)
 	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
 	require.EqualValues(t, &Service{
 		FrontendIPs: []net.IP{net.ParseIP("127.0.0.1")},
@@ -622,6 +628,7 @@ func TestParseService(t *testing.T) {
 		K8sExternalIPs:           map[string]net.IP{},
 		LoadBalancerIPs:          map[string]net.IP{},
 		SourceRangesPolicy:       loadbalancer.SVCSourceRangesPolicyAllow,
+		ProxyDelegation:          loadbalancer.SVCProxyDelegationNone,
 		Type:                     loadbalancer.SVCTypeLoadBalancer,
 		ForwardingMode:           loadbalancer.SVCForwardingModeSNAT,
 		TopologyAware:            true,
@@ -656,7 +663,7 @@ func TestParseService(t *testing.T) {
 			},
 		},
 	}
-	id, svc = ParseService(k8sSvc, addrs)
+	id, svc = ParseService(hivetest.Logger(t), k8sSvc, addrs)
 	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
 	require.EqualValues(t, &Service{
 		FrontendIPs: []net.IP{net.ParseIP("127.0.0.1")},
@@ -678,6 +685,7 @@ func TestParseService(t *testing.T) {
 		K8sExternalIPs:           map[string]net.IP{},
 		LoadBalancerIPs:          map[string]net.IP{},
 		SourceRangesPolicy:       loadbalancer.SVCSourceRangesPolicyAllow,
+		ProxyDelegation:          loadbalancer.SVCProxyDelegationNone,
 		Type:                     loadbalancer.SVCTypeLoadBalancer,
 		ForwardingMode:           loadbalancer.SVCForwardingModeSNAT,
 		TopologyAware:            true,
@@ -1339,29 +1347,28 @@ func TestServiceString(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		_, svc := ParseService(tt.service, nil)
+		_, svc := ParseService(hivetest.Logger(t), tt.service, nil)
 		require.Equal(t, tt.svcString, svc.String())
 	}
 }
 
 func TestNewClusterService(t *testing.T) {
-	id, svc := ParseService(
-		&slim_corev1.Service{
-			ObjectMeta: slim_metav1.ObjectMeta{
-				Name:      "foo",
-				Namespace: "bar",
-				Labels: map[string]string{
-					"foo": "bar",
-				},
+	id, svc := ParseService(hivetest.Logger(t), &slim_corev1.Service{
+		ObjectMeta: slim_metav1.ObjectMeta{
+			Name:      "foo",
+			Namespace: "bar",
+			Labels: map[string]string{
+				"foo": "bar",
 			},
-			Spec: slim_corev1.ServiceSpec{
-				ClusterIP: "127.0.0.1",
-				Selector: map[string]string{
-					"foo": "bar",
-				},
-				Type: slim_corev1.ServiceTypeClusterIP,
+		},
+		Spec: slim_corev1.ServiceSpec{
+			ClusterIP: "127.0.0.1",
+			Selector: map[string]string{
+				"foo": "bar",
 			},
-		}, nil)
+			Type: slim_corev1.ServiceTypeClusterIP,
+		},
+	}, nil)
 
 	endpoints := ParseEndpoints(&slim_corev1.Endpoints{
 		ObjectMeta: slim_metav1.ObjectMeta{

@@ -24,6 +24,7 @@
 #endif
 
 #include "lib/common.h"
+#include "lib/config_map.h"
 #include "lib/edt.h"
 #include "lib/arp.h"
 #include "lib/maps.h"
@@ -33,6 +34,7 @@
 #include "lib/eth.h"
 #include "lib/dbg.h"
 #include "lib/proxy.h"
+#include "lib/policy.h"
 #include "lib/trace.h"
 #include "lib/identity.h"
 #include "lib/l3.h"
@@ -51,6 +53,8 @@
 #include "lib/encrypt.h"
 #include "lib/wireguard.h"
 #include "lib/vxlan.h"
+#include "lib/l2_responder.h"
+#include "lib/vtep.h"
 
  #define host_egress_policy_hook(ctx, src_sec_identity, ext_err) CTX_ACT_OK
  #define host_wg_encrypt_hook(ctx, proto) wg_maybe_redirect_to_encrypt(ctx, proto)
@@ -131,7 +135,7 @@ struct {
 	__type(key, __u32);
 	__type(value, struct ct_buffer6);
 	__uint(max_entries, 1);
-} CT_TAIL_CALL_BUFFER6 __section_maps_btf;
+} cilium_tail_call_buffer6 __section_maps_btf;
 
 static __always_inline int
 handle_ipv6(struct __ctx_buff *ctx, __u32 secctx __maybe_unused,
@@ -211,7 +215,7 @@ handle_ipv6(struct __ctx_buff *ctx, __u32 secctx __maybe_unused,
 	if (need_hostfw) {
 		__u32 zero = 0;
 
-		if (map_update_elem(&CT_TAIL_CALL_BUFFER6, &zero, &ct_buffer, 0) < 0)
+		if (map_update_elem(&cilium_tail_call_buffer6, &zero, &ct_buffer, 0) < 0)
 			return DROP_INVALID_TC_BUFFER;
 	}
 #endif /* ENABLE_HOST_FIREWALL */
@@ -266,7 +270,7 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 		__u32 zero = 0;
 		__u32 remote_id = WORLD_IPV6_ID;
 
-		ct_buffer = map_lookup_elem(&CT_TAIL_CALL_BUFFER6, &zero);
+		ct_buffer = map_lookup_elem(&cilium_tail_call_buffer6, &zero);
 		if (!ct_buffer)
 			return DROP_INVALID_TC_BUFFER;
 		if (ct_buffer->tuple.saddr.d1 == 0 && ct_buffer->tuple.saddr.d2 == 0)
@@ -582,7 +586,7 @@ struct {
 	__type(key, __u32);
 	__type(value, struct ct_buffer4);
 	__uint(max_entries, 1);
-} CT_TAIL_CALL_BUFFER4 __section_maps_btf;
+} cilium_tail_call_buffer4 __section_maps_btf;
 
 static __always_inline int
 handle_ipv4(struct __ctx_buff *ctx, __u32 secctx __maybe_unused,
@@ -663,7 +667,7 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx __maybe_unused,
 	if (need_hostfw) {
 		__u32 zero = 0;
 
-		if (map_update_elem(&CT_TAIL_CALL_BUFFER4, &zero, &ct_buffer, 0) < 0)
+		if (map_update_elem(&cilium_tail_call_buffer4, &zero, &ct_buffer, 0) < 0)
 			return DROP_INVALID_TC_BUFFER;
 	}
 
@@ -713,7 +717,7 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 		__u32 zero = 0;
 		__u32 remote_id = 0;
 
-		ct_buffer = map_lookup_elem(&CT_TAIL_CALL_BUFFER4, &zero);
+		ct_buffer = map_lookup_elem(&cilium_tail_call_buffer4, &zero);
 		if (!ct_buffer)
 			return DROP_INVALID_TC_BUFFER;
 		if (ct_buffer->tuple.saddr == 0)
@@ -802,7 +806,7 @@ handle_ipv4_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 		struct vtep_value *vtep;
 
 		vkey.vtep_ip = ip4->daddr & VTEP_MASK;
-		vtep = map_lookup_elem(&VTEP_MAP, &vkey);
+		vtep = map_lookup_elem(&cilium_vtep_map, &vkey);
 		if (!vtep)
 			goto skip_vtep;
 
@@ -1036,7 +1040,7 @@ do_netdev_encrypt_encap(struct __ctx_buff *ctx, __be16 proto, __u32 src_id)
 		return DROP_NO_TUNNEL_ENDPOINT;
 
 	ctx->mark = 0;
-	bpf_clear_meta(ctx);
+
 	return encap_and_redirect_with_nodeid(ctx, ep->tunnel_endpoint, 0,
 					      src_id, 0, &trace);
 }
@@ -1052,10 +1056,9 @@ static __always_inline int handle_l2_announcement(struct __ctx_buff *ctx)
 	struct l2_responder_v4_key key;
 	struct l2_responder_v4_stats *stats;
 	int ret;
-	__u32 index = RUNTIME_CONFIG_AGENT_LIVENESS;
-	__u64 *time;
+	__u64 time;
 
-	time = map_lookup_elem(&CONFIG_MAP, &index);
+	time = config_get(RUNTIME_CONFIG_AGENT_LIVENESS);
 	if (!time)
 		return CTX_ACT_OK;
 
@@ -1063,7 +1066,7 @@ static __always_inline int handle_l2_announcement(struct __ctx_buff *ctx)
 	 * of the responder map anymore. So stop responding, assuming other nodes
 	 * will take over for a node without an active agent.
 	 */
-	if (ktime_get_ns() - (*time) > L2_ANNOUNCEMENTS_MAX_LIVENESS)
+	if (ktime_get_ns() - (time) > L2_ANNOUNCEMENTS_MAX_LIVENESS)
 		return CTX_ACT_OK;
 
 	if (!arp_validate(ctx, &mac, &smac, &sip, &tip))
@@ -1071,7 +1074,7 @@ static __always_inline int handle_l2_announcement(struct __ctx_buff *ctx)
 
 	key.ip4 = tip;
 	key.ifindex = ctx->ingress_ifindex;
-	stats = map_lookup_elem(&L2_RESPONDER_MAP4, &key);
+	stats = map_lookup_elem(&cilium_l2_responder_v4, &key);
 	if (!stats)
 		return CTX_ACT_OK;
 
@@ -1394,7 +1397,7 @@ int cil_to_netdev(struct __ctx_buff *ctx)
 
 	bpf_clear_meta(ctx);
 
-	if (magic == MARK_MAGIC_HOST || magic == MARK_MAGIC_OVERLAY)
+	if (magic == MARK_MAGIC_HOST || magic == MARK_MAGIC_OVERLAY || ctx_mark_is_wireguard(ctx))
 		src_sec_identity = HOST_ID;
 	else if (magic == MARK_MAGIC_IDENTITY)
 		src_sec_identity = get_identity(ctx);
@@ -1478,7 +1481,9 @@ skip_host_firewall:
 	{
 		void *data, *data_end;
 		struct iphdr *ip4;
-		struct ipv4_ct_tuple tuple = {};
+		struct ipv6hdr __maybe_unused *ip6;
+		struct ipv4_ct_tuple tuple4 = {};
+		struct ipv6_ct_tuple __maybe_unused tuple6 = {};
 		int l4_off;
 		struct remote_endpoint_info *info;
 		struct endpoint_info *src_ep;
@@ -1487,49 +1492,96 @@ skip_host_firewall:
 		if (src_sec_identity == HOST_ID)
 			goto skip_egress_gateway;
 
-		if (proto != bpf_htons(ETH_P_IP))
-			goto skip_egress_gateway;
-
 		if (ctx_egw_done(ctx))
 			goto skip_egress_gateway;
 
-		if (!revalidate_data(ctx, &data, &data_end, &ip4)) {
-			ret = DROP_INVALID;
-			goto drop_err;
-		}
+		switch (proto) {
+		case bpf_htons(ETH_P_IP):
+			if (!revalidate_data(ctx, &data, &data_end, &ip4)) {
+				ret = DROP_INVALID;
+				goto drop_err;
+			}
 
-		tuple.nexthdr = ip4->protocol;
-		tuple.daddr = ip4->daddr;
-		tuple.saddr = ip4->saddr;
+			tuple4.nexthdr = ip4->protocol;
+			tuple4.daddr = ip4->daddr;
+			tuple4.saddr = ip4->saddr;
 
-		l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
-		ret = ct_extract_ports4(ctx, ip4, l4_off, CT_EGRESS, &tuple,
-					NULL);
-		if (IS_ERR(ret)) {
-			if (ret == DROP_CT_UNKNOWN_PROTO)
+			l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
+			ret = ct_extract_ports4(ctx, ip4, l4_off, CT_EGRESS, &tuple4,
+						NULL);
+			if (IS_ERR(ret)) {
+				if (ret == DROP_CT_UNKNOWN_PROTO)
+					goto skip_egress_gateway;
+				goto drop_err;
+			}
+
+			/* Only handle outbound connections: */
+			is_reply = ct_is_reply4(get_ct_map4(&tuple4), &tuple4);
+			if (is_reply)
 				goto skip_egress_gateway;
 
-			goto drop_err;
+			src_ep = __lookup_ip4_endpoint(ip4->saddr);
+			if (src_ep)
+				src_sec_identity = src_ep->sec_id;
+
+			info = lookup_ip4_remote_endpoint(ip4->daddr, 0);
+			if (info && info->sec_identity)
+				dst_sec_identity = info->sec_identity;
+
+			/* lower-level code expects CT tuple to be flipped: */
+			__ipv4_ct_tuple_reverse(&tuple4);
+			ret = egress_gw_handle_packet(ctx, &tuple4,
+						      src_sec_identity, dst_sec_identity,
+						      &trace);
+			break;
+#if defined(ENABLE_IPV6)
+		case bpf_htons(ETH_P_IPV6):
+			if (!revalidate_data(ctx, &data, &data_end, &ip6)) {
+				ret = DROP_INVALID;
+				goto drop_err;
+			}
+
+			tuple6.nexthdr = ip6->nexthdr;
+			ipv6_addr_copy(&tuple6.daddr, (union v6addr *)&ip6->daddr);
+			ipv6_addr_copy(&tuple6.saddr, (union v6addr *)&ip6->saddr);
+
+			l4_off = ETH_HLEN + ipv6_hdrlen(ctx, &tuple6.nexthdr);
+			if (l4_off < 0) {
+				ret = l4_off;
+				goto drop_err;
+			}
+
+			ret = ct_extract_ports6(ctx, l4_off, &tuple6);
+			if (IS_ERR(ret)) {
+				if (ret == DROP_CT_UNKNOWN_PROTO)
+					goto skip_egress_gateway;
+				goto drop_err;
+			}
+
+			/* Only handle outbound connections: */
+			is_reply = ct_is_reply6(get_ct_map6(&tuple6), &tuple6);
+			if (is_reply)
+				goto skip_egress_gateway;
+
+			src_ep = __lookup_ip6_endpoint((union v6addr *)&ip6->saddr);
+			if (src_ep)
+				src_sec_identity = src_ep->sec_id;
+
+			info = lookup_ip6_remote_endpoint((union v6addr *)&ip6->daddr, 0);
+			if (info && info->sec_identity)
+				dst_sec_identity = info->sec_identity;
+
+			/* lower-level code expects CT tuple to be flipped: */
+			__ipv6_ct_tuple_reverse(&tuple6);
+			ret = egress_gw_handle_packet_v6(ctx, &tuple6,
+							 src_sec_identity, dst_sec_identity,
+							 &trace);
+			break;
+#endif
+		default:
+			goto skip_egress_gateway;
 		}
 
-		/* Only handle outbound connections: */
-		is_reply = ct_is_reply4(get_ct_map4(&tuple), &tuple);
-		if (is_reply)
-			goto skip_egress_gateway;
-
-		src_ep = __lookup_ip4_endpoint(ip4->saddr);
-		if (src_ep)
-			src_sec_identity = src_ep->sec_id;
-
-		info = lookup_ip4_remote_endpoint(ip4->daddr, 0);
-		if (info && info->sec_identity)
-			dst_sec_identity = info->sec_identity;
-
-		/* lower-level code expects CT tuple to be flipped: */
-		__ipv4_ct_tuple_reverse(&tuple);
-		ret = egress_gw_handle_packet(ctx, &tuple,
-					      src_sec_identity, dst_sec_identity,
-					      &trace);
 		if (IS_ERR(ret))
 			goto drop_err;
 

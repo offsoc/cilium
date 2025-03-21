@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
 	"net"
 	"net/netip"
@@ -60,9 +61,6 @@ const (
 	// ClusterMeshHealthPort is the TCP port for ClusterMesh apiserver health API
 	ClusterMeshHealthPort = "clustermesh-health-port"
 
-	// AgentLabels are additional labels to identify this agent
-	AgentLabels = "agent-labels"
-
 	// AllowICMPFragNeeded allows ICMP Fragmentation Needed type packets in policy.
 	AllowICMPFragNeeded = "allow-icmp-frag-needed"
 
@@ -92,6 +90,9 @@ const (
 	// EnableL2NeighDiscovery determines if cilium should perform L2 neighbor
 	// discovery.
 	EnableL2NeighDiscovery = "enable-l2-neigh-discovery"
+
+	// BPFDistributedLRU enables per-CPU distributed backend memory
+	BPFDistributedLRU = "bpf-distributed-lru"
 
 	// BPFRoot is the Path to BPF filesystem
 	BPFRoot = "bpf-root"
@@ -198,6 +199,9 @@ const (
 
 	// K8sAPIServer is the kubernetes api address server (for https use --k8s-kubeconfig-path instead)
 	K8sAPIServer = "k8s-api-server"
+
+	// K8sAPIServerURLs is the kubernetes api address server url
+	K8sAPIServerURLs = "k8s-api-server-urls"
 
 	// K8sKubeConfigPath is the absolute path of the kubernetes kubeconfig file
 	K8sKubeConfigPath = "k8s-kubeconfig-path"
@@ -633,9 +637,6 @@ const (
 	// NeighMapEntriesGlobalName configures max entries for BPF neighbor table
 	NeighMapEntriesGlobalName = "bpf-neigh-global-max"
 
-	// PolicyMapEntriesName configures max entries for BPF policymap.
-	PolicyMapEntriesName = "bpf-policy-map-max"
-
 	// PolicyMapFullReconciliationInterval sets the interval for performing the full
 	// reconciliation of the endpoint policy map.
 	PolicyMapFullReconciliationIntervalName = "bpf-policy-map-full-reconciliation-interval"
@@ -819,10 +820,6 @@ const (
 
 	// KVstoreConnectivityTimeout is the timeout when performing kvstore operations
 	KVstoreConnectivityTimeout = "kvstore-connectivity-timeout"
-
-	// KVstorePodNetworkSupport enables the support for running the Cilium KVstore
-	// in pod network.
-	KVstorePodNetworkSupport = "kvstore-pod-network-support"
 
 	// IdentityChangeGracePeriod is the name of the
 	// IdentityChangeGracePeriod option
@@ -1014,10 +1011,6 @@ const (
 
 	// LBMaglevMapMaxEntries configures max entries of bpf map for Maglev.
 	LBMaglevMapMaxEntries = "bpf-lb-maglev-map-max"
-
-	// CRDWaitTimeout is the timeout in which Cilium will exit if CRDs are not
-	// available.
-	CRDWaitTimeout = "crd-wait-timeout"
 
 	// EgressMultiHomeIPRuleCompat instructs Cilium to use a new scheme to
 	// store rules and routes under ENI and Azure IPAM modes, if false.
@@ -1302,6 +1295,27 @@ func BindEnvWithLegacyEnvFallback(vp *viper.Viper, optName, legacyEnvName string
 	vp.BindEnv(optName, envName)
 }
 
+// LogRegisteredSlogOptions logs all options that where bound to viper.
+func LogRegisteredSlogOptions(vp *viper.Viper, entry *slog.Logger) {
+	keys := vp.AllKeys()
+	slices.Sort(keys)
+	for _, k := range keys {
+		ss := vp.GetStringSlice(k)
+		if len(ss) == 0 {
+			sm := vp.GetStringMap(k)
+			for k, v := range sm {
+				ss = append(ss, fmt.Sprintf("%s=%s", k, v))
+			}
+		}
+
+		if len(ss) > 0 {
+			entry.Info(fmt.Sprintf("  --%s='%s'", k, strings.Join(ss, ",")))
+		} else {
+			entry.Info(fmt.Sprintf("  --%s='%s'", k, vp.GetString(k)))
+		}
+	}
+}
+
 // LogRegisteredOptions logs all options that where bound to viper.
 func LogRegisteredOptions(vp *viper.Viper, entry *logrus.Entry) {
 	keys := vp.AllKeys()
@@ -1379,9 +1393,6 @@ type DaemonConfig struct {
 
 	// ClusterMeshHealthPort is the TCP port for ClusterMesh apiserver health API
 	ClusterMeshHealthPort int
-
-	// AgentLabels contains additional labels to identify this agent in monitor events.
-	AgentLabels []string
 
 	// IPv6ClusterAllocCIDR is the base CIDR used to allocate IPv6 node
 	// CIDRs if allocation is not performed by an orchestration system
@@ -1488,10 +1499,6 @@ type DaemonConfig struct {
 
 	// AuthMapEntries is the maximum number of entries in the auth map.
 	AuthMapEntries int
-
-	// PolicyMapEntries is the maximum number of peer identities that an
-	// endpoint may allow traffic to exchange traffic with.
-	PolicyMapEntries int
 
 	// PolicyMapFullReconciliationInterval is the interval at which to perform
 	// the full reconciliation of the endpoint policy map.
@@ -1799,10 +1806,6 @@ type DaemonConfig struct {
 	// KVstoreConnectivityTimeout is the timeout when performing kvstore operations
 	KVstoreConnectivityTimeout time.Duration
 
-	// KVstorePodNetworkSupport enables the support for running the Cilium KVstore
-	// in pod network.
-	KVstorePodNetworkSupport bool
-
 	// IdentityChangeGracePeriod is the grace period that needs to pass
 	// before an endpoint that has changed its identity will start using
 	// that new identity. During the grace period, the new identity has
@@ -2082,10 +2085,6 @@ type DaemonConfig struct {
 	// LBMaglevMapEntries is the maximum number of entries allowed in BPF lbmap for maglev.
 	LBMaglevMapEntries int
 
-	// CRDWaitTimeout is the timeout in which Cilium will exit if CRDs are not
-	// available.
-	CRDWaitTimeout time.Duration
-
 	// EgressMultiHomeIPRuleCompat instructs Cilium to use a new scheme to
 	// store rules and routes under ENI and Azure IPAM modes, if false.
 	// Otherwise, it will use the old scheme.
@@ -2181,6 +2180,9 @@ type DaemonConfig struct {
 	BPFMapEventBuffers          map[string]string
 	BPFMapEventBuffersValidator func(val string) (string, error) `json:"-"`
 	bpfMapEventConfigs          BPFEventBufferConfigs
+
+	// BPFDistributedLRU enables per-CPU distributed backend memory
+	BPFDistributedLRU bool
 
 	// BPFEventsDropEnabled controls whether the Cilium datapath exposes "drop" events to Cilium monitor and Hubble.
 	BPFEventsDropEnabled bool
@@ -2278,7 +2280,6 @@ var (
 		ToFQDNsMaxIPsPerHost:            defaults.ToFQDNsMaxIPsPerHost,
 		KVstorePeriodicSync:             defaults.KVstorePeriodicSync,
 		KVstoreConnectivityTimeout:      defaults.KVstoreConnectivityTimeout,
-		KVstorePodNetworkSupport:        defaults.KVstorePodNetworkSupport,
 		IdentityChangeGracePeriod:       defaults.IdentityChangeGracePeriod,
 		IdentityRestoreGracePeriod:      defaults.IdentityRestoreGracePeriodK8s,
 		FixedIdentityMapping:            make(map[string]string),
@@ -2306,6 +2307,7 @@ var (
 		PolicyCIDRMatchMode:                  defaults.PolicyCIDRMatchMode,
 		MaxConnectedClusters:                 defaults.MaxConnectedClusters,
 
+		BPFDistributedLRU:             defaults.BPFDistributedLRU,
 		BPFEventsDropEnabled:          defaults.BPFEventsDropEnabled,
 		BPFEventsPolicyVerdictEnabled: defaults.BPFEventsPolicyVerdictEnabled,
 		BPFEventsTraceEnabled:         defaults.BPFEventsTraceEnabled,
@@ -2382,7 +2384,7 @@ func (c *DaemonConfig) AreDevicesRequired() bool {
 }
 
 // NeedBPFHostOnWireGuardDevice returns true if the agent needs to attach
-// a BPF program on the Ingress of Cilium's WireGuard device
+// cil_from_netdev on the Ingress of Cilium's WireGuard device
 func (c *DaemonConfig) NeedBPFHostOnWireGuardDevice() bool {
 	if !c.EnableWireguard {
 		return false
@@ -2404,6 +2406,27 @@ func (c *DaemonConfig) NeedBPFHostOnWireGuardDevice() bool {
 	// netdev (otherwise, the WG netdev after decrypting the reply will pass
 	// it to the stack which drops the packet).
 	if c.EnableNodePort && c.EncryptNode {
+		return true
+	}
+
+	return false
+}
+
+// NeedEgressOnWireGuardDevice returns true if the agent needs to attach
+// cil_to_wireguard on the Egress of Cilium's WireGuard device
+func (c *DaemonConfig) NeedEgressOnWireGuardDevice() bool {
+	if !c.EnableWireguard {
+		return false
+	}
+
+	// No need to handle rev-NAT xlations in wireguard with tunneling enabled.
+	if c.TunnelingEnabled() {
+		return false
+	}
+
+	// Attaching cil_to_wireguard to cilium_wg0 egress is required for handling
+	// the rev-NAT xlations when encrypting KPR traffic.
+	if c.EnableNodePort && c.EnableL7Proxy && c.KubeProxyReplacement == KubeProxyReplacementTrue {
 		return true
 	}
 
@@ -2517,12 +2540,7 @@ func (c *DaemonConfig) K8sNetworkPolicyEnabled() bool {
 }
 
 func (c *DaemonConfig) PolicyCIDRMatchesNodes() bool {
-	for _, mode := range c.PolicyCIDRMatchMode {
-		if mode == "nodes" {
-			return true
-		}
-	}
-	return false
+	return slices.Contains(c.PolicyCIDRMatchMode, "nodes")
 }
 
 // PerNodeLabelsEnabled returns true if per-node labels feature
@@ -2565,10 +2583,9 @@ func (c *DaemonConfig) LoadBalancerUsesDSR() bool {
 		c.LoadBalancerModeAnnotation
 }
 
-// KVstoreEnabledWithoutPodNetworkSupport returns whether Cilium is configured to connect
-// to an external KVStore, and the support for running it in pod network is disabled.
-func (c *DaemonConfig) KVstoreEnabledWithoutPodNetworkSupport() bool {
-	return c.KVStore != "" && !c.KVstorePodNetworkSupport
+// KVstoreEnabled returns whether Cilium is configured to connect to an external KVStore.
+func (c *DaemonConfig) KVstoreEnabled() bool {
+	return c.KVStore != ""
 }
 
 func (c *DaemonConfig) validateIPv6ClusterAllocCIDR() error {
@@ -2822,7 +2839,6 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.AgentHealthPort = vp.GetInt(AgentHealthPort)
 	c.ClusterHealthPort = vp.GetInt(ClusterHealthPort)
 	c.ClusterMeshHealthPort = vp.GetInt(ClusterMeshHealthPort)
-	c.AgentLabels = vp.GetStringSlice(AgentLabels)
 	c.AllowICMPFragNeeded = vp.GetBool(AllowICMPFragNeeded)
 	c.AllowLocalhost = vp.GetString(AllowLocalhost)
 	c.AnnotateK8sNode = vp.GetBool(AnnotateK8sNode)
@@ -2912,7 +2928,6 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.KVstoreLeaseTTL = vp.GetDuration(KVstoreLeaseTTL)
 	c.KVstorePeriodicSync = vp.GetDuration(KVstorePeriodicSync)
 	c.KVstoreConnectivityTimeout = vp.GetDuration(KVstoreConnectivityTimeout)
-	c.KVstorePodNetworkSupport = vp.GetBool(KVstorePodNetworkSupport)
 	c.KVstoreMaxConsecutiveQuorumErrors = vp.GetUint(KVstoreMaxConsecutiveQuorumErrorsName)
 	c.LabelPrefixFile = vp.GetString(LabelPrefixFile)
 	c.Labels = vp.GetStringSlice(Labels)
@@ -2955,7 +2970,6 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.PolicyAccounting = vp.GetBool(PolicyAccountingArg)
 	c.EnableIPv4FragmentsTracking = vp.GetBool(EnableIPv4FragmentsTrackingName)
 	c.FragmentsMapEntries = vp.GetInt(FragmentsMapEntriesName)
-	c.CRDWaitTimeout = vp.GetDuration(CRDWaitTimeout)
 	c.LoadBalancerDSRDispatch = vp.GetString(LoadBalancerDSRDispatch)
 	c.LoadBalancerRSSv4CIDR = vp.GetString(LoadBalancerRSSv4CIDR)
 	c.LoadBalancerRSSv6CIDR = vp.GetString(LoadBalancerRSSv6CIDR)
@@ -2973,6 +2987,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.EnablePMTUDiscovery = vp.GetBool(EnablePMTUDiscovery)
 	c.IPv6NAT46x64CIDR = defaults.IPv6NAT46x64CIDR
 	c.IPAMCiliumNodeUpdateRate = vp.GetDuration(IPAMCiliumNodeUpdateRate)
+	c.BPFDistributedLRU = vp.GetBool(BPFDistributedLRU)
 	c.BPFEventsDropEnabled = vp.GetBool(BPFEventsDropEnabled)
 	c.BPFEventsPolicyVerdictEnabled = vp.GetBool(BPFEventsPolicyVerdictEnabled)
 	c.BPFEventsTraceEnabled = vp.GetBool(BPFEventsTraceEnabled)
@@ -3408,14 +3423,14 @@ func (c *DaemonConfig) populateNodePortRange(vp *viper.Viper) error {
 
 func (c *DaemonConfig) checkMapSizeLimits() error {
 	if c.AuthMapEntries < AuthMapEntriesMin {
-		return fmt.Errorf("specified AuthMap max entries %d must exceed minimum %d", c.AuthMapEntries, AuthMapEntriesMin)
+		return fmt.Errorf("specified AuthMap max entries %d must be greater or equal to %d", c.AuthMapEntries, AuthMapEntriesMin)
 	}
 	if c.AuthMapEntries > AuthMapEntriesMax {
 		return fmt.Errorf("specified AuthMap max entries %d must not exceed maximum %d", c.AuthMapEntries, AuthMapEntriesMax)
 	}
 
 	if c.CTMapEntriesGlobalTCP < LimitTableMin || c.CTMapEntriesGlobalAny < LimitTableMin {
-		return fmt.Errorf("specified CT tables values %d/%d must exceed minimum %d",
+		return fmt.Errorf("specified CT tables values %d/%d must be greater or equal to %d",
 			c.CTMapEntriesGlobalTCP, c.CTMapEntriesGlobalAny, LimitTableMin)
 	}
 	if c.CTMapEntriesGlobalTCP > LimitTableMax || c.CTMapEntriesGlobalAny > LimitTableMax {
@@ -3424,7 +3439,7 @@ func (c *DaemonConfig) checkMapSizeLimits() error {
 	}
 
 	if c.NATMapEntriesGlobal < LimitTableMin {
-		return fmt.Errorf("specified NAT table size %d must exceed minimum %d",
+		return fmt.Errorf("specified NAT table size %d must be greater or equal to %d",
 			c.NATMapEntriesGlobal, LimitTableMin)
 	}
 	if c.NATMapEntriesGlobal > LimitTableMax {
@@ -3442,7 +3457,7 @@ func (c *DaemonConfig) checkMapSizeLimits() error {
 	}
 
 	if c.SockRevNatEntries < LimitTableMin {
-		return fmt.Errorf("specified Socket Reverse NAT table size %d must exceed minimum %d",
+		return fmt.Errorf("specified Socket Reverse NAT table size %d must be greater or equal to %d",
 			c.SockRevNatEntries, LimitTableMin)
 	}
 	if c.SockRevNatEntries > LimitTableMax {
@@ -3450,18 +3465,8 @@ func (c *DaemonConfig) checkMapSizeLimits() error {
 			c.SockRevNatEntries, LimitTableMax)
 	}
 
-	if c.PolicyMapEntries < PolicyMapMin {
-		return fmt.Errorf("specified PolicyMap max entries %d must exceed minimum %d",
-			c.PolicyMapEntries, PolicyMapMin)
-	}
-	if c.PolicyMapEntries > PolicyMapMax {
-		log.Warnf("specified PolicyMap max entries %d must not exceed maximum %d, lowering it to the maximum value",
-			c.PolicyMapEntries, PolicyMapMax)
-		c.PolicyMapEntries = PolicyMapMax
-	}
-
 	if c.FragmentsMapEntries < FragmentsMapMin {
-		return fmt.Errorf("specified max entries %d for fragment-tracking map must exceed minimum %d",
+		return fmt.Errorf("specified max entries %d for fragment-tracking map must be greater or equal to %d",
 			c.FragmentsMapEntries, FragmentsMapMin)
 	}
 	if c.FragmentsMapEntries > FragmentsMapMax {
@@ -3573,7 +3578,6 @@ func (c *DaemonConfig) calculateBPFMapSizes(vp *viper.Viper) error {
 	c.CTMapEntriesGlobalAny = vp.GetInt(CTMapEntriesGlobalAnyName)
 	c.NATMapEntriesGlobal = vp.GetInt(NATMapEntriesGlobalName)
 	c.NeighMapEntriesGlobal = vp.GetInt(NeighMapEntriesGlobalName)
-	c.PolicyMapEntries = vp.GetInt(PolicyMapEntriesName)
 	c.PolicyMapFullReconciliationInterval = vp.GetDuration(PolicyMapFullReconciliationIntervalName)
 	c.SockRevNatEntries = vp.GetInt(SockRevNatEntriesName)
 	c.LBMapEntries = vp.GetInt(LBMapEntriesName)

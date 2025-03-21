@@ -5,7 +5,9 @@ package experimental
 
 import (
 	"fmt"
+	"maps"
 	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -38,6 +40,11 @@ type Service struct {
 	// Annotations associated with this service.
 	Annotations map[string]string
 
+	// Selector specifies which pods should be associated with this service. If
+	// this is empty the backends associated to this service are managed externally
+	// and not by Kubernetes.
+	Selector map[string]string
+
 	// NatPolicy defines whether we need NAT46/64 translation for backends.
 	NatPolicy loadbalancer.SVCNatPolicy
 
@@ -69,6 +76,9 @@ type Service struct {
 	// SourceRanges if non-empty will restrict access to the service to the specified
 	// client addresses.
 	SourceRanges []cidr.CIDR
+
+	// PortNames maps a port name to a port number.
+	PortNames map[string]uint16
 
 	// Properties are additional untyped properties that can carry feature
 	// specific metadata about the service.
@@ -123,57 +133,88 @@ func (svc *Service) TableHeader() []string {
 	return []string{
 		"Name",
 		"Source",
-		"NatPolicy",
-		"ExtTrafficPolicy",
-		"IntTrafficPolicy",
-		"SessionAffinity",
-		"ProxyRedirect",
-		"HealthCheckNodePort",
-		"LoopbackHostPort",
-		"SourceRanges",
-		"ExplicitLBAlgorithm",
+		"PortNames",
+		"TrafficPolicy",
+		"Flags",
 	}
 }
 
 func (svc *Service) TableRow() []string {
-	var sessionAffinity string
+	var trafficPolicy string
+	if svc.ExtTrafficPolicy == svc.IntTrafficPolicy {
+		trafficPolicy = string(svc.ExtTrafficPolicy)
+	} else {
+		trafficPolicy = fmt.Sprintf("Ext=%s, Int=%s", svc.ExtTrafficPolicy, svc.IntTrafficPolicy)
+	}
+
+	// Collapse the more rarely set fields into a single "Flags" column
+	var flags []string
+
 	if svc.SessionAffinity {
-		sessionAffinity = svc.SessionAffinityTimeout.String()
+		flags = append(flags, "SessionAffinity="+svc.SessionAffinityTimeout.String())
 	}
 
-	showBool := func(v bool) string {
-		if v {
-			return "true"
-		} else {
-			return "false"
-		}
-	}
-
-	showSourceRanges := func(cidrs []cidr.CIDR) string {
+	if len(svc.SourceRanges) > 0 {
+		cidrs := svc.SourceRanges
 		ss := make([]string, len(cidrs))
 		for i := range cidrs {
 			ss[i] = cidrs[i].String()
 		}
-		return strings.Join(ss, ", ")
+		flags = append(flags, "SourceRanges="+strings.Join(ss, ", "))
 	}
+
+	if svc.ProxyRedirect != nil {
+		flags = append(flags, "ProxyRedirect="+svc.ProxyRedirect.String())
+	}
+
+	if svc.HealthCheckNodePort != 0 {
+		flags = append(flags, fmt.Sprintf("HealthCheckNodePort=%d", svc.HealthCheckNodePort))
+	}
+
+	if svc.LoopbackHostPort {
+		flags = append(flags, "LoopbackHostPort="+strconv.FormatBool(svc.LoopbackHostPort))
+	}
+
+	if alg := svc.GetLBAlgorithmAnnotation(); alg != loadbalancer.SVCLoadBalancingAlgorithmUndef {
+		flags = append(flags, "ExplicitLBAlgorithm="+alg.String())
+	}
+
+	if svc.Properties.Len() != 0 {
+		// Since the property is an "any", we'll just show the keys.
+		propKeys := make([]string, 0, svc.Properties.Len())
+		for k := range svc.Properties.All() {
+			propKeys = append(propKeys, k)
+		}
+		flags = append(flags, "Properties="+strings.Join(propKeys, ", "))
+	}
+
+	sort.Strings(flags)
 
 	return []string{
 		svc.Name.String(),
 		string(svc.Source),
-		string(svc.NatPolicy),
-		string(svc.ExtTrafficPolicy),
-		string(svc.IntTrafficPolicy),
-		sessionAffinity,
-		svc.ProxyRedirect.String(),
-		strconv.FormatUint(uint64(svc.HealthCheckNodePort), 10),
-		showBool(svc.LoopbackHostPort),
-		showSourceRanges(svc.SourceRanges),
-		svc.GetLBAlgorithmAnnotation(),
+		svc.showPortNames(),
+		trafficPolicy,
+		strings.Join(flags, ", "),
 	}
 }
 
-func (svc *Service) GetLBAlgorithmAnnotation() string {
-	return svc.Annotations[annotation.ServiceLoadBalancingAlgorithm]
+func (svc *Service) showPortNames() string {
+	var b strings.Builder
+	n := len(svc.PortNames)
+	for _, name := range slices.Sorted(maps.Keys(svc.PortNames)) {
+		fmt.Fprintf(&b, "%s=%d", name, svc.PortNames[name])
+		n--
+		if n > 0 {
+			b.WriteString(", ")
+		}
+
+	}
+	return b.String()
+}
+
+func (svc *Service) GetLBAlgorithmAnnotation() loadbalancer.SVCLoadBalancingAlgorithm {
+	return loadbalancer.ToSVCLoadBalancingAlgorithm(svc.Annotations[annotation.ServiceLoadBalancingAlgorithm])
 }
 
 var (

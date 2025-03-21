@@ -8,10 +8,13 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/cilium/hive/hivetest"
 	"github.com/stretchr/testify/require"
 
 	"github.com/cilium/cilium/pkg/completion"
+	"github.com/cilium/cilium/pkg/crypto/certificatemanager"
 	datapath "github.com/cilium/cilium/pkg/datapath/types"
+	envoypolicy "github.com/cilium/cilium/pkg/envoy/policy"
 	"github.com/cilium/cilium/pkg/fqdn/restore"
 	"github.com/cilium/cilium/pkg/identity"
 	"github.com/cilium/cilium/pkg/identity/cache"
@@ -61,7 +64,7 @@ func setupRedirectSuite(tb testing.TB) *RedirectSuite {
 	}
 
 	s.do.idmgr = identitymanager.NewIDManager()
-	s.do.repo = policy.NewPolicyRepository(identityCache, nil, nil, s.do.idmgr, api.NewPolicyMetricsNoop())
+	s.do.repo = policy.NewPolicyRepository(hivetest.Logger(tb), identityCache, nil, envoypolicy.NewEnvoyL7RulesTranslator(hivetest.Logger(tb), certificatemanager.NewMockSecretManagerInline()), s.do.idmgr, api.NewPolicyMetricsNoop())
 	s.do.repo.GetSelectorCache().SetLocalIdentityNotifier(testidentity.NewDummyIdentityNotifier())
 
 	s.rsp = &RedirectSuiteProxy{
@@ -214,7 +217,7 @@ const (
 )
 
 func (s *RedirectSuite) NewTestEndpoint(t *testing.T) *Endpoint {
-	ep := NewTestEndpointWithState(s.do, s.do, testipcache.NewMockIPCache(), s.rsp, s.mgr, ctmap.NewFakeGCRunner(), 12345, StateRegenerating)
+	ep := NewTestEndpointWithState(s.do, nil, s.do, testipcache.NewMockIPCache(), s.rsp, s.mgr, ctmap.NewFakeGCRunner(), 12345, StateRegenerating)
 	ep.SetPropertyValue(PropertyFakeEndpoint, false)
 
 	epIdentity, _, err := s.mgr.AllocateIdentity(context.Background(), labelsBar.Labels(), true, identityBar)
@@ -397,7 +400,7 @@ func TestRedirectWithDeny(t *testing.T) {
 
 	expected := policy.MapStateMap{
 		mapKeyAllowAllE: policyTypes.AllowEntry(),
-		mapKeyAllL7:     policyTypes.AllowEntry().WithProxyPort(httpPort),
+		mapKeyAllL7:     policyTypes.AllowEntry().WithProxyPort(httpPort).WithListenerPriority(policy.ListenerPriorityHTTP),
 		mapKeyFoo:       policyTypes.DenyEntry(),
 	}
 
@@ -528,7 +531,7 @@ func TestRedirectWithPriority(t *testing.T) {
 
 	expected := policy.MapStateMap{
 		mapKeyAllowAllE: policyTypes.AllowEntry(),
-		mapKeyFooL7:     policyTypes.AllowEntry().WithProxyPort(crd2Port).WithProxyPriority(1),
+		mapKeyFooL7:     policyTypes.AllowEntry().WithProxyPort(crd2Port).WithListenerPriority(1),
 		mapKeyAllL7:     policyTypes.AllowEntry(),
 	}
 	ep.ValidateRuleLabels(t, LabelArrayListMap{
@@ -583,7 +586,7 @@ func TestRedirectWithEqualPriority(t *testing.T) {
 
 	expected := policy.MapStateMap{
 		mapKeyAllowAllE: policyTypes.AllowEntry(),
-		mapKeyFooL7:     policyTypes.AllowEntry().WithProxyPort(crd1Port).WithProxyPriority(1),
+		mapKeyFooL7:     policyTypes.AllowEntry().WithProxyPort(crd1Port).WithListenerPriority(1),
 		mapKeyAllL7:     policyTypes.AllowEntry(),
 	}
 	ep.ValidateRuleLabels(t, LabelArrayListMap{

@@ -143,7 +143,7 @@
    * - :spelling:ignore:`authentication.mutual.spire.install.initImage`
      - init container image of SPIRE agent and server
      - object
-     - ``{"digest":"sha256:a5d0ce49aa801d475da48f8cb163c354ab95cab073cd3c138bd458fc8257fbf1","override":null,"pullPolicy":"Always","repository":"docker.io/library/busybox","tag":"1.37.0","useDigest":true}``
+     - ``{"digest":"sha256:37f7b378a29ceb4c551b1b5582e27747b855bbfaa73fa11914fe0df028dc581f","override":null,"pullPolicy":"Always","repository":"docker.io/library/busybox","tag":"1.37.0","useDigest":true}``
    * - :spelling:ignore:`authentication.mutual.spire.install.namespace`
      - SPIRE namespace to install into
      - string
@@ -332,6 +332,14 @@
      - Disable ExternalIP mitigation (CVE-2020-8554)
      - bool
      - ``false``
+   * - :spelling:ignore:`bpf.distributedLRU`
+     - Control to use a distributed per-CPU backend memory for the core BPF LRU maps which Cilium uses. This improves performance significantly, but it is also recommended to increase BPF map sizing along with that.
+     - object
+     - ``{"enabled":false}``
+   * - :spelling:ignore:`bpf.distributedLRU.enabled`
+     - Enable distributed LRU backend memory. For compatibility with existing installations it is off by default.
+     - bool
+     - ``false``
    * - :spelling:ignore:`bpf.enableTCX`
      - Attach endpoint programs using tcx instead of legacy tc hooks on supported kernels.
      - bool
@@ -424,6 +432,10 @@
      - Configure the maximum number of entries in endpoint policy map (per endpoint). @schema type: [null, integer] @schema
      - int
      - ``16384``
+   * - :spelling:ignore:`bpf.policyStatsMapMax`
+     - Configure the maximum number of entries in global policy stats map. @schema type: [null, integer] @schema
+     - int
+     - ``65536``
    * - :spelling:ignore:`bpf.preallocateMaps`
      - Enables pre-allocation of eBPF map values. This increases memory usage but can reduce latency.
      - bool
@@ -684,6 +696,10 @@
      - Relabeling configs for the ServiceMonitor clustermesh-apiserver (etcd metrics)
      - string
      - ``nil``
+   * - :spelling:ignore:`clustermesh.apiserver.metrics.serviceMonitor.etcd.scrapeTimeout`
+     - Timeout after which scrape is considered to be failed.
+     - string
+     - ``nil``
    * - :spelling:ignore:`clustermesh.apiserver.metrics.serviceMonitor.interval`
      - Interval for scrape metrics (apiserver metrics)
      - string
@@ -700,6 +716,10 @@
      - Relabeling configs for the ServiceMonitor clustermesh-apiserver (KVStoreMesh metrics)
      - string
      - ``nil``
+   * - :spelling:ignore:`clustermesh.apiserver.metrics.serviceMonitor.kvstoremesh.scrapeTimeout`
+     - Timeout after which scrape is considered to be failed.
+     - string
+     - ``nil``
    * - :spelling:ignore:`clustermesh.apiserver.metrics.serviceMonitor.labels`
      - Labels to add to ServiceMonitor clustermesh-apiserver
      - object
@@ -710,6 +730,10 @@
      - ``nil``
    * - :spelling:ignore:`clustermesh.apiserver.metrics.serviceMonitor.relabelings`
      - Relabeling configs for the ServiceMonitor clustermesh-apiserver (apiserver metrics)
+     - string
+     - ``nil``
+   * - :spelling:ignore:`clustermesh.apiserver.metrics.serviceMonitor.scrapeTimeout`
+     - Timeout after which scrape is considered to be failed.
      - string
      - ``nil``
    * - :spelling:ignore:`clustermesh.apiserver.nodeSelector`
@@ -1004,6 +1028,10 @@
      - Enable debug logging
      - bool
      - ``false``
+   * - :spelling:ignore:`debug.metricsSamplingInterval`
+     - Set the agent-internal metrics sampling frequency. This sets the frequency of the internal sampling of the agent metrics. These are available via the "cilium-dbg shell -- metrics -s" command and are part of the metrics HTML page included in the sysdump. @schema type: [null, string] @schema
+     - string
+     - ``"5m"``
    * - :spelling:ignore:`debug.verbose`
      - Configure verbosity levels for debug logging This option is used to enable debug messages for operations related to such sub-system such as (e.g. kvstore, envoy, datapath or policy), and flow is for enabling debug messages emitted per request, message and connection. Multiple values can be set via a space-separated string (e.g. "datapath envoy").  Applicable values: - flow - kvstore - envoy - datapath - policy
      - string
@@ -1240,10 +1268,6 @@
      - Filter via tags (k=v) which will dictate which subnets are going to be used to create new ENIs Important note: This requires that each instance has an ENI with a matching subnet attached when Cilium is deployed. If you only want to control subnets for ENIs attached by Cilium, use the CNI configuration file settings (cni.customConf) instead.
      - list
      - ``[]``
-   * - :spelling:ignore:`eni.updateEC2AdapterLimitViaAPI`
-     - Update ENI Adapter limits from the EC2 API
-     - bool
-     - ``true``
    * - :spelling:ignore:`envoy.affinity`
      - Affinity for cilium-envoy.
      - object
@@ -1319,7 +1343,7 @@
    * - :spelling:ignore:`envoy.image`
      - Envoy container image.
      - object
-     - ``{"digest":"sha256:6f1174ffbff7e12ae6bdc01fdf9d07592934aa187db317e11ec724b572428d28","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.32.3-1739965348-66cb64b47090969d3f0e2ce449a6563a3772c098","useDigest":true}``
+     - ``{"digest":"sha256:0dac9758f8d66c0c3a3c5c81fece7de233276ac11ebcbc9e1e56379779d2f418","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.33.0-1742456894-0de0009734b0b9e9481369813a047e69d6d7915b","useDigest":true}``
    * - :spelling:ignore:`envoy.initialFetchTimeoutSeconds`
      - Time in seconds after which the initial fetch on an xDS stream is considered timed out
      - int
@@ -1395,7 +1419,7 @@
    * - :spelling:ignore:`envoy.prometheus`
      - Configure Cilium Envoy Prometheus options. Note that some of these apply to either cilium-agent or cilium-envoy.
      - object
-     - ``{"enabled":true,"port":"9964","serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","labels":{},"metricRelabelings":null,"relabelings":[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}]}}``
+     - ``{"enabled":true,"port":"9964","serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","labels":{},"metricRelabelings":null,"relabelings":[{"action":"replace","replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"scrapeTimeout":null}}``
    * - :spelling:ignore:`envoy.prometheus.enabled`
      - Enable prometheus metrics for cilium-envoy
      - bool
@@ -1427,7 +1451,11 @@
    * - :spelling:ignore:`envoy.prometheus.serviceMonitor.relabelings`
      - Relabeling configs for the ServiceMonitor cilium-envoy or for cilium-agent with Envoy configured.
      - list
-     - ``[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}]``
+     - ``[{"action":"replace","replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}]``
+   * - :spelling:ignore:`envoy.prometheus.serviceMonitor.scrapeTimeout`
+     - Timeout after which scrape is considered to be failed.
+     - string
+     - ``nil``
    * - :spelling:ignore:`envoy.readinessProbe.failureThreshold`
      - failure threshold of readiness probe
      - int
@@ -1468,6 +1496,10 @@
      - interval between checks of the startup probe
      - int
      - ``2``
+   * - :spelling:ignore:`envoy.streamIdleTimeoutDurationSeconds`
+     - Set Envoy the amount of time that the connection manager will allow a stream to exist with no upstream or downstream activity. default 5 minutes
+     - int
+     - ``300``
    * - :spelling:ignore:`envoy.terminationGracePeriodSeconds`
      - Configure termination grace period for cilium-envoy DaemonSet.
      - int
@@ -1703,7 +1735,7 @@
    * - :spelling:ignore:`hubble.metrics`
      - Hubble metrics configuration. See https://docs.cilium.io/en/stable/observability/metrics/#hubble-metrics for more comprehensive documentation about Hubble metrics.
      - object
-     - ``{"dashboards":{"annotations":{},"enabled":false,"label":"grafana_dashboard","labelValue":"1","namespace":null},"dynamic":{"config":{"configMapName":"cilium-dynamic-metrics-config","content":[{"contextOptions":[],"excludeFilters":[],"includeFilters":[],"name":"all"}],"createConfigMap":true},"enabled":false},"enableOpenMetrics":false,"enabled":null,"port":9965,"serviceAnnotations":{},"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"tlsConfig":{}},"tls":{"enabled":false,"server":{"cert":"","existingSecret":"","extraDnsNames":[],"extraIpAddresses":[],"key":"","mtls":{"enabled":false,"key":"ca.crt","name":null,"useSecret":false}}}}``
+     - ``{"dashboards":{"annotations":{},"enabled":false,"label":"grafana_dashboard","labelValue":"1","namespace":null},"dynamic":{"config":{"configMapName":"cilium-dynamic-metrics-config","content":[{"contextOptions":[],"excludeFilters":[],"includeFilters":[],"name":"all"}],"createConfigMap":true},"enabled":false},"enableOpenMetrics":false,"enabled":null,"port":9965,"serviceAnnotations":{},"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":[{"action":"replace","replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"scrapeTimeout":null,"tlsConfig":{}},"tls":{"enabled":false,"server":{"cert":"","existingSecret":"","extraDnsNames":[],"extraIpAddresses":[],"key":"","mtls":{"enabled":false,"key":"ca.crt","name":null,"useSecret":false}}}}``
    * - :spelling:ignore:`hubble.metrics.dashboards`
      - Grafana dashboards for hubble grafana can import dashboards based on the label and value ref: https://github.com/grafana/helm-charts/tree/main/charts/grafana#sidecar-for-dashboards
      - object
@@ -1763,7 +1795,11 @@
    * - :spelling:ignore:`hubble.metrics.serviceMonitor.relabelings`
      - Relabeling configs for the ServiceMonitor hubble
      - list
-     - ``[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}]``
+     - ``[{"action":"replace","replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}]``
+   * - :spelling:ignore:`hubble.metrics.serviceMonitor.scrapeTimeout`
+     - Timeout after which scrape is considered to be failed.
+     - string
+     - ``nil``
    * - :spelling:ignore:`hubble.metrics.tls.server.cert`
      - base64 encoded PEM values for the Hubble metrics server certificate (deprecated). Use existingSecret instead.
      - string
@@ -1923,7 +1959,7 @@
    * - :spelling:ignore:`hubble.relay.prometheus`
      - Enable prometheus metrics for hubble-relay on the configured port at /metrics
      - object
-     - ``{"enabled":false,"port":9966,"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","labels":{},"metricRelabelings":null,"relabelings":null}}``
+     - ``{"enabled":false,"port":9966,"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","labels":{},"metricRelabelings":null,"relabelings":null,"scrapeTimeout":null}}``
    * - :spelling:ignore:`hubble.relay.prometheus.serviceMonitor.annotations`
      - Annotations to add to ServiceMonitor hubble-relay
      - object
@@ -1946,6 +1982,10 @@
      - ``nil``
    * - :spelling:ignore:`hubble.relay.prometheus.serviceMonitor.relabelings`
      - Relabeling configs for the ServiceMonitor hubble-relay
+     - string
+     - ``nil``
+   * - :spelling:ignore:`hubble.relay.prometheus.serviceMonitor.scrapeTimeout`
+     - Timeout after which scrape is considered to be failed.
      - string
      - ``nil``
    * - :spelling:ignore:`hubble.relay.replicas`
@@ -2927,7 +2967,7 @@
    * - :spelling:ignore:`operator.prometheus`
      - Enable prometheus metrics for cilium-operator on the configured port at /metrics
      - object
-     - ``{"enabled":true,"metricsService":false,"port":9963,"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":null}}``
+     - ``{"enabled":true,"metricsService":false,"port":9963,"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":null,"scrapeTimeout":null}}``
    * - :spelling:ignore:`operator.prometheus.serviceMonitor.annotations`
      - Annotations to add to ServiceMonitor cilium-operator
      - object
@@ -2954,6 +2994,10 @@
      - ``nil``
    * - :spelling:ignore:`operator.prometheus.serviceMonitor.relabelings`
      - Relabeling configs for the ServiceMonitor cilium-operator
+     - string
+     - ``nil``
+   * - :spelling:ignore:`operator.prometheus.serviceMonitor.scrapeTimeout`
+     - Timeout after which scrape is considered to be failed.
      - string
      - ``nil``
    * - :spelling:ignore:`operator.removeNodeTaints`
@@ -3151,7 +3195,7 @@
    * - :spelling:ignore:`prometheus`
      - Configure prometheus metrics on the configured port at /metrics
      - object
-     - ``{"controllerGroupMetrics":["write-cni-file","sync-host-ips","sync-lb-maps-with-k8s-services"],"enabled":false,"metrics":null,"metricsService":false,"port":9962,"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"trustCRDsExist":false}}``
+     - ``{"controllerGroupMetrics":["write-cni-file","sync-host-ips","sync-lb-maps-with-k8s-services"],"enabled":false,"metrics":null,"metricsService":false,"port":9962,"serviceMonitor":{"annotations":{},"enabled":false,"interval":"10s","jobLabel":"","labels":{},"metricRelabelings":null,"relabelings":[{"action":"replace","replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}],"scrapeTimeout":null,"trustCRDsExist":false}}``
    * - :spelling:ignore:`prometheus.controllerGroupMetrics`
      - - Enable controller group metrics for monitoring specific Cilium subsystems. The list is a list of controller group names. The special values of "all" and "none" are supported. The set of controller group names is not guaranteed to be stable between Cilium versions.
      - list
@@ -3187,7 +3231,11 @@
    * - :spelling:ignore:`prometheus.serviceMonitor.relabelings`
      - Relabeling configs for the ServiceMonitor cilium-agent
      - list
-     - ``[{"replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}]``
+     - ``[{"action":"replace","replacement":"${1}","sourceLabels":["__meta_kubernetes_pod_node_name"],"targetLabel":"node"}]``
+   * - :spelling:ignore:`prometheus.serviceMonitor.scrapeTimeout`
+     - Timeout after which scrape is considered to be failed.
+     - string
+     - ``nil``
    * - :spelling:ignore:`prometheus.serviceMonitor.trustCRDsExist`
      - Set to ``true`` and helm will not check for monitoring.coreos.com/v1 CRDs before deploying
      - bool

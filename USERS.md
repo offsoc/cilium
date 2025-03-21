@@ -191,6 +191,12 @@ Users (Alphabetically)
       Q: @ant31
       L: https://conny.de
 
+    * N: CoreWeave
+      D: CoreWeave, The AI Hyperscaler™, uses Cilium as the default CNI for CoreWeave Kubernetes Service.
+      U: Networking
+      L: https://www.coreweave.com/
+      Q: @dswaffordcw
+
     * N: Cosmonic
       D: Cilium is the CNI for Cosmonic's Nomad based PaaS
       U: Networking, NetworkPolicy, Transparent Encryption
@@ -273,6 +279,12 @@ Users (Alphabetically)
       U: CNI
       L: https://documentation.elasticpath.com/cloudops-kubernetes/docs/index.html
       Q: @Neil Seward
+
+    * N: Entrywan
+      D: Entrywan provides Cilium as a CNI option in its managed kubernetes service
+      U: CNI
+      L: https://www.entrywan.com/docs#kubernetes
+      Q: @aarongroom
 
     * N: Equinix
       D: Equinix Metal is using Cilium for production and non-production environments on bare metal

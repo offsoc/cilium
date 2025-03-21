@@ -62,7 +62,7 @@ and two peers configured under this BGP instance.
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPClusterConfig
     metadata:
       name: cilium-bgp
@@ -109,7 +109,7 @@ section, we will go over each configuration option.
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPPeerConfig
     metadata:
       name: cilium-peer
@@ -143,7 +143,7 @@ Here is an example of setting ``authSecretRef``:
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPPeerConfig
     metadata:
       name: cilium-peer
@@ -206,15 +206,20 @@ recommended to set the ``HoldTimer`` and ``KeepaliveTimer`` to a lower value
 for faster possible failure detection. For example, you can set the minimum
 possible values ``holdTimeSeconds=9`` and ``keepAliveTimeSeconds=3``.
 
+To ensure a fast reconnection after losing connectivity with the peer,
+reduce the ``connectRetryTimeSeconds`` (for example to ``5`` or less).
+As random jitter is applied to the configured value internally, the actual value used for the
+``ConnectRetryTimer`` is within the interval ``[ConnectRetryTimeSeconds, 2 * ConnectRetryTimeSeconds)``.
+
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPPeerConfig
     metadata:
       name: cilium-peer
     spec:
       timers:
-        connectRetryTimeSeconds: 12
+        connectRetryTimeSeconds: 5
         holdTimeSeconds: 9
         keepAliveTimeSeconds: 3
 
@@ -230,7 +235,7 @@ different subnet, you may need to set the TTL value to more than 1.
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPPeerConfig
     metadata:
       name: cilium-peer
@@ -258,7 +263,7 @@ the routes previously advertised by the Cilium BGP control plane.
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPPeerConfig
     metadata:
       name: cilium-peer
@@ -296,7 +301,7 @@ Here is an example of setting the transport configuration:
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPPeerConfig
     metadata:
       name: cilium-peer
@@ -329,7 +334,7 @@ Various advertisements types are defined :ref:`here <bgp-adverts>`.
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPPeerConfig
     metadata:
       name: cilium-peer
@@ -368,7 +373,7 @@ pod prefixes with the community value of "65000:99" and local preference of 99.
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPAdvertisement
     metadata:
       name: bgp-advertisements
@@ -458,7 +463,7 @@ When :ref:`Kubernetes <k8s_hostscope>` or :ref:`ClusterPool
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPAdvertisement
     metadata:
       name: bgp-advertisements
@@ -484,7 +489,7 @@ or ``.matchExpressions``.
 .. code-block:: yaml
 
     ---
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumPodIPPool
     metadata:
       name: default
@@ -492,7 +497,7 @@ or ``.matchExpressions``.
         pool: blue
 
     ---
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPAdvertisement
     metadata:
       name: pod-ip-pool-advert
@@ -513,7 +518,7 @@ expression with a dummy key and value can be used like this:
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPAdvertisement
     metadata:
       name: pod-ip-pool-advert
@@ -569,7 +574,7 @@ or ``.matchExpressions``.
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPAdvertisement
     metadata:
       name: bgp-advertisements
@@ -611,7 +616,7 @@ If you only wish to advertise the ``.spec.externalIPs`` of a Service, you can sp
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPAdvertisement
     metadata:
       name: bgp-advertisements
@@ -642,7 +647,7 @@ you can specify the ``virtualRouters[*].serviceAdvertisements`` field as ``Clust
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPAdvertisement
     metadata:
       name: bgp-advertisements
@@ -670,7 +675,7 @@ IPs. Cilium supports assigning ingress IPs with the :ref:`Load Balancer IPAM
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPAdvertisement
     metadata:
       name: bgp-advertisements
@@ -693,7 +698,7 @@ with a dummy key and value can be used like this:
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPAdvertisement
     metadata:
       name: bgp-advertisements
@@ -765,7 +770,7 @@ match. One matches on the label ``vpc1`` while the other on ``vpc2``.
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPAdvertisement
     metadata:
       name: bgp-advertisements
@@ -823,6 +828,38 @@ across all matches. This is in line with `RFC4271 <https://datatracker.ietf.org/
 which states *The higher degree of preference MUST be preferred.*
 
 
+Routing Aggregation
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Cilium BGP Control Plane supports Routing Aggregation `RFC4632 <https://datatracker.ietf.org/doc/html/rfc4632>`__.
+
+.. code-block:: yaml
+
+    apiVersion: cilium.io/v2
+    kind: CiliumBGPAdvertisement
+    metadata:
+      name: bgp-advertisements
+      labels:
+        advertise: bgp
+    spec:
+      advertisements:
+        - advertisementType: "Service"
+          service:
+            aggregationLengthIPv4: 24          # <-- specify the IPv4 prefix length to aggregate
+            aggregationLengthIPv6: 120         # <-- specify the IPv6 prefix length to aggregate
+            addresses:
+              - ClusterIP
+              - ExternalIP
+              - LoadBalancerIP
+          selector:
+            matchExpressions:
+              - { key: bgp, operator: In, values: [ blue ] }
+
+.. note::
+
+    If the Service has ``externalTrafficPolicy: Local`` then BGP Control Plane will ignore routing aggregation parameter
+
+
 .. _bgp-override:
 
 BGP Configuration Override
@@ -836,7 +873,7 @@ local autonomous system number used in each peer for the node with a name ``bgpv
 
 .. code-block:: yaml
 
-    apiVersion: cilium.io/v2alpha1
+    apiVersion: cilium.io/v2
     kind: CiliumBGPNodeConfigOverride
     metadata:
       name: bgpv2-cplane-dev-multi-homing-worker

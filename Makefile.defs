@@ -58,8 +58,8 @@ ifeq ($(DOCKER_IMAGE_TAG),)
 endif
 
 # renovate: datasource=docker depName=gcr.io/etcd-development/etcd
-ETCD_IMAGE_VERSION = v3.5.18
-ETCD_IMAGE_SHA = sha256:9079538aa6e9ff9a57b4d737ca1f03f978e7b9e8fe45bb91b19bd933deb98912
+ETCD_IMAGE_VERSION = v3.5.19
+ETCD_IMAGE_SHA = sha256:c415170328bbb2cb497c79dbd8494b1c8d58886dccf95fbfdd3845c13c6d1ca3
 ETCD_IMAGE=gcr.io/etcd-development/etcd:$(ETCD_IMAGE_VERSION)@$(ETCD_IMAGE_SHA)
 
 CILIUM_BUILDER_IMAGE=$(shell cat $(ROOT_DIR)/images/cilium/Dockerfile | grep "ARG CILIUM_BUILDER_IMAGE=" | cut -d"=" -f2)
@@ -89,6 +89,8 @@ GO_TAGS_FLAGS += osusergo
 # RACE is specified.
 GOTEST_COVER_OPTS =
 
+CODEOWNERS_PATH ?= CODEOWNERS
+
 # By default, just print go test output immediately to the terminal. If tparse
 # is installed, use it to format the output. Use -progress instead of -follow,
 # as the latter is too verbose for most of the test suite.
@@ -100,15 +102,15 @@ ifneq ($(V),0)
 	GOTEST_FORMATTER_FLAGS += -follow
 endif
 ifneq ($(LOG_CODEOWNERS),)
-	GOTEST_FORMATTER = tee >($(GO) run ./tools/testowners) >(tparse $(GOTEST_FORMATTER_FLAGS)) >/dev/null
+	GOTEST_FORMATTER = tee >($(GO) run ./tools/testowners --code-owners=$(CODEOWNERS_PATH)) >(tparse $(GOTEST_FORMATTER_FLAGS)) >/dev/null
 else
 	GOTEST_FORMATTER = tparse $(GOTEST_FORMATTER_FLAGS)
 endif
 endif
 
 # renovate: datasource=docker depName=golangci/golangci-lint
-GOLANGCILINT_WANT_VERSION = v1.64.5
-GOLANGCILINT_IMAGE_SHA = sha256:9faef4dda4304c4790a14c5b8c8cd8c2715a8cb754e13f61d8ceaa358f5a454a
+GOLANGCILINT_WANT_VERSION = v1.64.8
+GOLANGCILINT_IMAGE_SHA = sha256:2987913e27f4eca9c8a39129d2c7bc1e74fbcf77f181e01cea607be437aa5cb8
 GOLANGCILINT_VERSION = $(shell golangci-lint version --format short 2>/dev/null)
 
 VERSION = $(shell cat $(dir $(lastword $(MAKEFILE_LIST)))/VERSION)

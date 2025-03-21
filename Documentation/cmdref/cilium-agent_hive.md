@@ -11,11 +11,14 @@ cilium-agent hive [flags]
 ### Options
 
 ```
+      --agent-labels strings                                      Additional labels to identify this agent in monitor events
       --agent-liveness-update-interval duration                   Interval at which the agent updates liveness time for the datapath (default 1s)
       --api-rate-limit string                                     API rate limiting configuration (example: --api-rate-limit endpoint-create=rate-limit:10/m,rate-burst:2)
       --bpf-lb-maglev-hash-seed string                            Maglev cluster-wide hash seed (base64 encoded) (default "JLfvgnHc2kaSUFaI")
       --bpf-lb-maglev-table-size uint                             Maglev per service backend table size (parameter M, one of: [251 509 1021 2039 4093 8191 16381 32749 65521 131071]) (default 16381)
       --bpf-node-map-max uint32                                   Sets size of node bpf map which will be the max number of unique Node IPs in the cluster (default 16384)
+      --bpf-policy-map-max int                                    Maximum number of entries in endpoint policy map (per endpoint) (default 16384)
+      --bpf-policy-stats-map-max int                              Maximum number of entries in bpf policy stats map (default 65536)
       --certificates-directory string                             Root directory to find certificates specified in L7 TLS policy enforcement (default "/var/run/cilium/certs")
       --cluster-id uint32                                         Unique identifier of the cluster
       --cluster-name string                                       Name of the cluster. It must consist of at most 32 lower case alphanumeric characters and '-', start and end with an alphanumeric character. (default "default")
@@ -27,6 +30,7 @@ cilium-agent hive [flags]
       --cni-external-routing                                      Whether the chained CNI plugin handles routing on the node
       --cni-log-file string                                       Path where the CNI plugin should write logs (default "/var/run/cilium/cilium-cni.log")
       --controller-group-metrics strings                          List of controller group names for which to to enable metrics. Accepts 'all' and 'none'. The set of controller group names available is not guaranteed to be stable between Cilium versions.
+      --crd-wait-timeout duration                                 Cilium will exit if CRDs are not available within this duration upon startup (default 5m0s)
       --devices strings                                           List of devices facing cluster/external network (used for BPF NodePort, BPF masquerading and host firewall); supports '+' as wildcard in device name, e.g. 'eth+'
       --direct-routing-device string                              Device name used to connect nodes in direct routing mode (used by BPF NodePort, BPF host routing; if empty, automatically set to a device with k8s InternalIP/ExternalIP or with a default route)
       --disable-envoy-version-check                               Do not perform Envoy version check
@@ -81,6 +85,7 @@ cilium-agent hive [flags]
       --http-request-timeout uint                                 Time after which a forwarded HTTP request is considered failed unless completed (in seconds); Use 0 for unlimited (default 3600)
       --http-retry-count uint                                     Number of retries performed after a forwarded request attempt fails (default 3)
       --http-retry-timeout uint                                   Time after which a forwarded but uncompleted request is retried (connection failures are retried immediately); defaults to 0 (never)
+      --http-stream-idle-timeout uint                             Set Envoy the amount of time that the connection manager will allow a stream to exist with no upstream or downstream activity. Default 300s (default 300)
       --hubble-disable-tls                                        Allow Hubble server to run on the given listen address without TLS.
       --hubble-drop-events                                        Emit packet drop Events related to pods (alpha)
       --hubble-drop-events-interval duration                      Minimum time between emitting same events (default 2m0s)
@@ -123,7 +128,7 @@ cilium-agent hive [flags]
       --ingress-secrets-namespace string                          IngressSecretsNamespace is the namespace having tls secrets used by CEC, originating from Ingress controller
       --iptables-lock-timeout duration                            Time to pass to each iptables invocation to wait for xtables lock acquisition (default 5s)
       --iptables-random-fully                                     Set iptables flag random-fully on masquerading rules
-      --k8s-api-server string                                     Kubernetes API server URL
+      --k8s-api-server-urls strings                               Kubernetes API server URLs
       --k8s-client-burst int                                      Burst value allowed for the K8s client (default 20)
       --k8s-client-connection-keep-alive duration                 Configures the keep alive duration of K8s client connections. K8 client is disabled if the value is set to 0 (default 30s)
       --k8s-client-connection-timeout duration                    Configures the timeout of K8s client connections. K8s client is disabled if the value is set to 0 (default 30s)
@@ -131,7 +136,7 @@ cilium-agent hive [flags]
       --k8s-heartbeat-timeout duration                            Configures the timeout for api-server heartbeat, set to 0 to disable (default 30s)
       --k8s-kubeconfig-path string                                Absolute path of the kubernetes kubeconfig file
       --k8s-service-proxy-name string                             Value of K8s service-proxy-name label for which Cilium handles the services (empty = all services without service.kubernetes.io/service-proxy-name label)
-      --l2-pod-announcements-interface string                     Interface used for sending gratuitous arp messages
+      --l2-pod-announcements-interface-pattern string             Regex matching interfaces used for sending gratuitous arp messages
       --max-connected-clusters uint32                             Maximum number of clusters to be connected in a clustermesh. Increasing this value will reduce the maximum number of identities available. Valid configurations are [255, 511]. (default 255)
       --mesh-auth-enabled                                         Enable authentication processing & garbage collection (beta) (default true)
       --mesh-auth-gc-interval duration                            Interval in which auth entries are attempted to be garbage collected (default 5m0s)
@@ -142,6 +147,7 @@ cilium-agent hive [flags]
       --mesh-auth-spiffe-trust-domain string                      The trust domain for the SPIFFE identity. (default "spiffe.cilium")
       --mesh-auth-spire-admin-socket string                       The path for the SPIRE admin agent Unix socket.
       --metrics strings                                           Metrics that should be enabled or disabled from the default metric list. (+metric_foo to enable metric_foo, -metric_bar to disable metric_bar)
+      --metrics-sampling-interval duration                        Set the internal metrics sampling interval (default 5m0s)
       --monitor-queue-size int                                    Size of the event queue when reading monitor events
       --multicast-enabled                                         Enables multicast in Cilium
       --nat-map-stats-entries int                                 Number k top stats entries to store locally in statedb (default 32)

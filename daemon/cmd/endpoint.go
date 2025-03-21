@@ -32,15 +32,16 @@ import (
 	"github.com/cilium/cilium/pkg/k8s"
 	"github.com/cilium/cilium/pkg/k8s/client"
 	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
+	slim_metav1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/apis/meta/v1"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/labelsfilter"
 	"github.com/cilium/cilium/pkg/lock"
+	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/mac"
 	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
 	"github.com/cilium/cilium/pkg/option"
-	"github.com/cilium/cilium/pkg/proxy"
 	"github.com/cilium/cilium/pkg/resiliency"
 	"github.com/cilium/cilium/pkg/time"
 )
@@ -209,7 +210,7 @@ func (d *Daemon) fetchK8sMetadataForEndpointFromPod(p *slim_corev1.Pod) (*endpoi
 		return nil, err
 	}
 
-	containerPorts, lbls := k8s.GetPodMetadata(ns, p)
+	containerPorts, lbls := k8s.GetPodMetadata(logging.DefaultSlogLogger, ns, p)
 	k8sLbls := labels.Map2Labels(lbls, labels.LabelSourceK8s)
 	identityLabels, infoLabels := labelsfilter.Filter(k8sLbls)
 	return &endpoint.K8sMetadata{
@@ -224,6 +225,15 @@ type cachedEndpointMetadataFetcher struct {
 }
 
 func (cemf *cachedEndpointMetadataFetcher) FetchNamespace(nsName string) (*slim_corev1.Namespace, error) {
+	// If network policies are disabled, labels are not needed, the namespace
+	// watcher is not running, and a namespace containing only the name is returned.
+	if !option.NetworkPolicyEnabled(option.Config) {
+		return &slim_corev1.Namespace{
+			ObjectMeta: slim_metav1.ObjectMeta{
+				Name: nsName,
+			},
+		}, nil
+	}
 	return cemf.k8sWatcher.GetCachedNamespace(nsName)
 }
 
@@ -395,7 +405,7 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
 	apiLabels := labels.NewLabelsFromModel(epTemplate.Labels)
 	epTemplate.Labels = nil
 
-	ep, err := endpoint.NewEndpointFromChangeModel(d.ctx, owner, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC, epTemplate)
+	ep, err := endpoint.NewEndpointFromChangeModel(d.ctx, owner, d.policyMapFactory, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC, epTemplate)
 	if err != nil {
 		return invalidDataError(ep, fmt.Errorf("unable to parse endpoint parameters: %w", err))
 	}
@@ -706,7 +716,7 @@ func patchEndpointIDHandler(d *Daemon, params PatchEndpointIDParams) middleware.
 
 	// Validate the template. Assignment afterwards is atomic.
 	// Note: newEp's labels are ignored.
-	newEp, err2 := endpoint.NewEndpointFromChangeModel(d.ctx, d, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC, epTemplate)
+	newEp, err2 := endpoint.NewEndpointFromChangeModel(d.ctx, d, d.policyMapFactory, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC, epTemplate)
 	if err2 != nil {
 		r.Error(err2, PutEndpointIDInvalidCode)
 		return api.Error(PutEndpointIDInvalidCode, err2)
@@ -1179,14 +1189,15 @@ func (d *Daemon) QueueEndpointBuild(ctx context.Context, epID uint64) (func(), e
 }
 
 func (d *Daemon) GetDNSRules(epID uint16) restore.DNSRules {
-	if proxy.DefaultDNSProxy == nil {
+	dnsProxy := d.dnsProxy.Get()
+	if dnsProxy == nil {
 		return nil
 	}
 
 	// We get the latest consistent view on the DNS rules by getting handle to the latest
 	// coherent state of the selector cache
 	version := d.policy.GetSelectorCache().GetVersionHandle()
-	rules, err := proxy.DefaultDNSProxy.GetRules(version, epID)
+	rules, err := dnsProxy.GetRules(version, epID)
 	version.Close()
 
 	if err != nil {
@@ -1197,9 +1208,10 @@ func (d *Daemon) GetDNSRules(epID uint16) restore.DNSRules {
 }
 
 func (d *Daemon) RemoveRestoredDNSRules(epID uint16) {
-	if proxy.DefaultDNSProxy == nil {
+	dnsProxy := d.dnsProxy.Get()
+	if dnsProxy == nil {
 		return
 	}
 
-	proxy.DefaultDNSProxy.RemoveRestoredRules(epID)
+	dnsProxy.RemoveRestoredRules(epID)
 }

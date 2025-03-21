@@ -87,7 +87,7 @@
     "^make -C Documentation update-helm-values$",
     "^make generate-k8s-api$",
     "^make manifests$",
-    "^make GO='RUN_AS_NONROOT=1 contrib/scripts/builder.sh go' generate-apis$"
+    "^make GO='contrib/scripts/builder.sh go' generate-apis$"
   ],
   "assignAutomerge": true,
   "packageRules": [
@@ -175,6 +175,16 @@
       matchBaseBranches: [
         "main"
       ]
+    },
+    {
+      // Disabling updating quay.io/lvh-images/kind until issue https://github.com/cilium/cilium/issues/38058 is fixed.
+      "matchDepNames": [
+        "quay.io/lvh-images/kind",
+      ],
+      "paths": [
+        ".github/workflows/conformance-runtime.yaml",
+      ],
+      "enabled": false
     },
     {
       // Avoid updating patch releases of golang in go.mod
@@ -546,7 +556,7 @@
       ],
       "postUpgradeTasks": {
         "commands": [
-          "make GO='RUN_AS_NONROOT=1 contrib/scripts/builder.sh go' generate-apis"
+          "make GO='contrib/scripts/builder.sh go' generate-apis"
         ],
         "executionMode": "update"
       }
@@ -559,7 +569,7 @@
       ],
       "postUpgradeTasks": {
         "commands": [
-          "make GO='RUN_AS_NONROOT=1 contrib/scripts/builder.sh go' generate-apis"
+          "make GO='contrib/scripts/builder.sh go' generate-apis"
         ],
         "executionMode": "update"
       }
@@ -571,8 +581,6 @@
       "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)-(?<revision>.*)$",
       "allowedVersions": "/^v1\\.31\\.([0-9]+)-([0-9]+)-.*$/",
       "matchBaseBranches": [
-        "v1.17",
-        "v1.16",
         "v1.15",
       ]
     },
@@ -582,6 +590,17 @@
       ],
       "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)-(?<revision>.*)$",
       "allowedVersions": "/^v1\\.32\\.([0-9]+)-([0-9]+)-.*$/",
+      "matchBaseBranches": [
+        "v1.17",
+        "v1.16",
+      ]
+    },
+    {
+      "matchDepNames": [
+        "quay.io/cilium/cilium-envoy"
+      ],
+      "versioning": "regex:v(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)-(?<build>\\d+)-(?<revision>.*)$",
+      "allowedVersions": "/^v1\\.33\\.([0-9]+)-([0-9]+)-.*$/",
       "matchBaseBranches": [
         "main",
       ]

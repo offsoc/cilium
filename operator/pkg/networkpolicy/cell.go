@@ -11,6 +11,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/hive/job"
@@ -113,7 +114,10 @@ func (pv *policyValidator) handleCNPEvent(ctx context.Context, event resource.Ev
 	}
 
 	pol := event.Object
-	log := pv.params.Logger.With(logfields.K8sNamespace, pol.Namespace, logfields.CiliumNetworkPolicyName, pol.Name)
+	log := pv.params.Logger.With(
+		logfields.K8sNamespace, pol.Namespace,
+		logfields.CiliumNetworkPolicyName, pol.Name,
+	)
 
 	var errs error
 	if pol.Spec != nil {
@@ -160,7 +164,10 @@ func (pv *policyValidator) handleCCNPEvent(ctx context.Context, event resource.E
 	}
 
 	pol := event.Object
-	log := pv.params.Logger.With(logfields.K8sNamespace, pol.Namespace, logfields.CiliumClusterwideNetworkPolicyName, pol.Name)
+	log := pv.params.Logger.With(
+		logfields.K8sNamespace, pol.Namespace,
+		logfields.CiliumClusterwideNetworkPolicyName, pol.Name,
+	)
 
 	var errs error
 	if pol.Spec != nil {
@@ -228,7 +235,7 @@ func updateCondition(conditions []cilium_api_v2.NetworkPolicyCondition, errs err
 		Message:            message,
 	}
 
-	out := append([]cilium_api_v2.NetworkPolicyCondition{}, conditions...)
+	out := slices.Clone(conditions)
 
 	if foundIdx >= 0 {
 		// If the status did not change (just the message), don't bump the

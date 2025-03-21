@@ -14,7 +14,6 @@ cilium-operator [flags]
       --alibaba-cloud-vpc-id string                          Specific VPC ID for AlibabaCloud ENI. If not set use same VPC as operator
       --auto-create-cilium-pod-ip-pools map                  Automatically create CiliumPodIPPool resources on startup. Specify pools in the form of <pool>=ipv4-cidrs:<cidr>,[<cidr>...];ipv4-mask-size:<size> (multiple pools can also be passed by repeating the CLI flag)
       --aws-enable-prefix-delegation                         Allows operator to allocate prefixes to ENIs instead of individual IP addresses
-      --aws-instance-limit-mapping map                       Add or overwrite mappings of AWS instance limit in the form of {"AWS instance type": "Maximum Network Interfaces","IPv4 Addresses per Interface","IPv6 Addresses per Interface"}. cli example: --aws-instance-limit-mapping=a1.medium=2,4,4 --aws-instance-limit-mapping=a2.somecustomflavor=4,5,6 configmap example: {"a1.medium": "2,4,4", "a2.somecustomflavor": "4,5,6"}
       --aws-release-excess-ips                               Enable releasing excess free IP addresses from AWS ENI.
       --aws-use-primary-address                              Allows for using primary address of the ENI for allocations on the node
       --azure-resource-group string                          Resource group to use for Azure IPAM
@@ -99,7 +98,7 @@ cilium-operator [flags]
       --ingress-shared-lb-service-name string                Name of shared LB service name for Ingress. (default "cilium-ingress")
       --instance-tags-filter map                             EC2 Instance tags in the form of k1=v1,k2=v2 (multiple k/v pairs can also be passed by repeating the CLI flag
       --ipam string                                          Backend to use for IPAM (default "cluster-pool")
-      --k8s-api-server string                                Kubernetes API server URL
+      --k8s-api-server-urls strings                          Kubernetes API server URLs
       --k8s-client-connection-keep-alive duration            Configures the keep alive duration of K8s client connections. K8 client is disabled if the value is set to 0 (default 30s)
       --k8s-client-connection-timeout duration               Configures the timeout of K8s client connections. K8s client is disabled if the value is set to 0 (default 30s)
       --k8s-heartbeat-timeout duration                       Configures the timeout for api-server heartbeat, set to 0 to disable (default 30s)
@@ -147,7 +146,6 @@ cilium-operator [flags]
       --synchronize-k8s-services                             Synchronize Kubernetes services to kvstore (default true)
       --taint-sync-workers int                               Number of workers used to synchronize node tains and conditions (default 10)
       --unmanaged-pod-watcher-interval int                   Interval to check for unmanaged kube-dns pods (0 to disable) (default 15)
-      --update-ec2-adapter-limit-via-api                     Use the EC2 API to update the instance type to adapter limits (default true)
       --validate-network-policy                              Whether to enable or disable the informational network policy validator (default true)
       --version                                              Print version information
 ```

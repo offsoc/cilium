@@ -156,6 +156,8 @@ jobs:
           fi
 
           CONNECTIVITY_TEST_DEFAULTS="--test-concurrency=5 \
+            --log-code-owners --code-owners=${CILIUM_CLI_CODE_OWNERS_PATHS} \
+            --exclude-code-owners=${CILIUM_CLI_EXCLUDE_OWNERS} \
             --flow-validation=disabled --hubble=false --collect-sysdump-on-failure \
             --external-target bing.com. --external-cidr 8.0.0.0/8 --external-ip 8.8.4.4 --external-other-ip 8.8.8.8"
 
@@ -265,11 +267,13 @@ jobs:
           wait: 0
 
       - name: Install Cilium CLI
-        uses: cilium/cilium-cli@1432ef0e4e0cd766f5c1ee0544759d7a31cd32b2 # v0.17.0
+        uses: cilium/cilium-cli@0caa9e5cbfe3a80a1fd6bbc1f5f9926da35b0373 # v0.18.2
         with:
           skip-build: ${{ env.CILIUM_CLI_SKIP_BUILD }}
           image-repo: ${{ env.CILIUM_CLI_IMAGE_REPO }}
           image-tag: ${{ steps.vars.outputs.sha }}
+          repository: ${{ env.CILIUM_CLI_RELEASE_REPO }}
+          release-version: ${{ env.CILIUM_CLI_VERSION }}
 
       - name: Wait for images to be available
         timeout-minutes: 30
@@ -336,7 +340,6 @@ jobs:
       - name: Cilium connectivity test
         run: |
           cilium connectivity test ${{ steps.vars.outputs.connectivity_test_defaults }} \
-            --log-code-owners \
             --junit-file "cilium-junits/${{ env.job_name }} (${{ join(matrix.*, ', ') }}).xml" --junit-property github_job_step="Run connectivity test"
 
       - name: Features tested
@@ -355,7 +358,7 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ !success() }}
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: cilium-sysdumps-${{ join(matrix.*, '-') }}
           path: cilium-sysdump-*.zip
@@ -363,7 +366,7 @@ jobs:
 
       - name: Upload JUnits [junit]
         if: ${{ always() }}
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: cilium-junits-${{ join(matrix.*, '-') }}
           path: cilium-junits/*.xml
@@ -371,7 +374,7 @@ jobs:
 
       - name: Upload features tested
         if: ${{ always() }}
-        uses: actions/upload-artifact@65c4c4a1ddee5b72f698fdd19549f0f0fb45cf08 # v4.6.0
+        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
         with:
           name: features-tested-${{ join(matrix.*, '-') }}
           path: ${{ env.job_name }}*.json
