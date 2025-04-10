@@ -6,10 +6,10 @@ package k8s
 import (
 	"fmt"
 	"log/slog"
+	"reflect"
 	"sync"
 
 	"github.com/cilium/hive/cell"
-	"github.com/cloudflare/cfssl/log"
 	"github.com/spf13/pflag"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8sRuntime "k8s.io/apimachinery/pkg/runtime"
@@ -30,6 +30,7 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/types"
 	"github.com/cilium/cilium/pkg/k8s/utils"
 	"github.com/cilium/cilium/pkg/k8s/version"
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/promise"
 )
@@ -73,8 +74,8 @@ func namespaceIndexFunc(obj any) ([]string, error) {
 	return []string{object.GetNamespace()}, nil
 }
 
-func GetIdentitiesByKeyFunc(keyFunc func(map[string]string) allocator.AllocatorKey) func(obj interface{}) ([]string, error) {
-	return func(obj interface{}) ([]string, error) {
+func GetIdentitiesByKeyFunc(keyFunc func(map[string]string) allocator.AllocatorKey) func(obj any) ([]string, error) {
+	return func(obj any) ([]string, error) {
 		if identity, ok := obj.(*cilium_api_v2.CiliumIdentity); ok {
 			return []string{keyFunc(identity.SecurityLabels).GetKey()}, nil
 		}
@@ -90,6 +91,7 @@ func GetIdentitiesByKeyFunc(keyFunc func(map[string]string) allocator.AllocatorK
 type CiliumResourceParams struct {
 	cell.In
 
+	Logger         *slog.Logger
 	Lifecycle      cell.Lifecycle
 	ClientSet      client.Clientset
 	CRDSyncPromise promise.Promise[synced.CRDSync] `optional:"true"`
@@ -310,6 +312,7 @@ func EndpointsResource(logger *slog.Logger, lc cell.Lifecycle, cfg Config, cs cl
 	}
 
 	lw := &endpointsListerWatcher{
+		logger:                      logger,
 		cs:                          cs,
 		enableK8sEndpointSlice:      cfg.EnableK8sEndpointSlice,
 		endpointsOptsModifiers:      append(opts, endpointsOptsModifier),
@@ -330,6 +333,7 @@ func EndpointsResource(logger *slog.Logger, lc cell.Lifecycle, cfg Config, cs cl
 // performs the capability check on first call to List/Watch. This allows constructing
 // the resource before the client has been started and capabilities have been probed.
 type endpointsListerWatcher struct {
+	logger                      *slog.Logger
 	cs                          client.Clientset
 	enableK8sEndpointSlice      bool
 	endpointsOptsModifiers      []func(*metav1.ListOptions)
@@ -349,13 +353,13 @@ func (lw *endpointsListerWatcher) getListerWatcher() cache.ListerWatcher {
 	lw.once.Do(func() {
 		if lw.enableK8sEndpointSlice && version.Capabilities().EndpointSlice {
 			if version.Capabilities().EndpointSliceV1 {
-				log.Info("Using discoveryv1.EndpointSlice")
+				lw.logger.Info("Using discoveryv1.EndpointSlice")
 				lw.cachedListerWatcher = utils.ListerWatcherFromTyped[*slim_discoveryv1.EndpointSliceList](
 					lw.cs.Slim().DiscoveryV1().EndpointSlices(""),
 				)
 				lw.sourceObj = &slim_discoveryv1.EndpointSlice{}
 			} else {
-				log.Info("Using discoveryv1beta1.EndpointSlice")
+				lw.logger.Info("Using discoveryv1beta1.EndpointSlice")
 				lw.cachedListerWatcher = utils.ListerWatcherFromTyped[*slim_discoveryv1beta1.EndpointSliceList](
 					lw.cs.Slim().DiscoveryV1beta1().EndpointSlices(""),
 				)
@@ -363,7 +367,7 @@ func (lw *endpointsListerWatcher) getListerWatcher() cache.ListerWatcher {
 			}
 			lw.cachedListerWatcher = utils.ListerWatcherWithModifiers(lw.cachedListerWatcher, lw.endpointSlicesOptsModifiers...)
 		} else {
-			log.Info("Using v1.Endpoints")
+			lw.logger.Info("Using v1.Endpoints")
 			lw.cachedListerWatcher = utils.ListerWatcherFromTyped[*slim_corev1.EndpointsList](
 				lw.cs.Slim().CoreV1().Endpoints(""),
 			)
@@ -390,7 +394,10 @@ func transformEndpoint(logger *slog.Logger, obj any) (any, error) {
 		return ParseEndpointSliceV1(logger, obj), nil
 	case *slim_discoveryv1beta1.EndpointSlice:
 		return ParseEndpointSliceV1Beta1(obj), nil
+	case cache.DeletedFinalStateUnknown:
+		return obj, nil
 	default:
+		logger.Error("Unknown endpoint or endpoint slice object", logfields.Name, reflect.TypeOf(obj))
 		return nil, fmt.Errorf("%T not a known endpoint or endpoint slice object", obj)
 	}
 }
@@ -409,7 +416,9 @@ func CiliumSlimEndpointResource(params CiliumResourceParams, _ *node.LocalNodeSt
 		opts...,
 	)
 	indexers := cache.Indexers{
-		"localNode": ciliumEndpointLocalPodIndexFunc,
+		"localNode": func(obj any) ([]string, error) {
+			return ciliumEndpointLocalPodIndexFunc(params.Logger, obj)
+		},
 	}
 	return resource.New[*types.CiliumEndpoint](params.Lifecycle, lw,
 		resource.WithLazyTransform(func() k8sRuntime.Object {
@@ -423,16 +432,16 @@ func CiliumSlimEndpointResource(params CiliumResourceParams, _ *node.LocalNodeSt
 
 // ciliumEndpointLocalPodIndexFunc is an IndexFunc that indexes only local
 // CiliumEndpoints, by their local Node IP.
-func ciliumEndpointLocalPodIndexFunc(obj any) ([]string, error) {
+func ciliumEndpointLocalPodIndexFunc(logger *slog.Logger, obj any) ([]string, error) {
 	cep, ok := obj.(*types.CiliumEndpoint)
 	if !ok {
 		return nil, fmt.Errorf("unexpected object type: %T", obj)
 	}
 	indices := []string{}
 	if cep.Networking == nil {
-		log.Debug(
+		logger.Debug(
 			"cannot index CiliumEndpoint by node without network status",
-			slog.Any("ciliumendpoint", cep.GetNamespace()+"/"+cep.GetName()),
+			logfields.Name, cep.GetNamespace()+"/"+cep.GetName(),
 		)
 		return nil, nil
 	}

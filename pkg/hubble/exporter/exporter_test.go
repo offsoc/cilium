@@ -7,6 +7,7 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
 	"testing"
 
 	"github.com/cilium/fake"
@@ -27,6 +28,17 @@ func (bwc *bytesWriteCloser) Close() error { return nil }
 type ioWriteCloser struct{ io.Writer }
 
 func (wc *ioWriteCloser) Close() error { return nil }
+
+func TestNewExporterLogOptionsJSON(t *testing.T) {
+	// when slog encounters a marshalling error, it stores it in the field with
+	// the prefix '!ERROR'. Example:
+	//   {..., "options":"!ERROR:json: unsupported type: exporter.NewWriterFunc"}
+	var buf bytes.Buffer
+	log := slog.New(slog.NewJSONHandler(&buf, nil))
+	_, err := NewExporter(log)
+	assert.NoError(t, err)
+	assert.NotContains(t, buf.String(), "!ERROR")
+}
 
 func TestExporter(t *testing.T) {
 	// override node name for unit test.
@@ -51,16 +63,15 @@ func TestExporter(t *testing.T) {
 	log := hivetest.Logger(t)
 
 	opts := DefaultOptions
-	opts.NewWriterFunc = func() (io.WriteCloser, error) {
+	opts.newWriterFunc = func() (io.WriteCloser, error) {
 		return buf, nil
 	}
 
 	exporter, err := newExporter(log, opts)
 	assert.NoError(t, err)
 
-	ctx := context.Background()
 	for _, ev := range events {
-		err := exporter.Export(ctx, ev)
+		err := exporter.Export(t.Context(), ev)
 		assert.NoError(t, err)
 
 	}
@@ -122,7 +133,7 @@ func TestExporterWithFilters(t *testing.T) {
 	log := hivetest.Logger(t)
 
 	opts := DefaultOptions
-	opts.NewWriterFunc = func() (io.WriteCloser, error) {
+	opts.newWriterFunc = func() (io.WriteCloser, error) {
 		return buf, nil
 	}
 
@@ -172,7 +183,7 @@ func TestEventToExportEvent(t *testing.T) {
 	log := hivetest.Logger(t)
 
 	opts := DefaultOptions
-	opts.NewWriterFunc = func() (io.WriteCloser, error) {
+	opts.newWriterFunc = func() (io.WriteCloser, error) {
 		return buf, nil
 	}
 
@@ -254,7 +265,7 @@ func TestExporterWithFieldMask(t *testing.T) {
 	log := hivetest.Logger(t)
 
 	opts := DefaultOptions
-	opts.NewWriterFunc = func() (io.WriteCloser, error) {
+	opts.newWriterFunc = func() (io.WriteCloser, error) {
 		return buf, nil
 	}
 	for _, opt := range []Option{
@@ -267,11 +278,8 @@ func TestExporterWithFieldMask(t *testing.T) {
 	exporter, err := newExporter(log, opts)
 	assert.NoError(t, err)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
 	for _, ev := range events {
-		err := exporter.Export(ctx, ev)
+		err := exporter.Export(t.Context(), ev)
 		assert.NoError(t, err)
 	}
 
@@ -318,7 +326,7 @@ func TestExporterOnExportEvent(t *testing.T) {
 	log := hivetest.Logger(t)
 
 	opts := DefaultOptions
-	opts.NewWriterFunc = func() (io.WriteCloser, error) {
+	opts.newWriterFunc = func() (io.WriteCloser, error) {
 		return buf, nil
 	}
 	for _, opt := range []Option{
@@ -438,7 +446,7 @@ func BenchmarkExporter(b *testing.B) {
 	log := hivetest.Logger(b)
 
 	opts := DefaultOptions
-	opts.NewWriterFunc = func() (io.WriteCloser, error) {
+	opts.newWriterFunc = func() (io.WriteCloser, error) {
 		return buf, nil
 	}
 	for _, opt := range []Option{
@@ -459,11 +467,9 @@ func BenchmarkExporter(b *testing.B) {
 	exporter, err := newExporter(log, opts)
 	assert.NoError(b, err)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := b.Context()
 
-	b.StartTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		event := &allowEvent
 		if i%10 == 0 { // 10% doesn't match allow filter
 			event = &noAllowEvent

@@ -10,6 +10,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
@@ -146,16 +147,11 @@ func (n *Node) PrepareIPRelease(excessIPs int, scopedLog *slog.Logger) *ipam.Rel
 	n.mutex.Lock()
 	defer n.mutex.Unlock()
 
-	// Needed for selecting the same ENI to release IPs from
-	// when more than one ENI qualifies for release
-	eniIds := make([]string, 0, len(n.enis))
-	for k := range n.enis {
-		eniIds = append(eniIds, k)
-	}
-	slices.Sort(eniIds)
+	// Needs to be sorted for selecting the same ENI to release IPs from
+	// when more than one ENI qualifies for release.
 	// Iterate over ENIs on this node, select the ENI with the most
 	// addresses available for release
-	for _, eniId := range eniIds {
+	for _, eniId := range slices.Sorted(maps.Keys(n.enis)) {
 		e := n.enis[eniId]
 
 		// IP release for prefixes is not currently supported. Will skip releasing from this ENI
@@ -351,6 +347,7 @@ func (n *Node) getSecurityGroupIDs(ctx context.Context, eniSpec eniTypes.ENISpec
 			for _, secGroup := range securityGroups {
 				groups = append(groups, secGroup.ID)
 			}
+			slices.Sort(groups)
 			return groups, nil
 		}
 	}
@@ -370,6 +367,8 @@ func (n *Node) getSecurityGroupIDs(ctx context.Context, eniSpec eniTypes.ENISpec
 	if securityGroups == nil {
 		return nil, errors.New("failed to get security group ids")
 	}
+
+	slices.Sort(securityGroups)
 
 	return securityGroups, nil
 }
@@ -515,7 +514,7 @@ func (n *Node) CreateInterface(ctx context.Context, allocation *ipam.AllocationA
 	}
 
 	var attachmentID string
-	for attachRetries := 0; attachRetries < maxAttachRetries; attachRetries++ {
+	for range maxAttachRetries {
 		attachmentID, err = n.manager.api.AttachNetworkInterface(ctx, index, n.node.InstanceID(), eniID)
 
 		// The index is already in use, this can happen if the local

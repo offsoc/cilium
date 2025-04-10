@@ -213,6 +213,9 @@ func (t *Test) setup(ctx context.Context) error {
 	}
 
 	if t.installIPRoutesFromOutsideToPodCIDRs {
+		// Attempt to cleanup any leftover routes in case tests previously
+		// didn't cleanup correctly.
+		t.Context().modifyStaticRoutesForNodesWithoutCilium(ctx, "del")
 		if err := t.Context().modifyStaticRoutesForNodesWithoutCilium(ctx, "add"); err != nil {
 			return fmt.Errorf("installing static routes: %w", err)
 		}
@@ -794,6 +797,17 @@ func (t *Test) NewAction(s Scenario, name string, src *Pod, dst TestPeer, ipFam 
 // is created for, name should be a visually-distinguishable name.
 func (t *Test) NewGenericAction(s Scenario, name string) *Action {
 	return t.NewAction(s, name, nil, nil, features.IPFamilyAny)
+}
+
+// Scenarios returns a slice of all Scenarios belonging to the Test.
+func (t *Test) Scenarios() []Scenario {
+	var out []Scenario
+
+	for s := range t.scenarios {
+		out = append(out, s)
+	}
+
+	return out
 }
 
 // failedActions returns a list of failed Actions in the Test.

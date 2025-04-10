@@ -11,7 +11,6 @@ import (
 	"fmt"
 	"log/slog"
 
-	"github.com/cloudflare/cfssl/log"
 	apiextclientset "k8s.io/apiextensions-apiserver/pkg/client/clientset/clientset"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/fields"
@@ -148,8 +147,8 @@ func SyncCRDs(ctx context.Context, logger *slog.Logger, clientset client.Clients
 		&slim_metav1.PartialObjectMetadata{},
 		0,
 		cache.ResourceEventHandlerFuncs{
-			AddFunc:    func(obj interface{}) { crds.add(obj) },
-			DeleteFunc: func(obj interface{}) { crds.remove(obj) },
+			AddFunc:    func(obj any) { crds.add(obj) },
+			DeleteFunc: func(obj any) { crds.remove(obj) },
 		},
 		nil,
 	)
@@ -224,13 +223,13 @@ func SyncCRDs(ctx context.Context, logger *slog.Logger, clientset client.Clients
 		case <-ticker.C:
 			if crds.isSynced() {
 				ticker.Stop()
-				log.Info("All Cilium CRDs have been found and are available")
+				logger.Info("All Cilium CRDs have been found and are available")
 				return nil
 			}
 			count++
 			if count == 20 {
 				count = 0
-				log.Info(
+				logger.Info(
 					"Still waiting for Cilium Operator to register CRDs",
 					logfields.CRDs, crds.unSynced(),
 				)
@@ -239,7 +238,7 @@ func SyncCRDs(ctx context.Context, logger *slog.Logger, clientset client.Clients
 	}
 }
 
-func (s *crdState) add(obj interface{}) {
+func (s *crdState) add(obj any) {
 	if pom := informer.CastInformerEvent[slim_metav1.PartialObjectMetadata](s.logger, obj); pom != nil {
 		s.Lock()
 		s.m[CRDResourceName(pom.GetName())] = true
@@ -247,7 +246,7 @@ func (s *crdState) add(obj interface{}) {
 	}
 }
 
-func (s *crdState) remove(obj interface{}) {
+func (s *crdState) remove(obj any) {
 	if pom := informer.CastInformerEvent[slim_metav1.PartialObjectMetadata](s.logger, obj); pom != nil {
 		s.Lock()
 		s.m[CRDResourceName(pom.GetName())] = false

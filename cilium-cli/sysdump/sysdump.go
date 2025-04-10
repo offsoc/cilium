@@ -2193,21 +2193,21 @@ func collectCiliumV2OrV2Alpha1Resource(collector *Collector, resource, title str
 	}
 }
 
-func (c *Collector) log(msg string, args ...interface{}) {
+func (c *Collector) log(msg string, args ...any) {
 	fmt.Fprintf(c.logWriter, msg+"\n", args...)
 }
 
-func (c *Collector) logDebug(msg string, args ...interface{}) {
+func (c *Collector) logDebug(msg string, args ...any) {
 	if c.Options.Debug {
 		c.log("🩺 "+msg, args...)
 	}
 }
 
-func (c *Collector) logTask(msg string, args ...interface{}) {
+func (c *Collector) logTask(msg string, args ...any) {
 	c.log("🔍 "+msg, args...)
 }
 
-func (c *Collector) logWarn(msg string, args ...interface{}) {
+func (c *Collector) logWarn(msg string, args ...any) {
 	c.log("⚠️ "+msg, args...)
 }
 
@@ -2510,8 +2510,7 @@ func (c *Collector) submitSpireEntriesTasks(pods []*corev1.Pod) error {
 }
 
 func extractGopsPID(output string) (string, error) {
-	entries := strings.Split(output, "\n")
-	for _, entry := range entries {
+	for entry := range strings.SplitSeq(output, "\n") {
 		match := gopsRegexp.FindStringSubmatch(entry)
 		if len(match) > 0 {
 			result := make(map[string]string)
@@ -2551,8 +2550,7 @@ func (c *Collector) SubmitCniConflistSubtask(pods []*corev1.Pod, containerName s
 			if err != nil {
 				return err
 			}
-			cniConfigFileNames := strings.Split(strings.TrimSpace(outputStr.String()), "\n")
-			for _, cniFileName := range cniConfigFileNames {
+			for cniFileName := range strings.SplitSeq(strings.TrimSpace(outputStr.String()), "\n") {
 				cniConfigPath := path.Join(c.Options.CNIConfigDirectory, cniFileName)
 				if err := c.WithFileSink(fmt.Sprintf(cniConfigFileName, cniFileName, p.GetName()), func(out io.Writer) error {
 					return c.Client.ExecInPodWithWriters(ctx, nil, p.GetNamespace(), p.GetName(), containerName, []string{

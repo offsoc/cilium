@@ -39,7 +39,7 @@ import (
 
 const (
 	concurrentRequests    = 10
-	tolerancePercentage   = 5.0
+	tolerancePercentage   = 15.0
 	totalRequests         = 500.0
 	numDistributionChecks = 5
 )
@@ -211,7 +211,7 @@ func testMirroredRequestsDistribution(t *testing.T, suite *suite.ConformanceTest
 			mu.Unlock()
 
 			return true
-		}, 60*time.Second, time.Millisecond*100, fmt.Sprintf(`Couldn't verify the logs for "%s/%s"`, mirrorPod.Namespace, mirrorPod.Name))
+		}, 60*time.Second, time.Millisecond*100, `Couldn't verify the logs for "%s/%s"`, mirrorPod.Namespace, mirrorPod.Name)
 	}
 
 	var errs []error

@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strconv"
 	"strings"
@@ -154,8 +155,7 @@ func nodeStatusFromText(str string) (models.EncryptionStatus, error) {
 			Interfaces: make([]*models.WireguardInterface, 0),
 		},
 	}
-	lines := strings.Split(str, "\n")
-	for _, line := range lines {
+	for line := range strings.SplitSeq(str, "\n") {
 		parts := strings.Split(line, ":")
 		if len(parts) < 2 {
 			continue
@@ -308,11 +308,7 @@ func printClusterStatus(cs clusterStatus, format string) error {
 	if cs.EncIPsecNodeCount > 0 {
 		builder.WriteString(fmt.Sprintf("Encryption: IPsec (%d/%d nodes)\n", cs.EncIPsecNodeCount, cs.TotalNodeCount))
 		if len(cs.IPsecKeysInUseNodeCount) > 0 {
-			keys := make([]int64, 0, len(cs.IPsecKeysInUseNodeCount))
-			for k := range cs.IPsecKeysInUseNodeCount {
-				keys = append(keys, k)
-			}
-			slices.Sort(keys)
+			keys := slices.Sorted(maps.Keys(cs.IPsecKeysInUseNodeCount))
 			keyStrs := make([]string, 0, len(keys))
 			for _, k := range keys {
 				keyStrs = append(keyStrs, fmt.Sprintf("%d on %d/%d", k, cs.IPsecKeysInUseNodeCount[k], cs.TotalNodeCount))

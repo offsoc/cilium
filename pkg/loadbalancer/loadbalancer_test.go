@@ -686,10 +686,47 @@ func TestServiceFlags_String(t *testing.T) {
 	}
 }
 
+func TestServiceNameYAML(t *testing.T) {
+	tests := []struct {
+		name ServiceName
+		want string
+	}{
+		{
+			name: ServiceName{},
+			want: "/",
+		},
+		{
+			name: ServiceName{Name: "foo"},
+			want: "/foo",
+		},
+		{
+			name: ServiceName{Name: "foo", Namespace: "bar"},
+			want: "bar/foo",
+		},
+		{
+			name: ServiceName{Name: "foo", Namespace: "bar", Cluster: "quux"},
+			want: "quux/bar/foo",
+		},
+	}
+	for _, test := range tests {
+		out, err := yaml.Marshal(test.name)
+		if assert.NoError(t, err, "Marshal") {
+			s := strings.TrimSpace(string(out))
+			assert.Equal(t, test.want, s)
+
+			var name ServiceName
+			err := yaml.Unmarshal(out, &name)
+			if assert.NoError(t, err, "Unmarshal") {
+				assert.True(t, test.name.Equal(name), "Equal")
+			}
+		}
+	}
+}
+
 func benchmarkHash(b *testing.B, addr *L3n4Addr) {
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		addr.Hash()
 	}
 }
@@ -716,9 +753,9 @@ func BenchmarkL3n4Addr_Hash_IPv6_Max(b *testing.B) {
 
 func benchmarkString(b *testing.B, addr *L3n4Addr) {
 	b.ReportAllocs()
-	b.ResetTimer()
+
 	var length int
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		length += len(addr.String())
 	}
 }
@@ -735,8 +772,8 @@ func BenchmarkL3n4Addr_String_IPv6_Max(b *testing.B) {
 
 func benchmarkStringWithProtocol(b *testing.B, addr *L3n4Addr) {
 	b.ReportAllocs()
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		addr.StringWithProtocol()
 	}
 }

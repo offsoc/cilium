@@ -650,7 +650,7 @@ const (
 	EgressGatewayPolicyMapEntriesName = "egress-gateway-policy-map-max"
 
 	// LogSystemLoadConfigName is the name of the option to enable system
-	// load loggging
+	// load logging
 	LogSystemLoadConfigName = "log-system-load"
 
 	// DisableCiliumEndpointCRDName is the name of the option to disable
@@ -761,7 +761,7 @@ const (
 	// IPSecKeyFileName is the name of the option for ipsec key file
 	IPSecKeyFileName = "ipsec-key-file"
 
-	// EnableIPSecEncrytpedOverlay is the name of the option which enables
+	// EnableIPSecEncryptedOverlay is the name of the option which enables
 	// the EncryptedOverlay feature.
 	//
 	// This feature will encrypt overlay traffic before it leaves the cluster.
@@ -793,7 +793,7 @@ const (
 	// EnableEncryptionStrictMode is the name of the option to enable strict encryption mode.
 	EnableEncryptionStrictMode = "enable-encryption-strict-mode"
 
-	// EncryptionStrictModeCIDR is the CIDR in which the strict ecryption mode should be enforced.
+	// EncryptionStrictModeCIDR is the CIDR in which the strict encryption mode should be enforced.
 	EncryptionStrictModeCIDR = "encryption-strict-mode-cidr"
 
 	// EncryptionStrictModeAllowRemoteNodeIdentities allows dynamic lookup of remote node identities.
@@ -801,7 +801,7 @@ const (
 	// or direct routing is used and the node CIDR and pod CIDR overlap.
 	EncryptionStrictModeAllowRemoteNodeIdentities = "encryption-strict-mode-allow-remote-node-identities"
 
-	// WireguardPersistentKeepalivee controls Wireguard PersistentKeepalive option. Set 0 to disable.
+	// WireguardPersistentKeepalive controls Wireguard PersistentKeepalive option. Set 0 to disable.
 	WireguardPersistentKeepalive = "wireguard-persistent-keepalive"
 
 	// NodeEncryptionOptOutLabels is the name of the option for the node-to-node encryption opt-out labels
@@ -1049,10 +1049,6 @@ const (
 	// regardless of whether it's available in the pool.
 	BypassIPAvailabilityUponRestore = "bypass-ip-availability-upon-restore"
 
-	// EnableK8sTerminatingEndpoint enables the option to auto detect terminating
-	// state for endpoints in order to support graceful termination.
-	EnableK8sTerminatingEndpoint = "enable-k8s-terminating-endpoint"
-
 	// EnableVTEP enables cilium VXLAN VTEP integration
 	EnableVTEP = "enable-vtep"
 
@@ -1093,7 +1089,7 @@ const (
 	// and the max size and TTL of events in the buffers should be.
 	BPFMapEventBuffers = "bpf-map-event-buffers"
 
-	// IPAMCiliumnodeUpdateRate is the maximum rate at which the CiliumNode custom
+	// IPAMCiliumNodeUpdateRate is the maximum rate at which the CiliumNode custom
 	// resource is updated.
 	IPAMCiliumNodeUpdateRate = "ipam-cilium-node-update-rate"
 
@@ -1463,7 +1459,7 @@ type DaemonConfig struct {
 	MonitorAggregationInterval time.Duration
 
 	// MonitorAggregationFlags determines which TCP flags that the monitor
-	// aggregation ensures reports are generated for when monitor-aggragation
+	// aggregation ensures reports are generated for when monitor-aggregation
 	// is enabled. Network byte-order.
 	MonitorAggregationFlags uint16
 
@@ -1848,7 +1844,7 @@ type DaemonConfig struct {
 	// EnableEndpointRoutes enables use of per endpoint routes
 	EnableEndpointRoutes bool
 
-	// Specifies wheather to annotate the kubernetes nodes or not
+	// Specifies whether to annotate the kubernetes nodes or not
 	AnnotateK8sNode bool
 
 	// EnableNodePort enables k8s NodePort service implementation in BPF
@@ -2023,7 +2019,7 @@ type DaemonConfig struct {
 
 	// PolicyAuditMode enables non-drop mode for installed policies. In
 	// audit mode packets affected by policies will not be dropped.
-	// Policy related decisions can be checked via the poicy verdict messages.
+	// Policy related decisions can be checked via the policy verdict messages.
 	PolicyAuditMode bool
 
 	// PolicyAccounting enable policy accounting
@@ -2142,10 +2138,6 @@ type DaemonConfig struct {
 	// within IPAM upon endpoint restore and allows the use of the restored IP
 	// regardless of whether it's available in the pool.
 	BypassIPAvailabilityUponRestore bool
-
-	// EnableK8sTerminatingEndpoint enables auto-detect of terminating state for
-	// Kubernetes service endpoints.
-	EnableK8sTerminatingEndpoint bool
 
 	// EnableVTEP enable Cilium VXLAN VTEP integration
 	EnableVTEP bool
@@ -2723,8 +2715,8 @@ func (c *DaemonConfig) Validate(vp *viper.Viper) error {
 
 // ReadDirConfig reads the given directory and returns a map that maps the
 // filename to the contents of that file.
-func ReadDirConfig(dirName string) (map[string]interface{}, error) {
-	m := map[string]interface{}{}
+func ReadDirConfig(dirName string) (map[string]any, error) {
+	m := map[string]any{}
 	files, err := os.ReadDir(dirName)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("unable to read configuration directory: %w", err)
@@ -2765,7 +2757,7 @@ func ReadDirConfig(dirName string) (map[string]interface{}, error) {
 }
 
 // MergeConfig merges the given configuration map with viper's configuration.
-func MergeConfig(vp *viper.Viper, m map[string]interface{}) error {
+func MergeConfig(vp *viper.Viper, m map[string]any) error {
 	err := vp.MergeConfigMap(m)
 	if err != nil {
 		return fmt.Errorf("unable to read merge directory configuration: %w", err)
@@ -2781,7 +2773,7 @@ func MergeConfig(vp *viper.Viper, m map[string]interface{}) error {
 // Once we remove them from this function we also need to remove them from
 // daemon_main.go and warn users about the old environment variable nor the
 // option in the configuration map have any effect.
-func ReplaceDeprecatedFields(m map[string]interface{}) {
+func ReplaceDeprecatedFields(m map[string]any) {
 	deprecatedFields := map[string]string{
 		"monitor-aggregation-level":   MonitorAggregationName,
 		"ct-global-max-entries-tcp":   CTMapEntriesGlobalTCPName,
@@ -3160,7 +3152,7 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 
 	monitorAggregationFlags := vp.GetStringSlice(MonitorAggregationFlags)
 	var ctMonitorReportFlags uint16
-	for i := 0; i < len(monitorAggregationFlags); i++ {
+	for i := range monitorAggregationFlags {
 		value := strings.ToLower(monitorAggregationFlags[i])
 		flag, exists := TCPFlags[value]
 		if !exists {
@@ -3308,7 +3300,6 @@ func (c *DaemonConfig) Populate(vp *viper.Viper) {
 	c.EnableICMPRules = vp.GetBool(EnableICMPRules)
 	c.UseCiliumInternalIPForIPsec = vp.GetBool(UseCiliumInternalIPForIPsec)
 	c.BypassIPAvailabilityUponRestore = vp.GetBool(BypassIPAvailabilityUponRestore)
-	c.EnableK8sTerminatingEndpoint = vp.GetBool(EnableK8sTerminatingEndpoint)
 
 	// VTEP integration enable option
 	c.EnableVTEP = vp.GetBool(EnableVTEP)
@@ -3935,7 +3926,7 @@ func sanitizeIntParam(vp *viper.Viper, paramName string, paramDefault int) int {
 	return intParam
 }
 
-func validateConfigMapFlag(flag *pflag.Flag, key string, value interface{}) error {
+func validateConfigMapFlag(flag *pflag.Flag, key string, value any) error {
 	var err error
 	switch t := flag.Value.Type(); t {
 	case "bool":
@@ -3982,7 +3973,7 @@ func validateConfigMapFlag(flag *pflag.Flag, key string, value interface{}) erro
 }
 
 // validateConfigMap checks whether the flag exists and validate its value
-func validateConfigMap(cmd *cobra.Command, m map[string]interface{}) error {
+func validateConfigMap(cmd *cobra.Command, m map[string]any) error {
 	flags := cmd.Flags()
 
 	for key, value := range m {

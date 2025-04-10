@@ -1496,6 +1496,9 @@
         "install": {
           "type": "boolean"
         },
+        "iptablesRemoveAWSRules": {
+          "type": "boolean"
+        },
         "logFile": {
           "type": "string"
         },
@@ -1702,9 +1705,6 @@
       "type": "boolean"
     },
     "enableInternalTrafficPolicy": {
-      "type": "boolean"
-    },
-    "enableK8sTerminatingEndpoint": {
       "type": "boolean"
     },
     "enableLBIPAM": {
@@ -2038,6 +2038,9 @@
         },
         "httpRetryCount": {
           "type": "integer"
+        },
+        "httpUpstreamLingerTimeout": {
+          "type": "null"
         },
         "idleTimeoutDurationSeconds": {
           "type": "integer"
@@ -2871,6 +2874,14 @@
           },
           "type": "object"
         },
+        "networkPolicyCorrelation": {
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            }
+          },
+          "type": "object"
+        },
         "peerService": {
           "properties": {
             "clusterDomain": {
@@ -3591,6 +3602,9 @@
                 "annotations": {
                   "type": "object"
                 },
+                "labels": {
+                  "type": "object"
+                },
                 "nodePort": {
                   "type": "integer"
                 },
@@ -4113,6 +4127,9 @@
         },
         "periodSeconds": {
           "type": "integer"
+        },
+        "requireK8sConnectivity": {
+          "type": "boolean"
         }
       },
       "type": "object"
@@ -5605,6 +5622,9 @@
       "type": "string"
     },
     "tunnelSourcePortRange": {
+      "type": "string"
+    },
+    "underlayProtocol": {
       "type": "string"
     },
     "updateStrategy": {

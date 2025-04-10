@@ -70,7 +70,7 @@ func TestIncrementalUpdatesDuringPolicyGeneration(t *testing.T) {
 
 	ep := Endpoint{
 		SecurityIdentity: podID,
-		policyGetter:     &mockPolicyGetter{repo},
+		policyRepo:       repo,
 		desiredPolicy:    policy.NewEndpointPolicy(hivetest.Logger(t), repo),
 	}
 	ep.UpdateLogger(nil)
@@ -114,7 +114,7 @@ func TestIncrementalUpdatesDuringPolicyGeneration(t *testing.T) {
 
 	// simulate ipcache churn: continuously allocate IDs and push them to the policy engine.
 	go func() {
-		for i := 0; i < testfactor; i++ {
+		for i := range testfactor {
 			if i%100 == 0 {
 				t.Log(i)
 			}
@@ -173,12 +173,4 @@ func TestIncrementalUpdatesDuringPolicyGeneration(t *testing.T) {
 			break
 		}
 	}
-}
-
-type mockPolicyGetter struct {
-	repo policy.PolicyRepository
-}
-
-func (m *mockPolicyGetter) GetPolicyRepository() policy.PolicyRepository {
-	return m.repo
 }

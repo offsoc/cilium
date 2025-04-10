@@ -3,7 +3,7 @@ apiVersion: apiextensions.k8s.io/v1
 kind: CustomResourceDefinition
 metadata:
   annotations:
-    controller-gen.kubebuilder.io/version: v0.16.5
+    controller-gen.kubebuilder.io/version: v0.17.2
   name: ciliumbgpadvertisements.cilium.io
 spec:
   group: cilium.io
@@ -147,7 +147,8 @@ spec:
                     selector:
                       description: |-
                         Selector is a label selector to select objects of the type specified by AdvertisementType.
-                        If not specified, no objects of the type specified by AdvertisementType are selected for advertisement.
+                        For the PodCIDR AdvertisementType it is not applicable. For other advertisement types,
+                        if not specified, no objects of the type specified by AdvertisementType are selected for advertisement.
                       properties:
                         matchExpressions:
                           description: matchExpressions is a list of label selector
@@ -239,6 +240,11 @@ spec:
                   required:
                   - advertisementType
                   type: object
+                  x-kubernetes-validations:
+                  - message: service field is required for the 'Service' advertisementType
+                    rule: self.advertisementType != 'Service' || has(self.service)
+                  - message: selector field is not allowed for the 'PodCIDR' advertisementType
+                    rule: self.advertisementType != 'PodCIDR' || !has(self.selector)
                 type: array
             required:
             - advertisements
@@ -379,7 +385,8 @@ spec:
                     selector:
                       description: |-
                         Selector is a label selector to select objects of the type specified by AdvertisementType.
-                        If not specified, no objects of the type specified by AdvertisementType are selected for advertisement.
+                        For the PodCIDR AdvertisementType it is not applicable. For other advertisement types,
+                        if not specified, no objects of the type specified by AdvertisementType are selected for advertisement.
                       properties:
                         matchExpressions:
                           description: matchExpressions is a list of label selector
@@ -471,6 +478,11 @@ spec:
                   required:
                   - advertisementType
                   type: object
+                  x-kubernetes-validations:
+                  - message: service field is required for the 'Service' advertisementType
+                    rule: self.advertisementType != 'Service' || has(self.service)
+                  - message: selector field is not allowed for the 'PodCIDR' advertisementType
+                    rule: self.advertisementType != 'PodCIDR' || !has(self.selector)
                 type: array
             required:
             - advertisements

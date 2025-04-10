@@ -66,7 +66,7 @@ func newTestData(logger *slog.Logger) *testData {
 	td := &testData{
 		sc:                testNewSelectorCache(logger, nil),
 		repo:              NewPolicyRepository(logger, nil, &fakeCertificateManager{}, envoypolicy.NewEnvoyL7RulesTranslator(logger, certificatemanager.NewMockSecretManagerInline()), nil, api.NewPolicyMetricsNoop()),
-		testPolicyContext: &testPolicyContextType{},
+		testPolicyContext: &testPolicyContextType{logger: logger},
 	}
 	td.testPolicyContext.sc = td.sc
 	td.repo.selectorCache = td.sc
@@ -184,6 +184,8 @@ type testPolicyContextType struct {
 	ns       string
 	sc       *SelectorCache
 	fromFile bool
+
+	logger *slog.Logger
 }
 
 func (p *testPolicyContextType) GetNamespace() string {
@@ -216,6 +218,14 @@ func (p *testPolicyContextType) SetDeny(isDeny bool) bool {
 
 func (p *testPolicyContextType) IsDeny() bool {
 	return p.isDeny
+}
+
+func (p *testPolicyContextType) GetLogger() *slog.Logger {
+	return p.logger
+}
+
+func (p *testPolicyContextType) PolicyTrace(format string, a ...any) {
+	p.logger.Info(fmt.Sprintf(format, a...))
 }
 
 func init() {
@@ -923,7 +933,7 @@ func TestMergeTLSSNIPolicy(t *testing.T) {
 							Name: "tls-ca-certs",
 						},
 					},
-					ServerNames: []string{"www.foo.com"},
+					ServerNames: []api.ServerName{"www.foo.com"},
 				}},
 			},
 			{
@@ -934,7 +944,7 @@ func TestMergeTLSSNIPolicy(t *testing.T) {
 					Ports: []api.PortProtocol{
 						{Port: "443", Protocol: api.ProtoTCP},
 					},
-					ServerNames: []string{"www.bar.com"},
+					ServerNames: []api.ServerName{"www.bar.com"},
 				}, {
 					Ports: []api.PortProtocol{
 						{Port: "443", Protocol: api.ProtoTCP},

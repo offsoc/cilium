@@ -402,7 +402,7 @@ func (k *K8sStatusCollector) Status(ctx context.Context) (*Status, error) {
 }
 
 func cursorUp(lines int) {
-	for i := 0; i < lines; i++ {
+	for range lines {
 		fmt.Print("\033[A\033[2K")
 	}
 }
@@ -413,7 +413,7 @@ func countWrappedLines(text string) int {
 		width = 80 // default width if we can't get the terminal size
 	}
 	lines := 1
-	for _, line := range strings.Split(text, "\n") {
+	for line := range strings.SplitSeq(text, "\n") {
 		lines += (utf8.RuneCountInString(line) + width - 1) / width
 	}
 	return lines

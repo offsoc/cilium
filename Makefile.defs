@@ -58,8 +58,8 @@ ifeq ($(DOCKER_IMAGE_TAG),)
 endif
 
 # renovate: datasource=docker depName=gcr.io/etcd-development/etcd
-ETCD_IMAGE_VERSION = v3.5.19
-ETCD_IMAGE_SHA = sha256:c415170328bbb2cb497c79dbd8494b1c8d58886dccf95fbfdd3845c13c6d1ca3
+ETCD_IMAGE_VERSION = v3.5.21
+ETCD_IMAGE_SHA = sha256:fd158fbe55240e252947bbd2e8dddc217997ff43978071fac2bd202b6ad15c03
 ETCD_IMAGE=gcr.io/etcd-development/etcd:$(ETCD_IMAGE_VERSION)@$(ETCD_IMAGE_SHA)
 
 CILIUM_BUILDER_IMAGE=$(shell cat $(ROOT_DIR)/images/cilium/Dockerfile | grep "ARG CILIUM_BUILDER_IMAGE=" | cut -d"=" -f2)
@@ -109,8 +109,8 @@ endif
 endif
 
 # renovate: datasource=docker depName=golangci/golangci-lint
-GOLANGCILINT_WANT_VERSION = v1.64.8
-GOLANGCILINT_IMAGE_SHA = sha256:2987913e27f4eca9c8a39129d2c7bc1e74fbcf77f181e01cea607be437aa5cb8
+GOLANGCILINT_WANT_VERSION = v2.0.2
+GOLANGCILINT_IMAGE_SHA = sha256:d55581f7797e7a0877a7c3aaa399b01bdc57d2874d6412601a046cc4062cb62e
 GOLANGCILINT_VERSION = $(shell golangci-lint version --format short 2>/dev/null)
 
 VERSION = $(shell cat $(dir $(lastword $(MAKEFILE_LIST)))/VERSION)
@@ -156,7 +156,7 @@ GO_BUILD_FLAGS += -mod=vendor
 GO_TEST_FLAGS += -mod=vendor -vet=all
 GO_CLEAN_FLAGS += -mod=vendor
 
-GO_BUILD = CGO_ENABLED=0 $(GO) build
+CGO_ENABLED ?= 0
 
 # Support CGO cross-compiling for amd64 and arm64 targets
 CGO_CC =
@@ -169,15 +169,16 @@ ifeq ($(CROSS_ARCH),arm64)
 else ifeq ($(CROSS_ARCH),amd64)
     CGO_CC = CC=x86_64-linux-gnu-gcc
 endif
-GO_BUILD_WITH_CGO = CGO_ENABLED=1 $(CGO_CC) $(GO) build
+
+GO_BUILD = CGO_ENABLED=$(CGO_ENABLED) $(CGO_CC) $(GO) build
 
 ifneq ($(RACE),)
     GO_BUILD_FLAGS += -race
     GO_TEST_FLAGS += -race
     GOTEST_COVER_OPTS += -covermode=atomic
 
-    # GO_BUILD becomes GO_BUILD_WITH_CGO as `-race` requires CGO
-    GO_BUILD = $(GO_BUILD_WITH_CGO)
+    # `-race` requires CGO
+    CGO_ENABLED = 1
     ifeq ($(LOCKDEBUG),)
         LOCKDEBUG=1
     endif
@@ -197,7 +198,6 @@ ifeq ($(NOOPT),1)
 endif
 
 GO_BUILD += $(GO_BUILD_FLAGS)
-GO_BUILD_WITH_CGO += $(GO_BUILD_FLAGS)
 
 GO_TEST = CGO_ENABLED=0 $(GO) test $(GO_TEST_FLAGS)
 GO_CLEAN = $(GO) clean $(GO_CLEAN_FLAGS)

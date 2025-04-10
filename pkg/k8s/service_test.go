@@ -24,91 +24,6 @@ import (
 	serviceStore "github.com/cilium/cilium/pkg/service/store"
 )
 
-func TestGetAnnotationIncludeExternal(t *testing.T) {
-	svc := &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Name: "foo",
-	}}
-	require.False(t, getAnnotationIncludeExternal(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/global": "True"},
-	}}
-	require.True(t, getAnnotationIncludeExternal(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/global": "false"},
-	}}
-	require.False(t, getAnnotationIncludeExternal(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/global": ""},
-	}}
-	require.False(t, getAnnotationIncludeExternal(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"io.cilium/global-service": "True"},
-	}}
-	require.True(t, getAnnotationIncludeExternal(svc))
-}
-
-func TestGetAnnotationShared(t *testing.T) {
-	svc := &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Name: "foo",
-	}}
-	require.False(t, getAnnotationShared(svc))
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/global": "true"},
-	}}
-	require.True(t, getAnnotationShared(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/shared": "true"},
-	}}
-	require.False(t, getAnnotationShared(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/global": "true", "service.cilium.io/shared": "True"},
-	}}
-	require.True(t, getAnnotationShared(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/global": "true", "service.cilium.io/shared": "false"},
-	}}
-	require.False(t, getAnnotationShared(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/global": "true", "io.cilium/shared-service": "false"},
-	}}
-	require.False(t, getAnnotationShared(svc))
-}
-
-func TestGetAnnotationServiceAffinity(t *testing.T) {
-	svc := &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/global": "true", "service.cilium.io/affinity": "local"},
-	}}
-	require.Equal(t, serviceAffinityLocal, getAnnotationServiceAffinity(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/global": "true", "service.cilium.io/affinity": "remote"},
-	}}
-	require.Equal(t, serviceAffinityRemote, getAnnotationServiceAffinity(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/global": "true", "io.cilium/service-affinity": "local"},
-	}}
-	require.Equal(t, serviceAffinityLocal, getAnnotationServiceAffinity(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{"service.cilium.io/affinity": "remote"},
-	}}
-	require.Equal(t, serviceAffinityNone, getAnnotationServiceAffinity(svc))
-
-	svc = &slim_corev1.Service{ObjectMeta: slim_metav1.ObjectMeta{
-		Annotations: map[string]string{},
-	}}
-	require.Equal(t, serviceAffinityNone, getAnnotationServiceAffinity(svc))
-}
-
 func TestGetTopologyAware(t *testing.T) {
 	tests := []struct {
 		name                string
@@ -261,7 +176,7 @@ func TestParseServiceID(t *testing.T) {
 		},
 	}
 
-	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, ParseServiceID(svc))
+	require.Equal(t, ServiceID{Namespace: "bar", Name: "foo"}, ParseServiceID(svc))
 }
 
 func TestParseServiceWithServiceTypeExposure(t *testing.T) {
@@ -379,8 +294,8 @@ func TestParseService(t *testing.T) {
 	}
 
 	id, svc := ParseService(hivetest.Logger(t), k8sSvc, nil)
-	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
-	require.EqualValues(t, &Service{
+	require.Equal(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
+	require.Equal(t, &Service{
 		ExtTrafficPolicy:         loadbalancer.SVCTrafficPolicyCluster,
 		IntTrafficPolicy:         loadbalancer.SVCTrafficPolicyCluster,
 		FrontendIPs:              []net.IP{net.ParseIP("127.0.0.1")},
@@ -405,8 +320,8 @@ func TestParseService(t *testing.T) {
 	}
 
 	id, svc = ParseService(hivetest.Logger(t), k8sSvc, nil)
-	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
-	require.EqualValues(t, &Service{
+	require.Equal(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
+	require.Equal(t, &Service{
 		IsHeadless:               true,
 		ExtTrafficPolicy:         loadbalancer.SVCTrafficPolicyCluster,
 		IntTrafficPolicy:         loadbalancer.SVCTrafficPolicyCluster,
@@ -431,8 +346,8 @@ func TestParseService(t *testing.T) {
 	k8sSvc.ObjectMeta.Labels[corev1.IsHeadlessService] = ""
 
 	id, svc = ParseService(hivetest.Logger(t), k8sSvc, nil)
-	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
-	require.EqualValues(t, &Service{
+	require.Equal(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
+	require.Equal(t, &Service{
 		IsHeadless:               true,
 		ExtTrafficPolicy:         loadbalancer.SVCTrafficPolicyCluster,
 		IntTrafficPolicy:         loadbalancer.SVCTrafficPolicyCluster,
@@ -460,8 +375,8 @@ func TestParseService(t *testing.T) {
 	}
 
 	id, svc = ParseService(hivetest.Logger(t), k8sSvc, nil)
-	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
-	require.EqualValues(t, &Service{
+	require.Equal(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
+	require.Equal(t, &Service{
 		FrontendIPs:              []net.IP{net.ParseIP("127.0.0.1")},
 		ExtTrafficPolicy:         loadbalancer.SVCTrafficPolicyLocal,
 		IntTrafficPolicy:         loadbalancer.SVCTrafficPolicyLocal,
@@ -542,8 +457,8 @@ func TestParseService(t *testing.T) {
 		option.Config.LoadBalancerAlgorithmAnnotation = oldLbAlg
 	}()
 	id, svc = ParseService(hivetest.Logger(t), k8sSvc, addrs)
-	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
-	require.EqualValues(t, &Service{
+	require.Equal(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
+	require.Equal(t, &Service{
 		FrontendIPs: []net.IP{net.ParseIP("127.0.0.1")},
 		Labels:      map[string]string{"foo": "bar"},
 		Ports: map[loadbalancer.FEPortName]*loadbalancer.L4Addr{
@@ -607,8 +522,8 @@ func TestParseService(t *testing.T) {
 		},
 	}
 	id, svc = ParseService(hivetest.Logger(t), k8sSvc, addrs)
-	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
-	require.EqualValues(t, &Service{
+	require.Equal(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
+	require.Equal(t, &Service{
 		FrontendIPs: []net.IP{net.ParseIP("127.0.0.1")},
 		Labels:      map[string]string{"foo": "bar"},
 		Ports: map[loadbalancer.FEPortName]*loadbalancer.L4Addr{
@@ -664,8 +579,8 @@ func TestParseService(t *testing.T) {
 		},
 	}
 	id, svc = ParseService(hivetest.Logger(t), k8sSvc, addrs)
-	require.EqualValues(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
-	require.EqualValues(t, &Service{
+	require.Equal(t, ServiceID{Namespace: "bar", Name: "foo"}, id)
+	require.Equal(t, &Service{
 		FrontendIPs: []net.IP{net.ParseIP("127.0.0.1")},
 		Labels:      map[string]string{"foo": "bar"},
 		Ports: map[loadbalancer.FEPortName]*loadbalancer.L4Addr{
@@ -738,7 +653,7 @@ func TestServiceUniquePorts(t *testing.T) {
 	}
 
 	for _, m := range matrix {
-		require.EqualValues(t, m.expected, m.input.UniquePorts())
+		require.Equal(t, m.expected, m.input.UniquePorts())
 	}
 }
 
@@ -1390,7 +1305,7 @@ func TestNewClusterService(t *testing.T) {
 	})
 
 	clusterService := NewClusterService(id, svc, endpoints)
-	require.EqualValues(t, serviceStore.ClusterService{
+	require.Equal(t, serviceStore.ClusterService{
 		Name:      "foo",
 		Namespace: "bar",
 		Labels:    map[string]string{"foo": "bar"},

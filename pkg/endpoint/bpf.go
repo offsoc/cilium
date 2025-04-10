@@ -83,13 +83,13 @@ func init() {
 
 // callsMapPath returns the path to cilium tail calls map of an endpoint.
 func (e *Endpoint) callsMapPath() string {
-	return e.owner.Loader().CallsMapPath(e.ID)
+	return e.loader.CallsMapPath(e.ID)
 }
 
 // callsCustomMapPath returns the path to cilium custom tail calls map of an
 // endpoint.
 func (e *Endpoint) customCallsMapPath() string {
-	return e.owner.Loader().CustomCallsMapPath(e.ID)
+	return e.loader.CustomCallsMapPath(e.ID)
 }
 
 // writeInformationalComments writes annotations to the specified writer,
@@ -211,7 +211,7 @@ func (e *Endpoint) writeHeaderfile(prefix string) error {
 		return err
 	}
 
-	if err = e.owner.Orchestrator().WriteEndpointConfig(f, e); err != nil {
+	if err = e.orchestrator.WriteEndpointConfig(f, e); err != nil {
 		return err
 	}
 
@@ -380,11 +380,18 @@ func (e *Endpoint) regenerateBPF(regenContext *regenerationContext) (revnum uint
 
 	datapathRegenCtxt := regenContext.datapathRegenerationContext
 
+	// Wait for the datapath to be initialized before we take the compilation read lock.
+	// If we take the read lock before the datapath is initialized, we end up blocking
+	// the datapath initialization which needs the write lock on `e.compilationLock`.
+	// Yet, we will be blocked while waiting for the initialization to finish, thus causing
+	// a deadlock.
+	<-e.orchestrator.DatapathInitialized()
+
 	// Make sure that owner is not compiling base programs while we are
 	// regenerating an endpoint.
-	e.owner.GetCompilationLock().RLock()
+	e.compilationLock.RLock()
 	stats.waitingForLock.End(true)
-	defer e.owner.GetCompilationLock().RUnlock()
+	defer e.compilationLock.RUnlock()
 
 	if err := e.aliveCtx.Err(); err != nil {
 		return 0, fmt.Errorf("endpoint was closed while waiting for datapath lock: %w", err)
@@ -413,7 +420,7 @@ func (e *Endpoint) regenerateBPF(regenContext *regenerationContext) (revnum uint
 	// configuration hasn't changed. Hashing the endpoint configuration requires
 	// getting the security identity, which takes out a read lock on the Endpoint.
 	// Make sure to calculate the endpoint hash outside of a locked context.
-	datapathRegenCtxt.bpfHeaderfilesHash, err = e.owner.Orchestrator().EndpointHash(e)
+	datapathRegenCtxt.bpfHeaderfilesHash, err = e.orchestrator.EndpointHash(e)
 	if err != nil {
 		return 0, fmt.Errorf("hash endpoint configuration: %w", err)
 	}
@@ -582,7 +589,7 @@ func (e *Endpoint) realizeBPFState(regenContext *regenerationContext) (err error
 		}
 
 		// Compile and install BPF programs for this endpoint
-		templateHash, err := e.owner.Orchestrator().ReloadDatapath(datapathRegenCtxt.completionCtx, datapathRegenCtxt.epInfoCache, &stats.datapathRealization)
+		templateHash, err := e.orchestrator.ReloadDatapath(datapathRegenCtxt.completionCtx, datapathRegenCtxt.epInfoCache, &stats.datapathRealization)
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
 				e.getLogger().WithError(err).Error("Error while reloading endpoint BPF program")
@@ -629,7 +636,7 @@ func (e *Endpoint) runPreCompilationSteps(regenContext *regenerationContext) (pr
 	}
 	identityRevision := e.identityRevision
 	e.unlock()
-	policyRevision := e.policyGetter.GetPolicyRepository().GetRevision()
+	policyRevision := e.policyRepo.GetRevision()
 
 	// regenerate policy without holding the lock.
 	// This is because policy generation needs the ipcache to make progress, and the ipcache
@@ -652,7 +659,7 @@ func (e *Endpoint) runPreCompilationSteps(regenContext *regenerationContext) (pr
 	// can get the new DNS rules for restoration now, before we take the endpoint lock below.
 	// NOTE: Endpoint lock must not be held during 'GetDNSRules' as it locks IPCache, which
 	// leads to a deadlock if endpoint lock is held.
-	rules := e.owner.GetDNSRules(e.ID)
+	rules := e.dnsRulesAPI.GetDNSRules(e.ID)
 
 	stats.waitingForLock.Start()
 	err = e.lockAlive()
@@ -669,13 +676,7 @@ func (e *Endpoint) runPreCompilationSteps(regenContext *regenerationContext) (pr
 	if !e.ctCleaned {
 		go func() {
 			if !e.isProperty(PropertyFakeEndpoint) {
-				ipv4 := option.Config.EnableIPv4
-				ipv6 := option.Config.EnableIPv6
-				exists := ctmap.Exists(nil, ipv4, ipv6)
-				if e.ConntrackLocal() {
-					exists = ctmap.Exists(e, ipv4, ipv6)
-				}
-				if exists {
+				if ctmap.Exists(option.Config.EnableIPv4, option.Config.EnableIPv6) {
 					e.scrubIPsInConntrackTable()
 				}
 			}
@@ -781,6 +782,14 @@ func (e *Endpoint) runPreCompilationSteps(regenContext *regenerationContext) (pr
 		datapathRegenCtxt.policyMapSyncDone = true
 	}
 
+	// sync policy map for fake endpoints, bpf compilation will be skipped for them.
+	if e.isProperty(PropertyFakeEndpoint) {
+		err = e.policyMapSync(nil, stats)
+		if err != nil {
+			return fmt.Errorf("fake ep policymap synchronization failed: %w", err)
+		}
+	}
+
 	if e.isProperty(PropertySkipBPFRegeneration) {
 		return nil
 	}
@@ -848,24 +857,10 @@ func (e *Endpoint) deleteMaps() []error {
 
 	// Remove rate limit from bandwidth manager map.
 	if e.bps != 0 {
-		e.owner.BandwidthManager().DeleteBandwidthLimit(e.ID)
+		e.bandwidthManager.DeleteBandwidthLimit(e.ID)
 	}
 	if e.ingressBps != 0 {
-		e.owner.BandwidthManager().DeleteIngressBandwidthLimit(e.ID)
-	}
-
-	if e.ConntrackLocalLocked() {
-		// Remove endpoint-specific CT map pins.
-		for _, m := range ctmap.LocalMaps(e, option.Config.EnableIPv4, option.Config.EnableIPv6) {
-			ctPath, err := m.Path()
-			if err != nil {
-				errors = append(errors, fmt.Errorf("getting path for CT map pin %s: %w", m.Name(), err))
-				continue
-			}
-			if err := os.RemoveAll(ctPath); err != nil {
-				errors = append(errors, fmt.Errorf("removing CT map pin %s: %w", ctPath, err))
-			}
-		}
+		e.bandwidthManager.DeleteIngressBandwidthLimit(e.ID)
 	}
 
 	// Remove program array pins as the last step. This permanently invalidates
@@ -895,14 +890,7 @@ func (e *Endpoint) deleteMaps() []error {
 //
 // The endpoint lock must be held
 func (e *Endpoint) garbageCollectConntrack(filter ctmap.GCFilter) {
-	var maps []*ctmap.Map
-
-	if e.ConntrackLocalLocked() {
-		maps = ctmap.LocalMaps(e, option.Config.EnableIPv4, option.Config.EnableIPv6)
-	} else {
-		maps = ctmap.GlobalMaps(option.Config.EnableIPv4, option.Config.EnableIPv6)
-	}
-	for _, m := range maps {
+	for _, m := range ctmap.GlobalMaps(option.Config.EnableIPv4, option.Config.EnableIPv6) {
 		if err := m.Open(); err != nil {
 			// If the CT table doesn't exist, there's nothing to GC.
 			scopedLog := log.WithError(err).WithField(logfields.EndpointID, e.ID)
@@ -1277,7 +1265,7 @@ func (e *Endpoint) endpointPolicyLockdown() error {
 	}
 
 	defer func() {
-		e.realizedPolicy = policy.NewEndpointPolicy(logging.DefaultSlogLogger, e.policyGetter.GetPolicyRepository())
+		e.realizedPolicy = policy.NewEndpointPolicy(logging.DefaultSlogLogger, e.policyRepo)
 	}()
 
 	i := 0

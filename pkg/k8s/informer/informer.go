@@ -21,7 +21,7 @@ import (
 func init() {
 	utilRuntime.PanicHandlers = append(
 		utilRuntime.PanicHandlers,
-		func(_ context.Context, r interface{}) {
+		func(_ context.Context, r any) {
 			// from k8s library
 			if err, ok := r.(error); ok && errors.Is(err, http.ErrAbortHandler) {
 				// honor the http.ErrAbortHandler sentinel panic value:
@@ -59,20 +59,6 @@ func NewInformer(
 	return clientState, NewInformerWithStore(lw, objType, resyncPeriod, h, transformer, clientState)
 }
 
-// NewIndexerInformer is a copy of k8s.io/client-go/tools/cache/NewIndexerInformer but includes the
-// default cache MutationDetector.
-func NewIndexerInformer(
-	lw cache.ListerWatcher,
-	objType k8sRuntime.Object,
-	resyncPeriod time.Duration,
-	h cache.ResourceEventHandler,
-	transformer cache.TransformFunc,
-	indexers cache.Indexers,
-) (cache.Indexer, cache.Controller) {
-	clientState := cache.NewIndexer(cache.DeletionHandlingMetaNamespaceKeyFunc, indexers)
-	return clientState, NewInformerWithStore(lw, objType, resyncPeriod, h, transformer, clientState)
-}
-
 // NewInformerWithStore uses the same arguments as NewInformer for which a caller can also set a
 // cache.Store and includes the default cache MutationDetector.
 func NewInformerWithStore(
@@ -99,11 +85,11 @@ func NewInformerWithStore(
 		FullResyncPeriod: resyncPeriod,
 		RetryOnError:     false,
 
-		Process: func(obj interface{}, isInInitialList bool) error {
+		Process: func(obj any, isInInitialList bool) error {
 			// from oldest to newest
 			for _, d := range obj.(cache.Deltas) {
 
-				var obj interface{}
+				var obj any
 				if transformer != nil {
 					var err error
 					if obj, err = transformer(d.Object); err != nil {

@@ -32,15 +32,15 @@ import (
 	"github.com/cilium/cilium/pkg/dynamiclifecycle"
 	"github.com/cilium/cilium/pkg/egressgateway"
 	"github.com/cilium/cilium/pkg/endpoint"
+	endpointcreator "github.com/cilium/cilium/pkg/endpoint/creator"
 	"github.com/cilium/cilium/pkg/endpointcleanup"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/envoy"
+	fqdn "github.com/cilium/cilium/pkg/fqdn/cell"
 	"github.com/cilium/cilium/pkg/fqdn/defaultdns"
-	"github.com/cilium/cilium/pkg/fqdn/namemanager"
 	"github.com/cilium/cilium/pkg/gops"
 	hubble "github.com/cilium/cilium/pkg/hubble/cell"
-	identity "github.com/cilium/cilium/pkg/identity/cache/cell"
-	"github.com/cilium/cilium/pkg/identity/identitymanager"
+	identity "github.com/cilium/cilium/pkg/identity/cell"
 	ipamcell "github.com/cilium/cilium/pkg/ipam/cell"
 	ipcache "github.com/cilium/cilium/pkg/ipcache/cell"
 	"github.com/cilium/cilium/pkg/k8s"
@@ -143,7 +143,7 @@ var (
 		shellCell,
 
 		// DNSProxy provides the DefaultDNSProxy singleton which is used by different
-		// pacakges.
+		// packages.
 		defaultdns.Cell,
 	)
 
@@ -181,12 +181,11 @@ var (
 		// be synced
 		k8sSynced.Cell,
 
-		// IdentityManager maintains the set of identities and a count of its
-		// users.
-		identitymanager.Cell,
-
 		// EndpointManager maintains a collection of the locally running endpoints.
 		endpointmanager.Cell,
+
+		// EndpointCreator helps creating endpoints
+		endpointcreator.Cell,
 
 		// Register the startup procedure to remove stale CiliumEndpoints referencing pods no longer
 		// managed by Cilium.
@@ -245,7 +244,7 @@ var (
 		// Auth is responsible for authenticating a request if required by a policy.
 		auth.Cell,
 
-		// Provides IdentityAllocators (Responsible for allocating security identities)
+		// Provides Identity Controlplane (Responsible for allocating & managing security identities)
 		identity.Cell,
 
 		// IPCache cell provides IPCache (IP to identity mappings)
@@ -331,8 +330,8 @@ var (
 		// Determines priorities of data sources.
 		source.Cell,
 
-		// The FQDN NameManager stores DNS mappings.
-		namemanager.Cell,
+		// FQDN rules cell provides the FQDN proxy functionality.
+		fqdn.Cell,
 	)
 )
 

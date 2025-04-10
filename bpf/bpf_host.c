@@ -4,7 +4,7 @@
 #include <bpf/ctx/skb.h>
 #include <bpf/api.h>
 
-#include <node_config.h>
+#include <bpf/config/node.h>
 #include <bpf/config/global.h>
 #include <bpf/config/endpoint.h>
 #include <bpf/config/host.h>
@@ -57,7 +57,8 @@
 #include "lib/vtep.h"
 
  #define host_egress_policy_hook(ctx, src_sec_identity, ext_err) CTX_ACT_OK
- #define host_wg_encrypt_hook(ctx, proto) wg_maybe_redirect_to_encrypt(ctx, proto)
+ #define host_wg_encrypt_hook(ctx, proto, src_sec_identity)			\
+	 wg_maybe_redirect_to_encrypt(ctx, proto, src_sec_identity)
 
 /* Bit 0 is skipped for robustness, as it's used in some places to indicate from_host itself. */
 #define FROM_HOST_FLAG_NEED_HOSTFW (1 << 1)
@@ -371,17 +372,6 @@ handle_ipv6_cont(struct __ctx_buff *ctx, __u32 secctx, const bool from_host,
 		return encap_and_redirect_with_nodeid(ctx, info->tunnel_endpoint,
 						      encrypt_key, secctx, info->sec_identity,
 						      &trace);
-	} else {
-		struct tunnel_key key = {};
-
-		/* IPv6 lookup key: daddr/96 */
-		ipv6_addr_copy(&key.ip6, dst);
-		key.ip6.p4 = 0;
-		key.family = ENDPOINT_KEY_IPV6;
-
-		ret = encap_and_redirect_netdev(ctx, &key, encrypt_key, secctx, &trace);
-		if (ret != DROP_NO_TUNNEL_ENDPOINT)
-			return ret;
 	}
 skip_tunnel:
 #endif
@@ -602,6 +592,7 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx __maybe_unused,
 #endif /* ENABLE_HOST_FIREWALL */
 	void *data, *data_end;
 	struct iphdr *ip4;
+	fraginfo_t fraginfo __maybe_unused;
 
 	if (!revalidate_data(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -611,7 +602,8 @@ handle_ipv4(struct __ctx_buff *ctx, __u32 secctx __maybe_unused,
  * then drop the packet.
  */
 #ifndef ENABLE_IPV4_FRAGMENTS
-	if (ipv4_is_fragment(ip4))
+	fraginfo = ipfrag_encode_ipv4(ip4);
+	if (ipfrag_is_fragment(fraginfo))
 		return DROP_FRAG_NOSUPPORT;
 #endif
 
@@ -837,17 +829,6 @@ skip_vtep:
 		return encap_and_redirect_with_nodeid(ctx, info->tunnel_endpoint,
 						      encrypt_key, secctx, info->sec_identity,
 						      &trace);
-	} else {
-		/* IPv4 lookup key: daddr & IPV4_MASK */
-		struct tunnel_key key = {};
-
-		key.ip4 = ip4->daddr & IPV4_MASK;
-		key.family = ENDPOINT_KEY_IPV4;
-
-		cilium_dbg(ctx, DBG_NETDEV_ENCAP4, key.ip4, secctx);
-		ret = encap_and_redirect_netdev(ctx, &key, encrypt_key, secctx, &trace);
-		if (ret != DROP_NO_TUNNEL_ENDPOINT)
-			return ret;
 	}
 skip_tunnel:
 #endif
@@ -1344,17 +1325,19 @@ int cil_from_host(struct __ctx_buff *ctx)
 #endif /* ENABLE_HOST_FIREWALL */
 	}
 
-	magic = inherit_identity_from_host(ctx, &identity);
-	if (magic == MARK_MAGIC_PROXY_INGRESS ||  magic == MARK_MAGIC_PROXY_EGRESS)
-		obs_point = TRACE_FROM_PROXY;
-
 #if defined(ENABLE_L7_LB)
-	if (magic == MARK_MAGIC_PROXY_EGRESS_EPID) {
-		/* extracted identity is actually the endpoint ID */
-		ret = tail_call_egress_policy(ctx, (__u16)identity);
+	if ((ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_PROXY_EGRESS_EPID) {
+		__u16 lxc_id = get_epid(ctx);
+
+		ctx->mark = 0;
+		ret = tail_call_egress_policy(ctx, lxc_id);
 		return send_drop_notify_error(ctx, UNKNOWN_ID, ret, METRIC_EGRESS);
 	}
 #endif
+
+	magic = inherit_identity_from_host(ctx, &identity);
+	if (magic == MARK_MAGIC_PROXY_INGRESS ||  magic == MARK_MAGIC_PROXY_EGRESS)
+		obs_point = TRACE_FROM_PROXY;
 
 #ifdef ENABLE_IPSEC
 	if (magic == MARK_MAGIC_ENCRYPT) {
@@ -1399,8 +1382,14 @@ int cil_to_netdev(struct __ctx_buff *ctx)
 
 	if (magic == MARK_MAGIC_HOST || magic == MARK_MAGIC_OVERLAY || ctx_mark_is_wireguard(ctx))
 		src_sec_identity = HOST_ID;
+#ifdef ENABLE_IDENTITY_MARK
 	else if (magic == MARK_MAGIC_IDENTITY)
 		src_sec_identity = get_identity(ctx);
+#endif
+#ifdef ENABLE_EGRESS_GATEWAY_COMMON
+	else if (magic == MARK_MAGIC_EGW_DONE)
+		src_sec_identity = get_identity(ctx);
+#endif
 
 	/* Filter allowed vlan id's and pass them back to kernel.
 	 */
@@ -1488,6 +1477,7 @@ skip_host_firewall:
 		struct remote_endpoint_info *info;
 		struct endpoint_info *src_ep;
 		bool is_reply;
+		fraginfo_t fraginfo;
 
 		if (src_sec_identity == HOST_ID)
 			goto skip_egress_gateway;
@@ -1502,13 +1492,15 @@ skip_host_firewall:
 				goto drop_err;
 			}
 
+			fraginfo = ipfrag_encode_ipv4(ip4);
+
 			tuple4.nexthdr = ip4->protocol;
 			tuple4.daddr = ip4->daddr;
 			tuple4.saddr = ip4->saddr;
 
 			l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
-			ret = ct_extract_ports4(ctx, ip4, l4_off, CT_EGRESS, &tuple4,
-						NULL);
+			ret = ct_extract_ports4(ctx, ip4, fraginfo, l4_off,
+						CT_EGRESS, &tuple4);
 			if (IS_ERR(ret)) {
 				if (ret == DROP_CT_UNKNOWN_PROTO)
 					goto skip_egress_gateway;
@@ -1642,7 +1634,7 @@ skip_egress_gateway:
 	 * is set before the redirect.
 	 */
 	if (!ctx_mark_is_wireguard(ctx)) {
-		ret = host_wg_encrypt_hook(ctx, proto);
+		ret = host_wg_encrypt_hook(ctx, proto, src_sec_identity);
 		if (ret == CTX_ACT_REDIRECT)
 			return ret;
 		else if (IS_ERR(ret))
@@ -1991,20 +1983,24 @@ int handle_lxc_traffic(struct __ctx_buff *ctx __maybe_unused)
 {
 #ifdef ENABLE_HOST_FIREWALL
 	bool from_host = ctx_load_meta(ctx, CB_FROM_HOST);
-	__u32 lxc_id;
-	int ret;
-	__s8 ext_err = 0;
 
 	if (from_host) {
+		__u32 lxc_id = ctx_load_meta(ctx, CB_DST_ENDPOINT_ID);
+		__u32 src_sec_identity = HOST_ID;
+		__s8 ext_err = 0;
+		int ret;
+
 		ret = from_host_to_lxc(ctx, &ext_err);
 		if (IS_ERR(ret))
-			return send_drop_notify_error_ext(ctx, HOST_ID, ret, ext_err,
-							  METRIC_EGRESS);
+			goto drop_err;
 
-		lxc_id = ctx_load_meta(ctx, CB_DST_ENDPOINT_ID);
-		ctx_store_meta(ctx, CB_SRC_LABEL, HOST_ID);
+		local_delivery_fill_meta(ctx, src_sec_identity, false,
+					 true, false, 0);
 		ret = tail_call_policy(ctx, (__u16)lxc_id);
-		return send_drop_notify_error(ctx, HOST_ID, ret, METRIC_EGRESS);
+
+drop_err:
+		return send_drop_notify_error_ext(ctx, src_sec_identity,
+						  ret, ext_err, METRIC_EGRESS);
 	}
 
 	return to_host_from_lxc(ctx);

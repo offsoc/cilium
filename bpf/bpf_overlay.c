@@ -4,7 +4,7 @@
 #include <bpf/ctx/skb.h>
 #include <bpf/api.h>
 
-#include <node_config.h>
+#include <bpf/config/node.h>
 #include <bpf/config/global.h>
 #include <netdev_config.h>
 #include "lib/mcast.h"
@@ -167,7 +167,7 @@ not_esp:
 			if (unlikely(ret != CTX_ACT_OK))
 				return ret;
 
-			ctx_egw_done_set(ctx);
+			set_identity_mark(ctx, *identity, MARK_MAGIC_EGW_DONE);
 
 			/* to-netdev@bpf_host handles SNAT, so no need to do it here. */
 			ret = egress_gw_fib_lookup_and_redirect_v6(ctx, &snat_addr,
@@ -320,6 +320,7 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
 	struct endpoint_info *ep;
 	bool decrypted;
 	bool __maybe_unused is_dsr = false;
+	fraginfo_t fraginfo __maybe_unused;
 	int ret;
 
 	/* verifier workaround (dereference of modified ctx ptr) */
@@ -331,7 +332,8 @@ static __always_inline int handle_ipv4(struct __ctx_buff *ctx,
  * then drop the packet.
  */
 #ifndef ENABLE_IPV4_FRAGMENTS
-	if (ipv4_is_fragment(ip4))
+	fraginfo = ipfrag_encode_ipv4(ip4);
+	if (ipfrag_is_fragment(fraginfo))
 		return DROP_FRAG_NOSUPPORT;
 #endif
 
@@ -475,7 +477,7 @@ not_esp:
 			if (unlikely(ret != CTX_ACT_OK))
 				return ret;
 
-			ctx_egw_done_set(ctx);
+			set_identity_mark(ctx, *identity, MARK_MAGIC_EGW_DONE);
 
 			/* to-netdev@bpf_host handles SNAT, so no need to do it here. */
 			ret = egress_gw_fib_lookup_and_redirect(ctx, snat_addr,

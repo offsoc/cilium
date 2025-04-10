@@ -27,7 +27,6 @@ import (
 	"github.com/cilium/cilium/pkg/endpoint"
 	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
-	"github.com/cilium/cilium/pkg/fqdn/restore"
 	"github.com/cilium/cilium/pkg/ipam"
 	"github.com/cilium/cilium/pkg/k8s"
 	"github.com/cilium/cilium/pkg/k8s/client"
@@ -40,7 +39,6 @@ import (
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/mac"
-	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/resiliency"
 	"github.com/cilium/cilium/pkg/time"
@@ -88,7 +86,7 @@ func (d *Daemon) getEndpointList(params GetEndpointParams) []*models.Endpoint {
 	epModelsCh := make(chan *models.Endpoint, maxGoroutines)
 
 	epWorkersWg.Add(maxGoroutines)
-	for i := 0; i < maxGoroutines; i++ {
+	for range maxGoroutines {
 		// Run goroutines to process each endpoint and the corresponding model.
 		// The obtained endpoint model is sent to the endpoint models channel from
 		// where it will be aggregated later.
@@ -350,7 +348,7 @@ func (m *endpointCreationManager) DebugStatus() (output string) {
 
 // createEndpoint attempts to create the endpoint corresponding to the change
 // request that was specified.
-func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, epTemplate *models.EndpointChangeRequest) (*endpoint.Endpoint, int, error) {
+func (d *Daemon) createEndpoint(ctx context.Context, epTemplate *models.EndpointChangeRequest) (*endpoint.Endpoint, int, error) {
 	if option.Config.EnableEndpointRoutes {
 		if epTemplate.DatapathConfiguration == nil {
 			epTemplate.DatapathConfiguration = &models.EndpointDatapathConfiguration{}
@@ -405,7 +403,7 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
 	apiLabels := labels.NewLabelsFromModel(epTemplate.Labels)
 	epTemplate.Labels = nil
 
-	ep, err := endpoint.NewEndpointFromChangeModel(d.ctx, owner, d.policyMapFactory, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC, epTemplate)
+	ep, err := d.endpointCreator.NewEndpointFromChangeModel(d.ctx, epTemplate)
 	if err != nil {
 		return invalidDataError(ep, fmt.Errorf("unable to parse endpoint parameters: %w", err))
 	}
@@ -536,7 +534,7 @@ func (d *Daemon) createEndpoint(ctx context.Context, owner regeneration.Owner, e
 	}
 
 	// e.ID assigned here
-	err = d.endpointManager.AddEndpoint(owner, ep)
+	err = d.endpointManager.AddEndpoint(ep)
 	if err != nil {
 		return d.errorDuringCreation(ep, fmt.Errorf("unable to insert endpoint into manager: %w", err))
 	}
@@ -664,7 +662,7 @@ func putEndpointIDHandler(d *Daemon, params PutEndpointIDParams) (resp middlewar
 	}
 	defer r.Done()
 
-	ep, code, err := d.createEndpoint(params.HTTPRequest.Context(), d, epTemplate)
+	ep, code, err := d.createEndpoint(params.HTTPRequest.Context(), epTemplate)
 	if err != nil {
 		r.Error(err, code)
 		return api.Error(code, err)
@@ -716,7 +714,7 @@ func patchEndpointIDHandler(d *Daemon, params PatchEndpointIDParams) middleware.
 
 	// Validate the template. Assignment afterwards is atomic.
 	// Note: newEp's labels are ignored.
-	newEp, err2 := endpoint.NewEndpointFromChangeModel(d.ctx, d, d.policyMapFactory, d, d.ipcache, d.l7Proxy, d.identityAllocator, d.ctMapGC, epTemplate)
+	newEp, err2 := d.endpointCreator.NewEndpointFromChangeModel(d.ctx, epTemplate)
 	if err2 != nil {
 		r.Error(err2, PutEndpointIDInvalidCode)
 		return api.Error(PutEndpointIDInvalidCode, err2)
@@ -865,46 +863,6 @@ func (d *Daemon) deleteEndpointByContainerID(containerID string) (nErrors int, e
 	}
 
 	return nErrors, nil
-}
-
-// EndpointDeleted is a callback to satisfy EndpointManager.Subscriber,
-// which works around the difficulties in initializing various subsystems
-// involved in managing endpoints, such as the EndpointManager, IPAM and
-// the Monitor.
-//
-// It is called after Daemon calls into d.endpointManager.RemoveEndpoint().
-func (d *Daemon) EndpointDeleted(ep *endpoint.Endpoint, conf endpoint.DeleteConfig) {
-	d.SendNotification(monitorAPI.EndpointDeleteMessage(ep))
-
-	if !conf.NoIPRelease {
-		if option.Config.EnableIPv4 {
-			if err := d.ipam.ReleaseIP(ep.IPv4.AsSlice(), ipam.PoolOrDefault(ep.IPv4IPAMPool)); err != nil {
-				scopedLog := ep.Logger(daemonSubsys).WithError(err)
-				scopedLog.Warning("Unable to release IPv4 address during endpoint deletion")
-			}
-		}
-		if option.Config.EnableIPv6 {
-			if err := d.ipam.ReleaseIP(ep.IPv6.AsSlice(), ipam.PoolOrDefault(ep.IPv6IPAMPool)); err != nil {
-				scopedLog := ep.Logger(daemonSubsys).WithError(err)
-				scopedLog.Warning("Unable to release IPv6 address during endpoint deletion")
-			}
-		}
-	}
-}
-
-// EndpointCreated is a callback to satisfy EndpointManager.Subscriber,
-// allowing the EndpointManager to be the primary implementer of the core
-// endpoint management functionality while deferring other responsibilities
-// to the daemon.
-//
-// It is called after Daemon calls into d.endpointManager.AddEndpoint().
-func (d *Daemon) EndpointCreated(ep *endpoint.Endpoint) {
-	d.SendNotification(monitorAPI.EndpointCreateMessage(ep))
-}
-
-// EndpointRestored implements endpointmanager.Subscriber.
-func (d *Daemon) EndpointRestored(ep *endpoint.Endpoint) {
-	// No-op
 }
 
 func deleteEndpointIDHandler(d *Daemon, params DeleteEndpointIDParams) middleware.Responder {
@@ -1149,69 +1107,4 @@ func putEndpointIDLabelsHandler(d *Daemon, params PatchEndpointIDLabelsParams) m
 		return api.Error(code, err)
 	}
 	return NewPatchEndpointIDLabelsOK()
-}
-
-// QueueEndpointBuild waits for a "build permit" for the endpoint
-// identified by 'epID'. This function blocks until the endpoint can
-// start building.  The returned function must then be called to
-// release the "build permit" when the most resource intensive parts
-// of the build are done. The returned function is idempotent, so it
-// may be called more than once. Returns a nil function if the caller should NOT
-// start building the endpoint. This may happen due to a build being
-// queued for the endpoint already, or due to the wait for the build
-// permit being canceled. The latter case happens when the endpoint is
-// being deleted. Returns an error if the build permit could not be acquired.
-func (d *Daemon) QueueEndpointBuild(ctx context.Context, epID uint64) (func(), error) {
-	// Acquire build permit. This may block.
-	err := d.buildEndpointSem.Acquire(ctx, 1)
-
-	if err != nil {
-		return nil, err // Acquire failed
-	}
-
-	// Acquire succeeded, but the context was canceled after?
-	if ctx.Err() != nil {
-		d.buildEndpointSem.Release(1)
-		return nil, ctx.Err()
-	}
-
-	// At this point the build permit has been acquired. It must
-	// be released by the caller by calling the returned function
-	// when the heavy lifting of the build is done.
-	// Using sync.Once to make the returned function idempotent.
-	var once sync.Once
-	doneFunc := func() {
-		once.Do(func() {
-			d.buildEndpointSem.Release(1)
-		})
-	}
-	return doneFunc, nil
-}
-
-func (d *Daemon) GetDNSRules(epID uint16) restore.DNSRules {
-	dnsProxy := d.dnsProxy.Get()
-	if dnsProxy == nil {
-		return nil
-	}
-
-	// We get the latest consistent view on the DNS rules by getting handle to the latest
-	// coherent state of the selector cache
-	version := d.policy.GetSelectorCache().GetVersionHandle()
-	rules, err := dnsProxy.GetRules(version, epID)
-	version.Close()
-
-	if err != nil {
-		log.WithField(logfields.EndpointID, epID).WithError(err).Error("Could not get DNS rules")
-		return nil
-	}
-	return rules
-}
-
-func (d *Daemon) RemoveRestoredDNSRules(epID uint16) {
-	dnsProxy := d.dnsProxy.Get()
-	if dnsProxy == nil {
-		return
-	}
-
-	dnsProxy.RemoveRestoredRules(epID)
 }

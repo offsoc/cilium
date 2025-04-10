@@ -18,9 +18,9 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/linux/linux_defaults"
 	"github.com/cilium/cilium/pkg/datapath/linux/route"
 	"github.com/cilium/cilium/pkg/datapath/linux/safenetlink"
-	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/endpointmanager"
+	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
 	"github.com/cilium/cilium/pkg/maps/encrypt"
@@ -186,17 +186,6 @@ func (d *Daemon) initMaps() error {
 		ep.InitMap()
 	}
 
-	for _, ep := range d.endpointManager.GetEndpoints() {
-		if !ep.ConntrackLocal() {
-			continue
-		}
-		for _, m := range ctmap.LocalMaps(ep, option.Config.EnableIPv4,
-			option.Config.EnableIPv6) {
-			if err := m.Create(); err != nil {
-				return fmt.Errorf("initializing conntrack map %s: %w", m.Name(), err)
-			}
-		}
-	}
 	for _, m := range ctmap.GlobalMaps(option.Config.EnableIPv4,
 		option.Config.EnableIPv6) {
 		if err := m.Create(); err != nil {
@@ -370,7 +359,7 @@ func setupRouteToVtepCidr() error {
 				MTU:    vtepMTU,
 				Table:  linux_defaults.RouteTableVtep,
 			}
-			if err := route.Upsert(r); err != nil {
+			if err := route.Upsert(logging.DefaultSlogLogger, r); err != nil {
 				return fmt.Errorf("Update VTEP CIDR route error: %w", err)
 			}
 			log.WithFields(logrus.Fields{
@@ -420,23 +409,4 @@ func setupRouteToVtepCidr() error {
 	}
 
 	return nil
-}
-
-// Loader returns a reference to the loader implementation.
-func (d *Daemon) Loader() datapath.Loader {
-	return d.loader
-}
-
-// Orchestrator returns a reference to the orchestrator implementation.
-func (d *Daemon) Orchestrator() datapath.Orchestrator {
-	return d.orchestrator
-}
-
-// BandwidthManager returns a reference to the bandwidth manager implementation.
-func (d *Daemon) BandwidthManager() datapath.BandwidthManager {
-	return d.bwManager
-}
-
-func (d *Daemon) IPTablesManager() datapath.IptablesManager {
-	return d.iptablesManager
 }

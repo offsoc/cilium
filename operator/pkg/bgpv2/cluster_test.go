@@ -644,7 +644,7 @@ func Test_ClusterConfigSteps(t *testing.T) {
 					return
 				}
 
-				assert.Equal(c, len(step.expectedNodeConfigs), len(nodes.Items))
+				assert.Len(c, nodes.Items, len(step.expectedNodeConfigs))
 
 				for _, expectedNodeConfig := range step.expectedNodeConfigs {
 					nodeConfig, err := f.bgpnClient.Get(ctx, expectedNodeConfig.Name, meta_v1.GetOptions{})
@@ -1148,7 +1148,7 @@ func TestConflictingClusterConfigCondition(t *testing.T) {
 						return
 					}
 
-					for _, conflictingConfig := range strings.Split(string(match[1]), " ") {
+					for conflictingConfig := range strings.SplitSeq(string(match[1]), " ") {
 						relation := [2]string{config.Name, conflictingConfig}
 						conflictingRelations = append(conflictingRelations, relation)
 					}
@@ -1164,7 +1164,7 @@ func TestConflictingClusterConfigCondition(t *testing.T) {
 				slices.SortFunc(tt.conflictingRelations, sortRelation)
 
 				// Compare the conflicting relations.
-				for i := 0; i < len(tt.conflictingRelations); i++ {
+				for i := range tt.conflictingRelations {
 					if !assert.ElementsMatch(ct, tt.conflictingRelations[i], conflictingRelations[i]) {
 						return
 					}

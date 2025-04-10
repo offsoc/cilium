@@ -44,7 +44,7 @@ func enableCNPWatcher(ctx context.Context, wg *sync.WaitGroup, clientset k8sClie
 		&cilium_v2.CiliumNetworkPolicy{},
 		0,
 		cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj interface{}) {
+			AddFunc: func(obj any) {
 				k8sEventMetric(resources.MetricCNP, resources.MetricCreate)
 				if cnp := informer.CastInformerEvent[types.SlimCNP](logging.DefaultSlogLogger, obj); cnp != nil {
 					// We need to deepcopy this structure because we are writing
@@ -52,10 +52,10 @@ func enableCNPWatcher(ctx context.Context, wg *sync.WaitGroup, clientset k8sClie
 					// See https://github.com/cilium/cilium/blob/27fee207f5422c95479422162e9ea0d2f2b6c770/pkg/policy/api/ingress.go#L112-L134
 					cnpCpy := cnp.DeepCopy()
 
-					groups.AddDerivativeCNPIfNeeded(logging.DefaultSlogLogger, clientset, cnpCpy.CiliumNetworkPolicy)
+					groups.AddDerivativePolicyIfNeeded(logging.DefaultSlogLogger, clientset, cnpCpy.CiliumNetworkPolicy, false)
 				}
 			},
-			UpdateFunc: func(oldObj, newObj interface{}) {
+			UpdateFunc: func(oldObj, newObj any) {
 				k8sEventMetric(resources.MetricCNP, resources.MetricUpdate)
 				if oldCNP := informer.CastInformerEvent[types.SlimCNP](logging.DefaultSlogLogger, oldObj); oldCNP != nil {
 					if newCNP := informer.CastInformerEvent[types.SlimCNP](logging.DefaultSlogLogger, newObj); newCNP != nil {
@@ -69,11 +69,11 @@ func enableCNPWatcher(ctx context.Context, wg *sync.WaitGroup, clientset k8sClie
 						newCNPCpy := newCNP.DeepCopy()
 						oldCNPCpy := oldCNP.DeepCopy()
 
-						groups.UpdateDerivativeCNPIfNeeded(logging.DefaultSlogLogger, clientset, newCNPCpy.CiliumNetworkPolicy, oldCNPCpy.CiliumNetworkPolicy)
+						groups.UpdateDerivativePolicyIfNeeded(logging.DefaultSlogLogger, clientset, newCNPCpy.CiliumNetworkPolicy, oldCNPCpy.CiliumNetworkPolicy, false)
 					}
 				}
 			},
-			DeleteFunc: func(obj interface{}) {
+			DeleteFunc: func(obj any) {
 				k8sEventMetric(resources.MetricCNP, resources.MetricDelete)
 				cnp := informer.CastInformerEvent[types.SlimCNP](logging.DefaultSlogLogger, obj)
 				if cnp == nil {

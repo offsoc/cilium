@@ -960,6 +960,10 @@
      - Install the CNI configuration and binary files into the filesystem.
      - bool
      - ``true``
+   * - :spelling:ignore:`cni.iptablesRemoveAWSRules`
+     - Enable the removal of iptables rules created by the AWS CNI VPC plugin.
+     - bool
+     - ``true``
    * - :spelling:ignore:`cni.logFile`
      - Configure the log file for CNI logging with retention policy of 7 days. Disable CNI file logging by setting this field to empty explicitly.
      - string
@@ -1126,10 +1130,6 @@
      - ``true``
    * - :spelling:ignore:`enableInternalTrafficPolicy`
      - Enable Internal Traffic Policy
-     - bool
-     - ``true``
-   * - :spelling:ignore:`enableK8sTerminatingEndpoint`
-     - Configure whether to enable auto detect of terminating state for endpoints in order to support graceful termination.
      - bool
      - ``true``
    * - :spelling:ignore:`enableLBIPAM`
@@ -1336,6 +1336,10 @@
      - Maximum number of retries for each HTTP request
      - int
      - ``3``
+   * - :spelling:ignore:`envoy.httpUpstreamLingerTimeout`
+     - Time in seconds to block Envoy worker thread while an upstream HTTP connection is closing. If set to 0, the connection is closed immediately (with TCP RST). If set to -1, the connection is closed asynchronously in the background.
+     - string
+     - ``nil``
    * - :spelling:ignore:`envoy.idleTimeoutDurationSeconds`
      - Set Envoy upstream HTTP idle connection timeout seconds. Does not apply to connections with pending requests. Default 60s
      - int
@@ -1343,7 +1347,7 @@
    * - :spelling:ignore:`envoy.image`
      - Envoy container image.
      - object
-     - ``{"digest":"sha256:0dac9758f8d66c0c3a3c5c81fece7de233276ac11ebcbc9e1e56379779d2f418","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.33.0-1742456894-0de0009734b0b9e9481369813a047e69d6d7915b","useDigest":true}``
+     - ``{"digest":"sha256:b8f10a6769013b589725f95b99b990a07eeec6d6b34d5ea748f816dd671d04ca","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.33.2-1743993934-6e55b1412ae5976fb0c8fdc87a5e53942f70b0fc","useDigest":true}``
    * - :spelling:ignore:`envoy.initialFetchTimeoutSeconds`
      - Time in seconds after which the initial fetch on an xDS stream is considered timed out
      - int
@@ -1832,6 +1836,10 @@
      - Name of the ConfigMap containing the CA to validate client certificates against. If mTLS is enabled and this is unspecified, it will default to the same CA used for Hubble metrics server certificates.
      - string
      - ``nil``
+   * - :spelling:ignore:`hubble.networkPolicyCorrelation`
+     - Enables network policy correlation of Hubble flows, i.e. populating ``egress_allowed_by``\ , ``ingress_denied_by`` fields with policy information.
+     - object
+     - ``{"enabled":true}``
    * - :spelling:ignore:`hubble.peerService.clusterDomain`
      - The cluster domain to use to query the Hubble Peer service. It should be the local cluster.
      - string
@@ -2279,9 +2287,13 @@
    * - :spelling:ignore:`hubble.ui.service`
      - hubble-ui service configuration.
      - object
-     - ``{"annotations":{},"nodePort":31235,"type":"ClusterIP"}``
+     - ``{"annotations":{},"labels":{},"nodePort":31235,"type":"ClusterIP"}``
    * - :spelling:ignore:`hubble.ui.service.annotations`
      - Annotations to be added for the Hubble UI service
+     - object
+     - ``{}``
+   * - :spelling:ignore:`hubble.ui.service.labels`
+     - Labels to be added for the Hubble UI service
      - object
      - ``{}``
    * - :spelling:ignore:`hubble.ui.service.nodePort`
@@ -2664,6 +2676,10 @@
      - interval between checks of the liveness probe
      - int
      - ``30``
+   * - :spelling:ignore:`livenessProbe.requireK8sConnectivity`
+     - whether to require k8s connectivity as part of the check.
+     - bool
+     - ``false``
    * - :spelling:ignore:`loadBalancer`
      - Configure service load balancing
      - object
@@ -3456,6 +3472,10 @@
      - Configure VXLAN and Geneve tunnel source port range hint.
      - string
      - 0-0 to let the kernel driver decide the range
+   * - :spelling:ignore:`underlayProtocol`
+     - IP family for the underlay.
+     - string
+     - ``"ipv4"``
    * - :spelling:ignore:`updateStrategy`
      - Cilium agent update strategy
      - object

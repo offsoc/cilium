@@ -121,7 +121,7 @@ func (n *nodeOperationsMock) AllocateIPs(ctx context.Context, allocation *Alloca
 	n.mutex.Lock()
 	n.allocator.mutex.Lock()
 	n.allocator.allocatedIPs += allocation.IPv4.AvailableForAllocation
-	for i := 0; i < allocation.IPv4.AvailableForAllocation; i++ {
+	for range allocation.IPv4.AvailableForAllocation {
 		n.allocator.ipGenerator++
 		n.allocatedIPs = append(n.allocatedIPs, fmt.Sprintf("%d", n.allocator.ipGenerator))
 	}
@@ -241,7 +241,7 @@ func TestNodeManagerDelete(t *testing.T) {
 	require.NotNil(t, mngr.Get("node-foo"))
 	require.Nil(t, mngr.Get("node2"))
 
-	mngr.Resync(context.Background(), time.Now())
+	mngr.Resync(t.Context(), time.Now())
 	avail, used, needed := metrics.GetPerNodeMetrics("node-foo")
 	require.NotNil(t, avail)
 	require.NotNil(t, used)
@@ -636,7 +636,7 @@ func TestNodeManagerManyNodes(t *testing.T) {
 	// The above check returns as soon as the address requirements are met.
 	// The metrics may still be oudated, resync all nodes to update
 	// metrics.
-	mngr.Resync(context.TODO(), time.Now())
+	mngr.Resync(t.Context(), time.Now())
 
 	require.Equal(t, numNodes, metricsapi.Nodes("total"))
 	require.Equal(t, 0, metricsapi.Nodes("in-deficit"))

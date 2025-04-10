@@ -150,7 +150,7 @@ func TestCreateL4Filter(t *testing.T) {
 		// Regardless of ingress/egress, we should end up with
 		// a single L7 rule whether the selector is wildcarded
 		// or if it is based on specific labels.
-		filter, err := createL4IngressFilter(hivetest.Logger(t), td.testPolicyContext, eps, nil, nil, portrule, tuple, tuple.Protocol, EmptyStringLabels)
+		filter, err := createL4IngressFilter(td.testPolicyContext, eps, nil, nil, portrule, tuple, tuple.Protocol, EmptyStringLabels)
 		require.NoError(t, err)
 		require.Len(t, filter.PerSelectorPolicies, 1)
 		for _, sp := range filter.PerSelectorPolicies {
@@ -160,7 +160,7 @@ func TestCreateL4Filter(t *testing.T) {
 			require.Equal(t, redirectTypeEnvoy, sp.redirectType())
 		}
 
-		filter, err = createL4EgressFilter(hivetest.Logger(t), td.testPolicyContext, eps, nil, portrule, tuple, tuple.Protocol, EmptyStringLabels, nil)
+		filter, err = createL4EgressFilter(td.testPolicyContext, eps, nil, portrule, tuple, tuple.Protocol, EmptyStringLabels, nil)
 		require.NoError(t, err)
 		require.Len(t, filter.PerSelectorPolicies, 1)
 		for _, sp := range filter.PerSelectorPolicies {
@@ -194,7 +194,7 @@ func TestCreateL4FilterAuthRequired(t *testing.T) {
 		// Regardless of ingress/egress, we should end up with
 		// a single L7 rule whether the selector is wildcarded
 		// or if it is based on specific labels.
-		filter, err := createL4IngressFilter(hivetest.Logger(t), td.testPolicyContext, eps, auth, nil, portrule, tuple, tuple.Protocol, EmptyStringLabels)
+		filter, err := createL4IngressFilter(td.testPolicyContext, eps, auth, nil, portrule, tuple, tuple.Protocol, EmptyStringLabels)
 		require.NoError(t, err)
 		require.Len(t, filter.PerSelectorPolicies, 1)
 		for _, sp := range filter.PerSelectorPolicies {
@@ -204,7 +204,7 @@ func TestCreateL4FilterAuthRequired(t *testing.T) {
 			require.Equal(t, redirectTypeEnvoy, sp.redirectType())
 		}
 
-		filter, err = createL4EgressFilter(hivetest.Logger(t), td.testPolicyContext, eps, auth, portrule, tuple, tuple.Protocol, EmptyStringLabels, nil)
+		filter, err = createL4EgressFilter(td.testPolicyContext, eps, auth, portrule, tuple, tuple.Protocol, EmptyStringLabels, nil)
 		require.NoError(t, err)
 		require.Len(t, filter.PerSelectorPolicies, 1)
 		for _, sp := range filter.PerSelectorPolicies {
@@ -244,10 +244,10 @@ func TestCreateL4FilterMissingSecret(t *testing.T) {
 		// Regardless of ingress/egress, we should end up with
 		// a single L7 rule whether the selector is wildcarded
 		// or if it is based on specific labels.
-		_, err := createL4IngressFilter(hivetest.Logger(t), td.testPolicyContext, eps, nil, nil, portrule, tuple, tuple.Protocol, EmptyStringLabels)
+		_, err := createL4IngressFilter(td.testPolicyContext, eps, nil, nil, portrule, tuple, tuple.Protocol, EmptyStringLabels)
 		require.Error(t, err)
 
-		_, err = createL4EgressFilter(hivetest.Logger(t), td.testPolicyContext, eps, nil, portrule, tuple, tuple.Protocol, EmptyStringLabels, nil)
+		_, err = createL4EgressFilter(td.testPolicyContext, eps, nil, portrule, tuple, tuple.Protocol, EmptyStringLabels, nil)
 		require.Error(t, err)
 	}
 }
@@ -261,8 +261,8 @@ func (a SortablePolicyRules) Less(i, j int) bool { return a[i].Rule < a[j].Rule 
 func TestJSONMarshal(t *testing.T) {
 	td := newTestData(hivetest.Logger(t))
 	model := &models.L4Policy{}
-	require.EqualValues(t, "[]", fmt.Sprintf("%+v", model.Egress))
-	require.EqualValues(t, "[]", fmt.Sprintf("%+v", model.Ingress))
+	require.Equal(t, "[]", fmt.Sprintf("%+v", model.Egress))
+	require.Equal(t, "[]", fmt.Sprintf("%+v", model.Ingress))
 
 	policy := L4Policy{
 		Egress: L4DirectionPolicy{PortRules: NewL4PolicyMapWithValues(map[string]*L4Filter{
@@ -338,7 +338,7 @@ func TestJSONMarshal(t *testing.T) {
 }`}
 	sort.StringSlice(expectedEgress).Sort()
 	sort.Sort(SortablePolicyRules(model.Egress))
-	require.Equal(t, len(model.Egress), len(expectedEgress))
+	require.Len(t, model.Egress, len(expectedEgress))
 	for i := range expectedEgress {
 		expected := new(bytes.Buffer)
 		err := json.Compact(expected, []byte(expectedEgress[i]))
@@ -415,7 +415,7 @@ func TestJSONMarshal(t *testing.T) {
 }`}
 	sort.StringSlice(expectedIngress).Sort()
 	sort.Sort(SortablePolicyRules(model.Ingress))
-	require.Equal(t, len(model.Ingress), len(expectedIngress))
+	require.Len(t, model.Ingress, len(expectedIngress))
 	for i := range expectedIngress {
 		expected := new(bytes.Buffer)
 		err := json.Compact(expected, []byte(expectedIngress[i]))
@@ -498,7 +498,7 @@ func BenchmarkContainsAllL3L4(b *testing.B) {
 	port := uint16(rand.IntN(65535))
 
 	b.ReportAllocs()
-	for i := 0; i < 1000; i++ {
+	for range 1000 {
 		b.StartTimer()
 		proxyID := ProxyID(id, true, "TCP", port, "")
 		if proxyID != strconv.FormatInt(int64(id), 10)+"ingress:TCP:8080:" {

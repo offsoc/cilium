@@ -1,3 +1,19 @@
+# v1.211.2 (2025-04-04)
+
+* **Documentation**: Doc-only updates for Amazon EC2
+
+# v1.211.1 (2025-04-03)
+
+* No change notes available for this release.
+
+# v1.211.0 (2025-03-31)
+
+* **Feature**: Release VPC Route Server, a new feature allowing dynamic routing in VPCs.
+
+# v1.210.1 (2025-03-19)
+
+* **Documentation**: Doc-only updates for EC2 for March 2025.
+
 # v1.210.0 (2025-03-13)
 
 * **Feature**: This release changes the CreateLaunchTemplate, CreateLaunchTemplateVersion, ModifyLaunchTemplate CLI and SDKs such that if you do not specify a client token, a randomly generated token is used for the request to ensure idempotency.

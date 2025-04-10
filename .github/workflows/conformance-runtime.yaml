@@ -58,7 +58,7 @@ concurrency:
 
 env:
   # renovate: datasource=golang-version depName=go
-  go-version: 1.24.1
+  go-version: 1.24.2
 
 jobs:
   echo-inputs:
@@ -118,7 +118,7 @@ jobs:
 
       # Load Ginkgo build from GitHub
       - name: Load ginkgo runtime from GH cache
-        uses: actions/cache@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         id: cache
         with:
           path: /tmp/.ginkgo-build/
@@ -126,10 +126,10 @@ jobs:
 
       - name: Install Go
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
-        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
         with:
           # renovate: datasource=golang-version depName=go
-          go-version: 1.24.1
+          go-version: 1.24.2
 
       - name: Build Ginkgo
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
@@ -190,10 +190,8 @@ jobs:
           # RuntimeAgentFQDNPolicies CNAME follow
           # RuntimeAgentFQDNPolicies DNS proxy policy works if Cilium stops
           # RuntimeAgentFQDNPolicies Enforces L3 policy even when no IPs are inserted
-          # RuntimeAgentFQDNPolicies Enforces ToFQDNs policy
           # RuntimeAgentFQDNPolicies Implements matchPattern: *
           # RuntimeAgentFQDNPolicies Interaction with other ToCIDR rules
-          # RuntimeAgentFQDNPolicies Roundrobin DNS
           # RuntimeAgentFQDNPolicies toFQDNs populates toCIDRSet (data from proxy) L3-dependent L7/HTTP with toFQDN updates proxy policy
           # RuntimeAgentFQDNPolicies toFQDNs populates toCIDRSet (data from proxy) Policy addition after DNS lookup
           # RuntimeAgentFQDNPolicies Validate dns-proxy monitor information
@@ -215,7 +213,6 @@ jobs:
             cliFocus: "RuntimeAgent"
 
           ###
-          # RuntimeDatapathConntrackInVethModeTest Conntrack-related configuration options for endpoints
           # RuntimeDatapathMonitorTest With Sample Containers checks container ids match monitor output
           # RuntimeDatapathMonitorTest With Sample Containers cilium-dbg monitor check --from
           # RuntimeDatapathMonitorTest With Sample Containers cilium-dbg monitor check --related-to
@@ -223,7 +220,7 @@ jobs:
           # RuntimeDatapathMonitorTest With Sample Containers Cilium monitor event types
           # RuntimeDatapathMonitorTest With Sample Containers delivers the same information to multiple monitors
           - focus: "datapath"
-            cliFocus: "RuntimeDatapathConntrackInVethModeTest|RuntimeDatapathMonitorTest"
+            cliFocus: "RuntimeDatapathMonitorTest"
 
     timeout-minutes: 50
     steps:
@@ -276,7 +273,7 @@ jobs:
 
       # Load Ginkgo build from GitHub
       - name: Load ${{ matrix.name }} Ginkgo build from GitHub
-        uses: actions/cache/restore@d4323d4df104b026a6aa633fdb11d772146be0bf # v4.2.2
+        uses: actions/cache/restore@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
         id: cache
         with:
           path: /tmp/.ginkgo-build/
@@ -284,10 +281,10 @@ jobs:
 
       - name: Install Go
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
-        uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.3.0
+        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
         with:
           # renovate: datasource=golang-version depName=go
-          go-version: 1.24.1
+          go-version: 1.24.2
 
       - name: Build Ginkgo
         if: ${{ steps.cache.outputs.cache-hit != 'true' }}
@@ -425,7 +422,7 @@ jobs:
 
       - name: Upload artifacts
         if: ${{ !success() && (matrix.focus == 'agent' || matrix.focus == 'datapath') }}
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cilium-sysdumps-${{ matrix.focus }}
           path: |
@@ -446,14 +443,14 @@ jobs:
 
       - name: Upload JUnits [junit]
         if: ${{ always() && (matrix.focus == 'agent' || matrix.focus == 'datapath') }}
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cilium-junits-${{ matrix.focus }}
           path: cilium-junits/*.xml
 
       - name: Upload features tested
         if: ${{ always() && (matrix.focus == 'agent' || matrix.focus == 'datapath') }}
-        uses: actions/upload-artifact@4cec3d8aa04e39d1a68397de0c4cd6fb9dce8ec1 # v4.6.1
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: features-tested-${{ matrix.focus }}
           path: ${{ env.job_name }}*.json

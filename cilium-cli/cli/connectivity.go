@@ -44,6 +44,8 @@ var params = check.Parameters{
 	ExternalDeploymentPort: 8080,
 	EchoServerHostPort:     4000,
 	JunitProperties:        make(map[string]string),
+	NamespaceLabels:        make(map[string]string),
+	NamespaceAnnotations:   make(map[string]string),
 	NodeSelector:           make(map[string]string),
 	Writer:                 os.Stdout,
 	SysdumpOptions: sysdump.Options{
@@ -148,9 +150,6 @@ func newCmdConnectivityTest(hooks api.Hooks) *cobra.Command {
 	cmd.Flags().StringVar(&params.AgentPodSelector, "agent-pod-selector", defaults.AgentPodSelector, "Label on cilium-agent pods to select with")
 	cmd.Flags().StringVar(&params.CiliumPodSelector, "cilium-pod-selector", defaults.CiliumPodSelector, "Label selector matching all cilium-related pods")
 	cmd.Flags().Var(option.NewNamedMapOptions("node-selector", &params.NodeSelector, nil), "node-selector", "Restrict connectivity pods to nodes matching this label")
-	cmd.Flags().Var(&params.NamespaceAnnotations, "namespace-annotations", "Add annotations to the connectivity test namespace, e.g. '{\"foo\":\"bar\"}'")
-	cmd.Flags().MarkHidden("namespace-annotations")
-	cmd.Flags().MarkHidden("deployment-pod-annotations")
 	cmd.Flags().StringVar(&params.MultiCluster, "multi-cluster", "", "Test across clusters to given context")
 	cmd.Flags().StringSliceVar(&tests, "test", []string{}, "Run tests that match one of the given regular expressions, skip tests by starting the expression with '!', target Scenarios with e.g. '/pod-to-cidr'")
 	cmd.Flags().StringVar(&params.FlowValidation, "flow-validation", check.FlowValidationModeWarning, "Enable Hubble flow validation { disabled | warning | strict }")
@@ -243,7 +242,7 @@ func newCmdConnectivityPerf(hooks api.Hooks) *cobra.Command {
 		Use:   "perf",
 		Short: "Test network performance",
 		Long:  ``,
-		PreRun: func(_ *cobra.Command, _ []string) {
+		PreRunE: func(_ *cobra.Command, _ []string) error {
 			// This is a bit of hack that allows us to override default values
 			// of these parameters that are not visible in perf subcommand options
 			// as we can't have different defaults specified in test and perf subcommands
@@ -251,6 +250,17 @@ func newCmdConnectivityPerf(hooks api.Hooks) *cobra.Command {
 			params.Perf = true
 			params.ForceDeploy = true
 			params.Hubble = false
+
+			if reportDir := params.PerfParameters.ReportDir; reportDir != "" {
+				if err := os.MkdirAll(reportDir, 0755); err != nil {
+					return fmt.Errorf("could not create report dir %q: %w", reportDir, err)
+				}
+			} else if params.PerfParameters.KernelProfiles {
+				fmt.Println("⚠️  Requested kernel profiles, but report-dir is unset, skipping")
+				params.PerfParameters.KernelProfiles = false
+			}
+
+			return nil
 		},
 		RunE: RunE(hooks),
 	}
@@ -273,6 +283,9 @@ func newCmdConnectivityPerf(hooks api.Hooks) *cobra.Command {
 	cmd.Flags().BoolVar(&params.PerfParameters.OtherNode, "other-node", true, "Run tests in which the client and the server are hosted on difference nodes")
 	cmd.Flags().BoolVar(&params.PerfParameters.NetQos, "net-qos", false, "Test pod network Quality of Service")
 
+	cmd.Flags().BoolVar(&params.PerfParameters.KernelProfiles, "unsafe-capture-kernel-profiles", false,
+		"Capture kernel profiles during test execution. Warning: run on disposable nodes only, as it installs additional software and modifies their configuration")
+
 	cmd.Flags().Var(option.NewNamedMapOptions("node-selector-server", &params.PerfParameters.NodeSelectorServer, nil),
 		"node-selector-server", "Node selector for the server pod (and client same-node)")
 	cmd.Flags().Var(option.NewNamedMapOptions("node-selector-client", &params.PerfParameters.NodeSelectorClient, nil),
@@ -289,7 +302,11 @@ func newCmdConnectivityPerf(hooks api.Hooks) *cobra.Command {
 func registerCommonFlags(flags *pflag.FlagSet) {
 	flags.BoolVarP(&params.Debug, "debug", "d", false, "Show debug messages")
 	flags.StringVar(&params.TestNamespace, "test-namespace", defaults.ConnectivityCheckNamespace, "Namespace to perform the connectivity in (always suffixed with a sequence number to be compliant with test-concurrency param, e.g.: cilium-test-1)")
+	flags.Var(option.NewNamedMapOptions("namespace-labels", &params.NamespaceLabels, nil), "namespace-labels", "Add labels to the connectivity test namespace")
+	flags.Var(option.NewNamedMapOptions("namespace-annotations", &params.NamespaceAnnotations, nil), "namespace-annotations", "Add annotations to the connectivity test namespace")
+	flags.MarkHidden("namespace-annotations")
 	flags.Var(&params.DeploymentAnnotations, "deployment-pod-annotations", "Add annotations to the connectivity pods, e.g. '{\"client\":{\"foo\":\"bar\"}}'")
+	flags.MarkHidden("deployment-pod-annotations")
 	flags.BoolVar(&params.PrintImageArtifacts, "print-image-artifacts", false, "Prints the used image artifacts")
 }
 
@@ -305,7 +322,7 @@ func newConnectivityTests(
 	}
 
 	connTests := make([]*check.ConnectivityTest, 0, params.TestConcurrency)
-	for i := 0; i < params.TestConcurrency; i++ {
+	for i := range params.TestConcurrency {
 		params := params
 		params.TestNamespace = fmt.Sprintf("%s-%d", params.TestNamespace, i+1)
 		params.TestNamespaceIndex = i

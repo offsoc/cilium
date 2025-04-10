@@ -56,10 +56,6 @@ var (
 )
 
 func RunBenchmark(testSize int, iterations int, loglevel slog.Level, validate bool) {
-	// As we're using k8s.Endpoints we need to set this to ask ParseEndpoint*
-	// to handle the termination state. Eventually this should migrate to the
-	// package for the k8s data source.
-	option.Config.EnableK8sTerminatingEndpoint = true
 	option.Config.EnableIPv4 = true
 	option.Config.EnableIPv6 = true
 
@@ -73,6 +69,7 @@ func RunBenchmark(testSize int, iterations int, loglevel slog.Level, validate bo
 			Log:    log,
 			Pinned: false,
 			Cfg: experimental.ExternalConfig{
+				ZoneMapper: &option.DaemonConfig{},
 				LBMapsConfig: experimental.LBMapsConfig{
 					MaxSockRevNatMapEntries:  3 * testSize,
 					ServiceMapMaxEntries:     3 * testSize,
@@ -129,7 +126,7 @@ func RunBenchmark(testSize int, iterations int, loglevel slog.Level, validate bo
 
 	var runs []run
 
-	for i := 0; i < iterations; i++ {
+	for i := range iterations {
 		runtime.GC()
 		var memory memoryPair
 		runtime.ReadMemStats(&memory.before)
@@ -522,6 +519,7 @@ func testHive(maps experimental.LBMaps,
 	bo **experimental.BPFOps,
 ) *hive.Hive {
 	extConfig := experimental.ExternalConfig{
+		ZoneMapper:        &option.DaemonConfig{},
 		EnableIPv4:        true,
 		EnableIPv6:        true,
 		ExternalClusterIP: false,

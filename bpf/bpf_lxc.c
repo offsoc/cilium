@@ -5,7 +5,7 @@
 #include <bpf/api.h>
 #include <linux/in.h>
 
-#include <node_config.h>
+#include <bpf/config/node.h>
 #include <bpf/config/global.h>
 #include <bpf/config/endpoint.h>
 #include <bpf/config/lxc.h>
@@ -76,7 +76,7 @@ static __always_inline int __per_packet_lb_svc_xlate_4(void *ctx, struct iphdr *
 {
 	struct ipv4_ct_tuple tuple = {};
 	struct ct_state ct_state_new = {};
-	bool has_l4_header;
+	fraginfo_t fraginfo;
 	struct lb4_service *svc;
 	struct lb4_key key = {};
 	__u16 proxy_port = 0;
@@ -84,7 +84,7 @@ static __always_inline int __per_packet_lb_svc_xlate_4(void *ctx, struct iphdr *
 	int l4_off;
 	int ret = 0;
 
-	has_l4_header = ipv4_has_l4_header(ip4);
+	fraginfo = ipfrag_encode_ipv4(ip4);
 
 	ret = lb4_extract_tuple(ctx, ip4, ETH_HLEN, &l4_off, &tuple);
 	if (IS_ERR(ret)) {
@@ -113,9 +113,9 @@ static __always_inline int __per_packet_lb_svc_xlate_4(void *ctx, struct iphdr *
 		if (unlikely(lb4_svc_is_localredirect(svc)))
 			goto skip_service_lookup;
 #endif /* ENABLE_LOCAL_REDIRECT_POLICY && ENABLE_SOCKET_LB_FULL */
-		ret = lb4_local(get_ct_map4(&tuple), ctx, ipv4_is_fragment(ip4),
-				ETH_HLEN, l4_off, &key, &tuple, svc, &ct_state_new,
-				has_l4_header, false, &cluster_id, ext_err, ENDPOINT_NETNS_COOKIE);
+		ret = lb4_local(get_ct_map4(&tuple), ctx, ETH_HLEN, fraginfo,
+				l4_off, &key, &tuple, svc, &ct_state_new,
+				false, &cluster_id, ext_err, ENDPOINT_NETNS_COOKIE);
 
 #ifdef SERVICE_NO_BACKEND_RESPONSE
 		if (ret == DROP_NO_SERVICE)
@@ -705,20 +705,6 @@ ct_recreate6:
 	/* The packet goes to a peer not managed by this agent instance */
 #ifdef TUNNEL_MODE
 	if (ct_state->from_tunnel || !skip_tunnel) {
-		struct tunnel_key key = {};
-		union v6addr *daddr = (union v6addr *)&ip6->daddr;
-
-		/* Lookup the destination prefix in the list of known
-		 * destination prefixes. If there is a match, the packet will
-		 * be encapsulated to that node and then routed by the agent on
-		 * the remote node.
-		 *
-		 * IPv6 lookup key: daddr/96
-		 */
-		ipv6_addr_copy(&key.ip6, daddr);
-		key.ip6.p4 = 0;
-		key.family = ENDPOINT_KEY_IPV6;
-
 #if !defined(ENABLE_NODEPORT) && defined(ENABLE_HOST_FIREWALL)
 		/* See comment in handle_ipv4_from_lxc(). */
 		if ((ct_status == CT_REPLY || ct_status == CT_RELATED) &&
@@ -731,8 +717,8 @@ ct_recreate6:
 		 * the packet needs IPSec encap so push ctx to stack for encap, or
 		 * (c) packet was redirected to tunnel device so return.
 		 */
-		ret = encap_and_redirect_lxc(ctx, tunnel_endpoint, 0, 0, encrypt_key,
-					     &key, SECLABEL_IPV6, *dst_sec_identity,
+		ret = encap_and_redirect_lxc(ctx, tunnel_endpoint, encrypt_key,
+					     SECLABEL_IPV6, *dst_sec_identity,
 					     &trace);
 		switch (ret) {
 		case CTX_ACT_OK:
@@ -1241,14 +1227,8 @@ skip_vtep:
 	 * destination's `skip_tunnel` flag.
 	 */
 	if (ct_state->from_tunnel || !skip_tunnel) {
-		struct tunnel_key key = {};
-
 		if (cluster_id > UINT16_MAX)
 			return DROP_INVALID_CLUSTER_ID;
-
-		key.ip4 = ip4->daddr & IPV4_MASK;
-		key.family = ENDPOINT_KEY_IPV4;
-		key.cluster_id = (__u16)cluster_id;
 
 #if !defined(ENABLE_NODEPORT) && defined(ENABLE_HOST_FIREWALL)
 		/*
@@ -1277,8 +1257,7 @@ skip_vtep:
 		}
 #endif
 
-		ret = encap_and_redirect_lxc(ctx, tunnel_endpoint, ip4->saddr,
-					     ip4->daddr, encrypt_key, &key,
+		ret = encap_and_redirect_lxc(ctx, tunnel_endpoint, encrypt_key,
 					     SECLABEL_IPV4, *dst_sec_identity, &trace);
 		switch (ret) {
 		case CTX_ACT_OK:
@@ -1396,6 +1375,7 @@ static __always_inline int __tail_handle_ipv4(struct __ctx_buff *ctx,
 {
 	void *data, *data_end;
 	struct iphdr *ip4;
+	fraginfo_t fraginfo __maybe_unused;
 
 	if (!revalidate_data_pull(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -1405,7 +1385,8 @@ static __always_inline int __tail_handle_ipv4(struct __ctx_buff *ctx,
  * then drop the packet.
  */
 #ifndef ENABLE_IPV4_FRAGMENTS
-	if (ipv4_is_fragment(ip4))
+	fraginfo = ipfrag_encode_ipv4(ip4);
+	if (ipfrag_is_fragment(fraginfo))
 		return DROP_FRAG_NOSUPPORT;
 #endif
 
@@ -1873,6 +1854,7 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 	struct ct_state *ct_state, ct_state_new = {};
 	int ifindex = THIS_INTERFACE_IFINDEX;
 	struct ipv4_ct_tuple *tuple;
+	fraginfo_t fraginfo;
 	bool is_untracked_fragment = false;
 	struct ct_buffer4 *ct_buffer;
 	struct trace_ctx trace;
@@ -1883,13 +1865,15 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 	__u8 auth_type = 0;
 	__u32 zero = 0;
 
+	fraginfo = ipfrag_encode_ipv4(ip4);
+
 	orig_sip = ip4->saddr;
 
 #ifndef ENABLE_IPV4_FRAGMENTS
 	/* Indicate that this is a datagram fragment for which we cannot
 	 * retrieve L4 ports. Do not set flag if we support fragmentation.
 	 */
-	is_untracked_fragment = ipv4_is_fragment(ip4);
+	is_untracked_fragment = ipfrag_is_fragment(fraginfo);
 #endif
 
 	ct_buffer = map_lookup_elem(&cilium_tail_call_buffer4, &zero);
@@ -1926,15 +1910,12 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 
 		/* Reverse NAT applies to return traffic only. */
 		if (unlikely(ct_state->rev_nat_index)) {
-			bool has_l4_header = false;
 			int ret2;
-
-			has_l4_header = ipv4_has_l4_header(ip4);
 
 			ret2 = lb4_rev_nat(ctx, ETH_HLEN, l4_off,
 					   ct_state->rev_nat_index,
 					   ct_state->loopback,
-					   tuple, has_l4_header);
+					   tuple, ipfrag_has_l4_header(fraginfo));
 			if (IS_ERR(ret2))
 				return ret2;
 		}
@@ -2352,16 +2333,20 @@ int cil_to_container(struct __ctx_buff *ctx)
 
 	bpf_clear_meta(ctx);
 
-	magic = inherit_identity_from_host(ctx, &identity);
-	if (magic == MARK_MAGIC_PROXY_INGRESS || magic == MARK_MAGIC_PROXY_EGRESS)
-		trace = TRACE_FROM_PROXY;
 #if defined(ENABLE_L7_LB)
-	else if (magic == MARK_MAGIC_PROXY_EGRESS_EPID) {
-		ret = tail_call_egress_policy(ctx, (__u16)identity);
-		return send_drop_notify(ctx, identity, sec_label, LXC_ID,
+	if ((ctx->mark & MARK_MAGIC_HOST_MASK) == MARK_MAGIC_PROXY_EGRESS_EPID) {
+		__u16 lxc_id = get_epid(ctx);
+
+		ctx->mark = 0;
+		ret = tail_call_egress_policy(ctx, lxc_id);
+		return send_drop_notify(ctx, lxc_id, sec_label, LXC_ID,
 					ret, METRIC_INGRESS);
 	}
 #endif
+
+	magic = inherit_identity_from_host(ctx, &identity);
+	if (magic == MARK_MAGIC_PROXY_INGRESS || magic == MARK_MAGIC_PROXY_EGRESS)
+		trace = TRACE_FROM_PROXY;
 
 	send_trace_notify(ctx, trace, identity, sec_label, LXC_ID,
 			  ctx->ingress_ifindex, TRACE_REASON_UNKNOWN, TRACE_PAYLOAD_LEN);

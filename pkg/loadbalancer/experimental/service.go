@@ -80,9 +80,32 @@ type Service struct {
 	// PortNames maps a port name to a port number.
 	PortNames map[string]uint16
 
+	// TrafficDistribution if not default will influence how backends are chosen for
+	// frontends associated with this service.
+	TrafficDistribution TrafficDistribution
+
 	// Properties are additional untyped properties that can carry feature
 	// specific metadata about the service.
 	Properties part.Map[string, any]
+}
+
+type TrafficDistribution string
+
+const (
+	// TrafficDistributionDefault will ignore any topology aware hints for choosing the backends.
+	TrafficDistributionDefault = TrafficDistribution("")
+
+	// TrafficDistributionPreferClose Indicates preference for routing traffic to topologically close backends,
+	// that is to backends that are in the same zone.
+	TrafficDistributionPreferClose = TrafficDistribution("PreferClose")
+)
+
+func (svc *Service) GetLBAlgorithmAnnotation() loadbalancer.SVCLoadBalancingAlgorithm {
+	return loadbalancer.ToSVCLoadBalancingAlgorithm(svc.Annotations[annotation.ServiceLoadBalancingAlgorithm])
+}
+
+func (svc *Service) GetAnnotations() map[string]string {
+	return svc.Annotations
 }
 
 type ProxyRedirect struct {
@@ -188,6 +211,10 @@ func (svc *Service) TableRow() []string {
 		flags = append(flags, "Properties="+strings.Join(propKeys, ", "))
 	}
 
+	if svc.TrafficDistribution != TrafficDistributionDefault {
+		flags = append(flags, "TrafficDistribution="+string(svc.TrafficDistribution))
+	}
+
 	sort.Strings(flags)
 
 	return []string{
@@ -211,10 +238,6 @@ func (svc *Service) showPortNames() string {
 
 	}
 	return b.String()
-}
-
-func (svc *Service) GetLBAlgorithmAnnotation() loadbalancer.SVCLoadBalancingAlgorithm {
-	return loadbalancer.ToSVCLoadBalancingAlgorithm(svc.Annotations[annotation.ServiceLoadBalancingAlgorithm])
 }
 
 var (

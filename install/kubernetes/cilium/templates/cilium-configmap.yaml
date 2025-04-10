@@ -520,11 +520,29 @@ data:
   routing-mode: {{ .Values.routingMode | default (ternary "native" "tunnel" .Values.gke.enabled) | quote }}
   tunnel-protocol: {{ .Values.tunnelProtocol | default "vxlan" | quote }}
 
+{{- if eq .Values.routingMode "native" }}
+  {{- if and .Values.ipv4.enabled .Values.enableIPv4Masquerade (not .Values.ipMasqAgent.enabled) }}
+    {{- if and (ne $ipam "eni") (ne $ipam "alibabacloud") }}
+      {{- if not .Values.ipv4NativeRoutingCIDR }}
+        {{- fail " ipv4NativeRoutingCIDR must be set when routingMode is native"}}
+      {{- end }}
+    {{- end }}
+  {{- end }}
+  {{- if and .Values.ipv6.enabled .Values.enableIPv6Masquerade (not .Values.ipMasqAgent.enabled) }}
+    {{- if not .Values.ipv6NativeRoutingCIDR }}
+      {{- fail "ipv6NativeRoutingCIDR must be set when routingMode is native"  }}
+    {{- end }}
+  {{- end }}
+{{- end }}
+
 {{- if .Values.tunnelPort }}
   tunnel-port: {{ .Values.tunnelPort | quote }}
 {{- end }}
 {{- if .Values.tunnelSourcePortRange }}
   tunnel-source-port-range: {{ .Values.tunnelSourcePortRange | quote }}
+{{- end }}
+{{- if .Values.underlayProtocol }}
+  underlay-protocol: {{ .Values.underlayProtocol | quote }}
 {{- end }}
 
 {{- if .Values.serviceNoBackendResponse }}
@@ -981,6 +999,9 @@ data:
   enable-hubble-open-metrics: {{ .Values.hubble.metrics.enableOpenMetrics | quote }}
 {{- end }}
 
+{{- if hasKey .Values.hubble.networkPolicyCorrelation "enabled" }}
+  hubble-network-policy-correlation-enabled: {{ .Values.hubble.networkPolicyCorrelation.enabled | quote }}
+{{- end }}
 {{- if .Values.hubble.redact }}
 {{- if eq .Values.hubble.redact.enabled true }}
   # Enables hubble redact capabilities
@@ -1228,10 +1249,6 @@ data:
 
   identity-management-mode: {{ .Values.identityManagementMode | quote }}
 
-{{- if hasKey .Values "enableK8sTerminatingEndpoint" }}
-  enable-k8s-terminating-endpoint: {{ .Values.enableK8sTerminatingEndpoint | quote }}
-{{- end }}
-
 {{- if hasKey .Values.sctp "enabled" }}
   enable-sctp: {{ .Values.sctp.enabled | quote }}
 {{- end }}
@@ -1357,6 +1374,10 @@ data:
 
   external-envoy-proxy: {{ include "envoyDaemonSetEnabled" . | quote }}
   envoy-base-id: {{ .Values.envoy.baseID | quote }}
+
+{{- if .Values.envoy.httpUpstreamLingerTimeout }}
+  envoy-http-upstream-linger-timeout: {{ .Values.envoy.httpUpstreamLingerTimeout | quote }}
+{{- end }}
 
 {{- if .Values.envoy.policyRestoreTimeoutDuration }}
   envoy-policy-restore-timeout: {{ .Values.envoy.policyRestoreTimeoutDuration | quote }}

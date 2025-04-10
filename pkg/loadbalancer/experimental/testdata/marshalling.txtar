@@ -75,6 +75,7 @@ Address              Instances
   "PortNames": {
     "http": 80
   },
+  "TrafficDistribution": "",
   "Properties": []
 }
 -- frontends-expected.json --
@@ -111,7 +112,9 @@ Address              Instances
       ],
       "Weight": 100,
       "NodeName": "nodeport-worker",
-      "ZoneID": 0,
+      "Zone": "",
+      "ForZones": null,
+      "ClusterID": 0,
       "Source": "k8s",
       "State": 0,
       "Unhealthy": false,
@@ -154,7 +157,9 @@ Address              Instances
       ],
       "Weight": 100,
       "NodeName": "nodeport-worker",
-      "ZoneID": 0,
+      "Zone": "",
+      "ForZones": null,
+      "ClusterID": 0,
       "Source": "k8s",
       "State": 0,
       "Unhealthy": false,
@@ -194,7 +199,9 @@ Address              Instances
         ],
         "Weight": 100,
         "NodeName": "nodeport-worker",
-        "ZoneID": 0,
+        "Zone": "",
+        "ForZones": null,
+        "ClusterID": 0,
         "Source": "k8s",
         "State": 0,
         "Unhealthy": false,
@@ -232,7 +239,9 @@ Address              Instances
         ],
         "Weight": 100,
         "NodeName": "nodeport-worker",
-        "ZoneID": 0,
+        "Zone": "",
+        "ForZones": null,
+        "ClusterID": 0,
         "Source": "k8s",
         "State": 0,
         "Unhealthy": false,
@@ -242,10 +251,7 @@ Address              Instances
   ]
 }
 -- services-expected.yaml --
-name:
-    namespace: test
-    name: echo
-    cluster: ""
+name: test/echo
 source: k8s
 labels: {}
 annotations: {}
@@ -262,15 +268,13 @@ loopbackhostport: false
 sourceranges: []
 portnames:
     http: 80
+trafficdistribution: ""
 properties: []
 -- frontends-expected.yaml --
 frontendparams:
     address: 10.96.50.104:80/TCP
     type: ClusterIP
-    servicename:
-        namespace: test
-        name: echo
-        cluster: ""
+    servicename: test/echo
     portname: http
     serviceport: 80
 status:
@@ -283,7 +287,9 @@ backends:
         - http
       weight: 100
       nodename: nodeport-worker
-      zoneid: 0
+      zone: ""
+      forzones: []
+      clusterid: 0
       source: k8s
       state: 0
       unhealthy: false
@@ -294,10 +300,7 @@ redirectto: null
 frontendparams:
     address: '[2001::1]:80/TCP'
     type: ClusterIP
-    servicename:
-        namespace: test
-        name: echo
-        cluster: ""
+    servicename: test/echo
     portname: http
     serviceport: 80
 status:
@@ -310,7 +313,9 @@ backends:
         - http
       weight: 100
       nodename: nodeport-worker
-      zoneid: 0
+      zone: ""
+      forzones: []
+      clusterid: 0
       source: k8s
       state: 0
       unhealthy: false
@@ -321,10 +326,7 @@ redirectto: null
 address: 10.244.1.1:8080/TCP
 instances:
     - k:
-        servicename:
-            namespace: test
-            name: echo
-            cluster: ""
+        servicename: test/echo
         sourcepriority: 4
       v:
         address: 10.244.1.1:8080/TCP
@@ -332,7 +334,9 @@ instances:
             - http
         weight: 100
         nodename: nodeport-worker
-        zoneid: 0
+        zone: ""
+        forzones: []
+        clusterid: 0
         source: k8s
         state: 0
         unhealthy: false
@@ -341,10 +345,7 @@ instances:
 address: '[2002::2]:8080/TCP'
 instances:
     - k:
-        servicename:
-            namespace: test
-            name: echo
-            cluster: ""
+        servicename: test/echo
         sourcepriority: 4
       v:
         address: '[2002::2]:8080/TCP'
@@ -352,7 +353,9 @@ instances:
             - http
         weight: 100
         nodename: nodeport-worker
-        zoneid: 0
+        zone: ""
+        forzones: []
+        clusterid: 0
         source: k8s
         state: 0
         unhealthy: false

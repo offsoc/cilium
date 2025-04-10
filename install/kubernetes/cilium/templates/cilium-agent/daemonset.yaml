@@ -72,6 +72,7 @@ spec:
         {{- with .Values.podAnnotations }}
         {{- toYaml . | nindent 8 }}
         {{- end }}
+        kubectl.kubernetes.io/default-container: cilium-agent
       labels:
         k8s-app: cilium
         app.kubernetes.io/name: cilium-agent
@@ -158,6 +159,8 @@ spec:
             httpHeaders:
             - name: "brief"
               value: "true"
+            - name: "require-k8s-connectivity"
+              value: {{ .Values.livenessProbe.requireK8sConnectivity | quote }}
           {{- end }}
           periodSeconds: {{ .Values.livenessProbe.periodSeconds }}
           successThreshold: 1
@@ -229,7 +232,7 @@ spec:
         {{- end }}
         {{- if .Values.cni.install }}
         lifecycle:
-          {{- if ne .Values.cni.chainingMode "aws-cni" }}
+          {{- if and .Values.cni.iptablesRemoveAWSRules (ne .Values.cni.chainingMode "aws-cni") }}
           postStart:
             exec:
               command:

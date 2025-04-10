@@ -1533,22 +1533,28 @@ type CapacityReservation struct {
 	//   to request parameters that are not valid, capacity constraints, or instance
 	//   limit constraints. You can view a failed request for 60 minutes.
 	//
-	//   - scheduled - (Future-dated Capacity Reservations only) The future-dated
-	//   Capacity Reservation request was approved and the Capacity Reservation is
-	//   scheduled for delivery on the requested start date.
+	//   - scheduled - (Future-dated Capacity Reservations) The future-dated Capacity
+	//   Reservation request was approved and the Capacity Reservation is scheduled for
+	//   delivery on the requested start date.
 	//
-	//   - assessing - (Future-dated Capacity Reservations only) Amazon EC2 is
-	//   assessing your request for a future-dated Capacity Reservation.
+	//   - payment-pending - (Capacity Blocks) The upfront payment has not been
+	//   processed yet.
 	//
-	//   - delayed - (Future-dated Capacity Reservations only) Amazon EC2 encountered a
+	//   - payment-failed - (Capacity Blocks) The upfront payment was not processed in
+	//   the 12-hour time frame. Your Capacity Block was released.
+	//
+	//   - assessing - (Future-dated Capacity Reservations) Amazon EC2 is assessing
+	//   your request for a future-dated Capacity Reservation.
+	//
+	//   - delayed - (Future-dated Capacity Reservations) Amazon EC2 encountered a
 	//   delay in provisioning the requested future-dated Capacity Reservation. Amazon
 	//   EC2 is unable to deliver the requested capacity by the requested start date and
 	//   time.
 	//
-	//   - unsupported - (Future-dated Capacity Reservations only) Amazon EC2 can't
-	//   support the future-dated Capacity Reservation request due to capacity
-	//   constraints. You can view unsupported requests for 30 days. The Capacity
-	//   Reservation will not be delivered.
+	//   - unsupported - (Future-dated Capacity Reservations) Amazon EC2 can't support
+	//   the future-dated Capacity Reservation request due to capacity constraints. You
+	//   can view unsupported requests for 30 days. The Capacity Reservation will not be
+	//   delivered.
 	State CapacityReservationState
 
 	// Any tags assigned to the Capacity Reservation.
@@ -4272,16 +4278,12 @@ type ElasticGpuSpecification struct {
 
 // Deprecated.
 //
-// Amazon Elastic Graphics reached end of life on January 8, 2024. For workloads
-// that require graphics acceleration, we recommend that you use Amazon EC2 G4ad,
-// G4dn, or G5 instances.
+// Amazon Elastic Graphics reached end of life on January 8, 2024.
 type ElasticGpuSpecificationResponse struct {
 
 	// Deprecated.
 	//
-	// Amazon Elastic Graphics reached end of life on January 8, 2024. For workloads
-	// that require graphics acceleration, we recommend that you use Amazon EC2 G4ad,
-	// G4dn, or G5 instances.
+	// Amazon Elastic Graphics reached end of life on January 8, 2024.
 	Type *string
 
 	noSmithyDocumentSerde
@@ -4440,10 +4442,11 @@ type EnaSrdSpecification struct {
 type EnaSrdSpecificationRequest struct {
 
 	// Specifies whether ENA Express is enabled for the network interface when you
-	// launch an instance from your launch template.
+	// launch an instance.
 	EnaSrdEnabled *bool
 
-	// Contains ENA Express settings for UDP network traffic in your launch template.
+	// Contains ENA Express settings for UDP network traffic for the network interface
+	// attached to the instance.
 	EnaSrdUdpSpecification *EnaSrdUdpSpecificationRequest
 
 	noSmithyDocumentSerde
@@ -4469,8 +4472,7 @@ type EnaSrdUdpSpecificationRequest struct {
 
 	// Indicates whether UDP traffic uses ENA Express for your instance. To ensure
 	// that UDP traffic can use ENA Express when you launch an instance, you must also
-	// set EnaSrdEnabled in the EnaSrdSpecificationRequest to true in your launch
-	// template.
+	// set EnaSrdEnabled in the EnaSrdSpecificationRequest to true .
 	EnaSrdUdpEnabled *bool
 
 	noSmithyDocumentSerde
@@ -5389,12 +5391,12 @@ type FleetEbsBlockDeviceRequest struct {
 	// Identifier (key ID, key alias, key ARN, or alias ARN) of the customer managed
 	// KMS key to use for EBS encryption.
 	//
-	// This parameter is only supported on BlockDeviceMapping objects called by [RunInstances], [RequestSpotFleet],
-	// and [RequestSpotInstances].
+	// This parameter is only supported on BlockDeviceMapping objects called by [CreateFleet], [RequestSpotInstances],
+	// and [RunInstances].
 	//
+	// [CreateFleet]: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_CreateFleet.html
 	// [RequestSpotInstances]: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_RequestSpotInstances.html
 	// [RunInstances]: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_RunInstances.html
-	// [RequestSpotFleet]: https://docs.aws.amazon.com/AWSEC2/latest/APIReference/API_RequestSpotFleet.html
 	KmsKeyId *string
 
 	// The ID of the snapshot.
@@ -5468,9 +5470,12 @@ type FleetLaunchTemplateOverrides struct {
 	// The Availability Zone in which to launch the instances.
 	AvailabilityZone *string
 
-	// The block device mapping, which defines the EBS volumes and instance store
-	// volumes to attach to the instance at launch. For more information, see [Block device mappings for volumes on Amazon EC2 instances]in the
-	// Amazon EC2 User Guide.
+	// The block device mappings, which define the EBS volumes and instance store
+	// volumes to attach to the instance at launch.
+	//
+	// Supported only for fleets of type instant .
+	//
+	// For more information, see [Block device mappings for volumes on Amazon EC2 instances] in the Amazon EC2 User Guide.
 	//
 	// [Block device mappings for volumes on Amazon EC2 instances]: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/block-device-mapping-concepts.html
 	BlockDeviceMappings []BlockDeviceMappingResponse
@@ -5580,24 +5585,12 @@ type FleetLaunchTemplateOverridesRequest struct {
 	// The Availability Zone in which to launch the instances.
 	AvailabilityZone *string
 
-	// The block device mapping, which defines the EBS volumes and instance store
-	// volumes to attach to the instance at launch. For more information, see [Block device mappings for volumes on Amazon EC2 instances]in the
-	// Amazon EC2 User Guide.
+	// The block device mappings, which define the EBS volumes and instance store
+	// volumes to attach to the instance at launch.
 	//
-	// To override a block device mapping specified in the launch template:
+	// Supported only for fleets of type instant .
 	//
-	//   - Specify the exact same DeviceName here as specified in the launch template.
-	//
-	//   - Only specify the parameters you want to change.
-	//
-	//   - Any parameters you don't specify here will keep their original launch
-	//   template values.
-	//
-	// To add a new block device mapping:
-	//
-	//   - Specify a DeviceName that doesn't exist in the launch template.
-	//
-	//   - Specify all desired parameters here.
+	// For more information, see [Block device mappings for volumes on Amazon EC2 instances] in the Amazon EC2 User Guide.
 	//
 	// [Block device mappings for volumes on Amazon EC2 instances]: https://docs.aws.amazon.com/AWSEC2/latest/UserGuide/block-device-mapping-concepts.html
 	BlockDeviceMappings []FleetBlockDeviceMappingRequest
@@ -7479,6 +7472,10 @@ type InstanceEventWindowAssociationRequest struct {
 
 	// The instance tags to associate with the event window. Any instances associated
 	// with the tags will be associated with the event window.
+	//
+	// Note that while you can't create tag keys beginning with aws: , you can specify
+	// existing Amazon Web Services managed tag keys (with the aws: prefix) when
+	// specifying them as targets to associate with the event window.
 	InstanceTags []Tag
 
 	noSmithyDocumentSerde
@@ -7495,6 +7492,10 @@ type InstanceEventWindowAssociationTarget struct {
 
 	// The instance tags associated with the event window. Any instances associated
 	// with the tags will be associated with the event window.
+	//
+	// Note that while you can't create tag keys beginning with aws: , you can specify
+	// existing Amazon Web Services managed tag keys (with the aws: prefix) when
+	// specifying them as targets to associate with the event window.
 	Tags []Tag
 
 	noSmithyDocumentSerde
@@ -8281,10 +8282,6 @@ type InstanceRequirements struct {
 	//
 	//   - For instance types with GPU accelerators, specify gpu .
 	//
-	//   - For instance types with Inference accelerators, specify inference .
-	//
-	//   - For instance types with Inference accelerators, specify inference .
-	//
 	// Default: Any accelerator type
 	AcceleratorTypes []AcceleratorType
 
@@ -8653,8 +8650,6 @@ type InstanceRequirementsRequest struct {
 	//   - For instance types with FPGA accelerators, specify fpga .
 	//
 	//   - For instance types with GPU accelerators, specify gpu .
-	//
-	//   - For instance types with Inference accelerators, specify inference .
 	//
 	// Default: Any accelerator type
 	AcceleratorTypes []AcceleratorType
@@ -11404,11 +11399,12 @@ type LaunchTemplateInstanceNetworkInterfaceSpecificationRequest struct {
 	// A description for the network interface.
 	Description *string
 
-	// The device index for the network interface attachment. Each network interface
-	// requires a device index. If you create a launch template that includes secondary
-	// network interfaces but not a primary network interface, then you must add a
-	// primary network interface as a launch parameter when you launch an instance from
-	// the template.
+	// The device index for the network interface attachment. The primary network
+	// interface has a device index of 0. Each network interface is of type interface ,
+	// you must specify a device index. If you create a launch template that includes
+	// secondary network interfaces but not a primary network interface, then you must
+	// add a primary network interface as a launch parameter when you launch an
+	// instance from the template.
 	DeviceIndex *int32
 
 	// Configure ENA Express settings for your launch template.
@@ -13868,11 +13864,11 @@ type OperatorRequest struct {
 	noSmithyDocumentSerde
 }
 
-// Describes whether the resource is managed by an service provider and, if so,
+// Describes whether the resource is managed by a service provider and, if so,
 // describes the service provider that manages it.
 type OperatorResponse struct {
 
-	// If true , the resource is managed by an service provider.
+	// If true , the resource is managed by a service provider.
 	Managed *bool
 
 	// If managed is true , then the principal is returned. The principal is the
@@ -15172,9 +15168,7 @@ type RequestLaunchTemplateData struct {
 
 	// Deprecated.
 	//
-	// Amazon Elastic Graphics reached end of life on January 8, 2024. For workloads
-	// that require graphics acceleration, we recommend that you use Amazon EC2 G4ad,
-	// G4dn, or G5 instances.
+	// Amazon Elastic Graphics reached end of life on January 8, 2024.
 	ElasticGpuSpecifications []ElasticGpuSpecification
 
 	// Amazon Elastic Inference is no longer available.
@@ -15184,14 +15178,6 @@ type RequestLaunchTemplateData struct {
 	// instances to accelerate your Deep Learning (DL) inference workloads.
 	//
 	// You cannot specify accelerators from different generations in the same request.
-	//
-	// Starting April 15, 2023, Amazon Web Services will not onboard new customers to
-	// Amazon Elastic Inference (EI), and will help current customers migrate their
-	// workloads to options that offer better price and performance. After April 15,
-	// 2023, new customers will not be able to launch instances with Amazon EI
-	// accelerators in Amazon SageMaker, Amazon ECS, or Amazon EC2. However, customers
-	// who have used Amazon EI at least once during the past 30-day period are
-	// considered current customers and will be able to continue using the service.
 	ElasticInferenceAccelerators []LaunchTemplateElasticInferenceAccelerator
 
 	// Indicates whether the instance is enabled for Amazon Web Services Nitro
@@ -15892,9 +15878,7 @@ type ResponseLaunchTemplateData struct {
 
 	// Deprecated.
 	//
-	// Amazon Elastic Graphics reached end of life on January 8, 2024. For workloads
-	// that require graphics acceleration, we recommend that you use Amazon EC2 G4ad,
-	// G4dn, or G5 instances.
+	// Amazon Elastic Graphics reached end of life on January 8, 2024.
 	ElasticGpuSpecifications []ElasticGpuSpecificationResponse
 
 	// Amazon Elastic Inference is no longer available.
@@ -15904,14 +15888,6 @@ type ResponseLaunchTemplateData struct {
 	// instances to accelerate your Deep Learning (DL) inference workloads.
 	//
 	// You cannot specify accelerators from different generations in the same request.
-	//
-	// Starting April 15, 2023, Amazon Web Services will not onboard new customers to
-	// Amazon Elastic Inference (EI), and will help current customers migrate their
-	// workloads to options that offer better price and performance. After April 15,
-	// 2023, new customers will not be able to launch instances with Amazon EI
-	// accelerators in Amazon SageMaker, Amazon ECS, or Amazon EC2. However, customers
-	// who have used Amazon EI at least once during the past 30-day period are
-	// considered current customers and will be able to continue using the service.
 	ElasticInferenceAccelerators []LaunchTemplateElasticInferenceAcceleratorResponse
 
 	// Indicates whether the instance is enabled for Amazon Web Services Nitro
@@ -16119,6 +16095,343 @@ type Route struct {
 
 	// The ID of a VPC peering connection.
 	VpcPeeringConnectionId *string
+
+	noSmithyDocumentSerde
+}
+
+// Describes a route server and its configuration.
+//
+// Amazon VPC Route Server simplifies routing for traffic between workloads that
+// are deployed within a VPC and its internet gateways. With this feature, VPC
+// Route Server dynamically updates VPC and internet gateway route tables with your
+// preferred IPv4 or IPv6 routes to achieve routing fault tolerance for those
+// workloads. This enables you to automatically reroute traffic within a VPC, which
+// increases the manageability of VPC routing and interoperability with third-party
+// workloads.
+//
+// Route server supports the follow route table types:
+//
+//   - VPC route tables not associated with subnets
+//
+//   - Subnet route tables
+//
+//   - Internet gateway route tables
+//
+// Route server does not support route tables associated with virtual private
+// gateways. To propagate routes into a transit gateway route table, use [Transit Gateway Connect].
+//
+// [Transit Gateway Connect]: https://docs.aws.amazon.com/vpc/latest/tgw/tgw-connect.html
+type RouteServer struct {
+
+	// The Border Gateway Protocol (BGP) Autonomous System Number (ASN) for the
+	// appliance. Valid values are from 1 to 4294967295. We recommend using a private
+	// ASN in the 64512–65534 (16-bit ASN) or 4200000000–4294967294 (32-bit ASN) range.
+	AmazonSideAsn *int64
+
+	// The number of minutes a route server will wait after BGP is re-established to
+	// unpersist the routes in the FIB and RIB. Value must be in the range of 1-5. The
+	// default value is 1. Only valid if persistRoutesState is 'enabled'.
+	//
+	// If you set the duration to 1 minute, then when your network appliance
+	// re-establishes BGP with route server, it has 1 minute to relearn it's adjacent
+	// network and advertise those routes to route server before route server resumes
+	// normal functionality. In most cases, 1 minute is probably sufficient. If,
+	// however, you have concerns that your BGP network may not be capable of fully
+	// re-establishing and re-learning everything in 1 minute, you can increase the
+	// duration up to 5 minutes.
+	PersistRoutesDuration *int64
+
+	// The current state of route persistence for the route server.
+	PersistRoutesState RouteServerPersistRoutesState
+
+	// The unique identifier of the route server.
+	RouteServerId *string
+
+	// Indicates whether SNS notifications are enabled for the route server. Enabling
+	// SNS notifications persists BGP status changes to an SNS topic provisioned by
+	// Amazon Web Services.
+	SnsNotificationsEnabled *bool
+
+	// The ARN of the SNS topic where notifications are published.
+	SnsTopicArn *string
+
+	// The current state of the route server.
+	State RouteServerState
+
+	// Any tags assigned to the route server.
+	Tags []Tag
+
+	noSmithyDocumentSerde
+}
+
+// Describes the association between a route server and a VPC.
+//
+// A route server association is the connection established between a route server
+// and a VPC.
+type RouteServerAssociation struct {
+
+	// The ID of the associated route server.
+	RouteServerId *string
+
+	// The current state of the association.
+	State RouteServerAssociationState
+
+	// The ID of the associated VPC.
+	VpcId *string
+
+	noSmithyDocumentSerde
+}
+
+// The current status of Bidirectional Forwarding Detection (BFD) for a BGP
+// session.
+type RouteServerBfdStatus struct {
+
+	// The operational status of the BFD session.
+	Status RouteServerBfdState
+
+	noSmithyDocumentSerde
+}
+
+// The BGP configuration options for a route server peer.
+type RouteServerBgpOptions struct {
+
+	// The Border Gateway Protocol (BGP) Autonomous System Number (ASN) for the
+	// appliance. Valid values are from 1 to 4294967295. We recommend using a private
+	// ASN in the 64512–65534 (16-bit ASN) or 4200000000–4294967294 (32-bit ASN) range.
+	PeerAsn *int64
+
+	// The liveness detection protocol used for the BGP peer.
+	//
+	// The requested liveness detection protocol for the BGP peer.
+	//
+	//   - bgp-keepalive : The standard BGP keep alive mechanism ([RFC4271] ) that is stable but
+	//   may take longer to fail-over in cases of network impact or router failure.
+	//
+	//   - bfd : An additional Bidirectional Forwarding Detection (BFD) protocol ([RFC5880] )
+	//   that enables fast failover by using more sensitive liveness detection.
+	//
+	// Defaults to bgp-keepalive .
+	//
+	// [RFC5880]: https://www.rfc-editor.org/rfc/rfc5880
+	// [RFC4271]: https://www.rfc-editor.org/rfc/rfc4271#page-21
+	PeerLivenessDetection RouteServerPeerLivenessMode
+
+	noSmithyDocumentSerde
+}
+
+// The BGP configuration options requested for a route server peer.
+type RouteServerBgpOptionsRequest struct {
+
+	// The Border Gateway Protocol (BGP) Autonomous System Number (ASN) for the
+	// appliance. Valid values are from 1 to 4294967295. We recommend using a private
+	// ASN in the 64512–65534 (16-bit ASN) or 4200000000–4294967294 (32-bit ASN) range.
+	//
+	// This member is required.
+	PeerAsn *int64
+
+	// The requested liveness detection protocol for the BGP peer.
+	//
+	//   - bgp-keepalive : The standard BGP keep alive mechanism ([RFC4271] ) that is stable but
+	//   may take longer to fail-over in cases of network impact or router failure.
+	//
+	//   - bfd : An additional Bidirectional Forwarding Detection (BFD) protocol ([RFC5880] )
+	//   that enables fast failover by using more sensitive liveness detection.
+	//
+	// Defaults to bgp-keepalive .
+	//
+	// [RFC5880]: https://www.rfc-editor.org/rfc/rfc5880
+	// [RFC4271]: https://www.rfc-editor.org/rfc/rfc4271#page-21
+	PeerLivenessDetection RouteServerPeerLivenessMode
+
+	noSmithyDocumentSerde
+}
+
+// The current status of a BGP session.
+type RouteServerBgpStatus struct {
+
+	// The operational status of the BGP session. The status enables you to monitor
+	// session liveness if you lack monitoring on your router/appliance.
+	Status RouteServerBgpState
+
+	noSmithyDocumentSerde
+}
+
+// Describes a route server endpoint and its properties.
+//
+// A route server endpoint is an Amazon Web Services-managed component inside a
+// subnet that facilitates [BGP (Border Gateway Protocol)]connections between your route server and your BGP
+// peers.
+//
+// [BGP (Border Gateway Protocol)]: https://en.wikipedia.org/wiki/Border_Gateway_Protocol
+type RouteServerEndpoint struct {
+
+	// The IP address of the Elastic network interface for the endpoint.
+	EniAddress *string
+
+	// The ID of the Elastic network interface for the endpoint.
+	EniId *string
+
+	// The reason for any failure in endpoint creation or operation.
+	FailureReason *string
+
+	// The unique identifier of the route server endpoint.
+	RouteServerEndpointId *string
+
+	// The ID of the route server associated with this endpoint.
+	RouteServerId *string
+
+	// The current state of the route server endpoint.
+	State RouteServerEndpointState
+
+	// The ID of the subnet to place the route server endpoint into.
+	SubnetId *string
+
+	// Any tags assigned to the route server endpoint.
+	Tags []Tag
+
+	// The ID of the VPC containing the endpoint.
+	VpcId *string
+
+	noSmithyDocumentSerde
+}
+
+// Describes a BGP peer configuration for a route server endpoint.
+//
+// A route server peer is a session between a route server endpoint and the device
+// deployed in Amazon Web Services (such as a firewall appliance or other network
+// security function running on an EC2 instance). The device must meet these
+// requirements:
+//
+//   - Have an elastic network interface in the VPC
+//
+//   - Support BGP (Border Gateway Protocol)
+//
+//   - Can initiate BGP sessions
+type RouteServerPeer struct {
+
+	// The current status of the BFD session with this peer.
+	BfdStatus *RouteServerBfdStatus
+
+	// The BGP configuration options for this peer, including ASN (Autonomous System
+	// Number) and BFD (Bidrectional Forwarding Detection) settings.
+	BgpOptions *RouteServerBgpOptions
+
+	// The current status of the BGP session with this peer.
+	BgpStatus *RouteServerBgpStatus
+
+	// The IP address of the Elastic network interface for the route server endpoint.
+	EndpointEniAddress *string
+
+	// The ID of the Elastic network interface for the route server endpoint.
+	EndpointEniId *string
+
+	// The reason for any failure in peer creation or operation.
+	FailureReason *string
+
+	// The IPv4 address of the peer device.
+	PeerAddress *string
+
+	// The ID of the route server endpoint associated with this peer.
+	RouteServerEndpointId *string
+
+	// The ID of the route server associated with this peer.
+	RouteServerId *string
+
+	// The unique identifier of the route server peer.
+	RouteServerPeerId *string
+
+	// The current state of the route server peer.
+	State RouteServerPeerState
+
+	// The ID of the subnet containing the route server peer.
+	SubnetId *string
+
+	// Any tags assigned to the route server peer.
+	Tags []Tag
+
+	// The ID of the VPC containing the route server peer.
+	VpcId *string
+
+	noSmithyDocumentSerde
+}
+
+// Describes the route propagation configuration between a route server and a
+// route table.
+//
+// When enabled, route server propagation installs the routes in the FIB on the
+// route table you've specified. Route server supports IPv4 and IPv6 route
+// propagation.
+type RouteServerPropagation struct {
+
+	// The ID of the route server configured for route propagation.
+	RouteServerId *string
+
+	// The ID of the route table configured for route server propagation.
+	RouteTableId *string
+
+	// The current state of route propagation.
+	State RouteServerPropagationState
+
+	noSmithyDocumentSerde
+}
+
+// Describes a route in the route server's routing database.
+type RouteServerRoute struct {
+
+	// The AS path attributes of the BGP route.
+	AsPaths []string
+
+	// The Multi-Exit Discriminator (MED) value of the BGP route.
+	Med *int32
+
+	// The IP address for the next hop.
+	NextHopIp *string
+
+	// The destination CIDR block of the route.
+	Prefix *string
+
+	// Details about the installation status of this route in route tables.
+	RouteInstallationDetails []RouteServerRouteInstallationDetail
+
+	// The ID of the route server endpoint that received this route.
+	RouteServerEndpointId *string
+
+	// The ID of the route server peer that advertised this route.
+	RouteServerPeerId *string
+
+	// The current status of the route in the routing database. Values are in-rib or
+	// in-fib depending on if the routes are in the RIB or the FIB database.
+	//
+	// The [Routing Information Base (RIB)] serves as a database that stores all the routing information and network
+	// topology data collected by a router or routing system, such as routes learned
+	// from BGP peers. The RIB is constantly updated as new routing information is
+	// received or existing routes change. This ensures that the route server always
+	// has the most current view of the network topology and can make optimal routing
+	// decisions.
+	//
+	// The [Forwarding Information Base (FIB)] serves as a forwarding table for what route server has determined are the
+	// best-path routes in the RIB after evaluating all available routing information
+	// and policies. The FIB routes are installed on the route tables. The FIB is
+	// recomputed whenever there are changes to the RIB.
+	//
+	// [Routing Information Base (RIB)]: https://en.wikipedia.org/wiki/Routing_table
+	// [Forwarding Information Base (FIB)]: https://en.wikipedia.org/wiki/Forwarding_information_base
+	RouteStatus RouteServerRouteStatus
+
+	noSmithyDocumentSerde
+}
+
+// Describes the installation status of a route in a route table.
+type RouteServerRouteInstallationDetail struct {
+
+	// The current installation status of the route in the route table.
+	RouteInstallationStatus RouteServerRouteInstallationStatus
+
+	// The reason for the current installation status of the route.
+	RouteInstallationStatusReason *string
+
+	// The ID of the route table where the route is being installed.
+	RouteTableId *string
 
 	noSmithyDocumentSerde
 }

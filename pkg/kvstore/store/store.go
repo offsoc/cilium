@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"maps"
 	"path"
+	"slices"
 	"strings"
 	"sync"
 
@@ -58,8 +59,7 @@ type Configuration struct {
 	// key is discovered. This parameter is required.
 	KeyCreator KeyCreator
 
-	// Backend is the kvstore to use as a backend. If no backend is
-	// specified, kvstore.Client() is being used.
+	// Backend is the kvstore to use as a backend. This parameter is required.
 	Backend kvstore.BackendOperations
 
 	// Observer is the observe that will receive events on key mutations
@@ -84,7 +84,7 @@ func (c *Configuration) validate() error {
 	}
 
 	if c.Backend == nil {
-		c.Backend = kvstore.Client()
+		return fmt.Errorf("backend must be specified")
 	}
 
 	if c.Context == nil {
@@ -311,10 +311,7 @@ func (s *SharedStore) syncLocalKeys(ctx context.Context, lease bool) error {
 	// Create a copy of all local keys so we can unlock and sync to kvstore
 	// without holding the lock
 	s.mutex.RLock()
-	keys := make([]LocalKey, 0, len(s.localKeys))
-	for _, key := range s.localKeys {
-		keys = append(keys, key)
-	}
+	keys := slices.Collect(maps.Values(s.localKeys))
 	s.mutex.RUnlock()
 
 	for _, key := range keys {

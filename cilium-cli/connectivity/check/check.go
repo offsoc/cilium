@@ -41,6 +41,7 @@ type PerfParameters struct {
 	UDP             bool
 	Image           string
 	NetQos          bool
+	KernelProfiles  bool
 
 	NodeSelectorServer map[string]string
 	NodeSelectorClient map[string]string
@@ -94,7 +95,8 @@ type Parameters struct {
 	CiliumPodSelector      string
 	NodeSelector           map[string]string
 	DeploymentAnnotations  annotationsMap
-	NamespaceAnnotations   annotations
+	NamespaceLabels        map[string]string
+	NamespaceAnnotations   map[string]string
 	ExternalTarget         string
 	ExternalOtherTarget    string
 	ExternalCIDR           string

@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -19,8 +20,10 @@ import (
 	"github.com/cilium/cilium/pkg/bpf"
 	"github.com/cilium/cilium/pkg/datapath/config"
 	"github.com/cilium/cilium/pkg/datapath/linux/safenetlink"
+	datapath "github.com/cilium/cilium/pkg/datapath/types"
 	"github.com/cilium/cilium/pkg/datapath/xdp"
 
+	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/option"
 )
 
@@ -60,10 +63,12 @@ func xdpAttachedModeToFlag(mode uint32) link.XDPAttachFlags {
 //
 // bpffsBase is typically set to /sys/fs/bpf/cilium, but can be a temp directory
 // during tests.
-func maybeUnloadObsoleteXDPPrograms(xdpDevs []string, xdpMode xdp.Mode, bpffsBase string) {
+func maybeUnloadObsoleteXDPPrograms(logger *slog.Logger, xdpDevs []string, xdpMode xdp.Mode, bpffsBase string) {
 	links, err := safenetlink.LinkList()
 	if err != nil {
-		log.WithError(err).Warn("Failed to list links for XDP unload")
+		logger.Warn("Failed to list links for XDP unload",
+			logfields.Error, err,
+		)
 	}
 
 	for _, link := range links {
@@ -89,7 +94,9 @@ func maybeUnloadObsoleteXDPPrograms(xdpDevs []string, xdpMode xdp.Mode, bpffsBas
 		}
 		if !used {
 			if err := DetachXDP(link.Attrs().Name, bpffsBase, symbolFromHostNetdevXDP); err != nil {
-				log.WithError(err).Warn("Failed to detach obsolete XDP program")
+				logger.Warn("Failed to detach obsolete XDP program",
+					logfields.Error, err,
+				)
 			}
 		}
 	}
@@ -107,7 +114,7 @@ func xdpCompileArgs(extraCArgs []string) ([]string, error) {
 }
 
 // compileAndLoadXDPProg compiles bpf_xdp.c for the given XDP device and loads it.
-func compileAndLoadXDPProg(ctx context.Context, xdpDev string, xdpMode xdp.Mode, extraCArgs []string) error {
+func compileAndLoadXDPProg(ctx context.Context, logger *slog.Logger, lnc *datapath.LocalNodeConfiguration, xdpDev string, xdpMode xdp.Mode, extraCArgs []string) error {
 	args, err := xdpCompileArgs(extraCArgs)
 	if err != nil {
 		return fmt.Errorf("failed to derive XDP compile extra args: %w", err)
@@ -126,7 +133,7 @@ func compileAndLoadXDPProg(ctx context.Context, xdpDev string, xdpMode xdp.Mode,
 		Options:    args,
 	}
 
-	objPath, err := compile(ctx, prog, dirs)
+	objPath, err := compile(ctx, logger, prog, dirs)
 	if err != nil {
 		return err
 	}
@@ -144,7 +151,7 @@ func compileAndLoadXDPProg(ctx context.Context, xdpDev string, xdpMode xdp.Mode,
 		return fmt.Errorf("loading eBPF ELF %s: %w", objPath, err)
 	}
 
-	cfg := config.NewBPFXDP()
+	cfg := config.NewBPFXDP(nodeConfig(lnc))
 	cfg.InterfaceIfindex = uint32(iface.Attrs().Index)
 	cfg.DeviceMTU = uint16(iface.Attrs().MTU)
 
@@ -163,7 +170,7 @@ func compileAndLoadXDPProg(ctx context.Context, xdpDev string, xdpMode xdp.Mode,
 	}
 	defer obj.Close()
 
-	if err := attachXDPProgram(iface, obj.Entrypoint, symbolFromHostNetdevXDP,
+	if err := attachXDPProgram(logger, iface, obj.Entrypoint, symbolFromHostNetdevXDP,
 		bpffsDeviceLinksDir(bpf.CiliumPath(), iface), xdpConfigModeToFlag(xdpMode)); err != nil {
 		return fmt.Errorf("interface %s: %w", xdpDev, err)
 	}
@@ -179,7 +186,7 @@ func compileAndLoadXDPProg(ctx context.Context, xdpDev string, xdpMode xdp.Mode,
 //
 // bpffsDir should exist and point to the links/ subdirectory in the per-device
 // bpffs directory.
-func attachXDPProgram(iface netlink.Link, prog *ebpf.Program, progName, bpffsDir string, flags link.XDPAttachFlags) error {
+func attachXDPProgram(logger *slog.Logger, iface netlink.Link, prog *ebpf.Program, progName, bpffsDir string, flags link.XDPAttachFlags) error {
 	if prog == nil {
 		return fmt.Errorf("program %s is nil", progName)
 	}
@@ -190,7 +197,10 @@ func attachXDPProgram(iface netlink.Link, prog *ebpf.Program, progName, bpffsDir
 	switch {
 	// Update successful, nothing left to do.
 	case err == nil:
-		log.Infof("Updated link %s for program %s", pin, progName)
+		logger.Info("Updated link for program",
+			logfields.Link, pin,
+			logfields.ProgName, progName,
+		)
 
 		return nil
 
@@ -202,11 +212,17 @@ func attachXDPProgram(iface netlink.Link, prog *ebpf.Program, progName, bpffsDir
 			return fmt.Errorf("unpinning defunct link %s: %w", pin, err)
 		}
 
-		log.Infof("Unpinned defunct link %s for program %s", pin, progName)
+		logger.Info("Unpinned defunct link for program",
+			logfields.Link, pin,
+			logfields.ProgName, progName,
+		)
 
 	// No existing link found, continue trying to create one.
 	case errors.Is(err, os.ErrNotExist):
-		log.Infof("No existing link found at %s for program %s", pin, progName)
+		logger.Info("No existing link found for program",
+			logfields.Link, pin,
+			logfields.ProgName, progName,
+		)
 
 	default:
 		return fmt.Errorf("updating link %s for program %s: %w", pin, progName, err)
@@ -228,7 +244,9 @@ func attachXDPProgram(iface netlink.Link, prog *ebpf.Program, progName, bpffsDir
 			// The program was successfully attached using bpf_link. Closing a link
 			// does not detach the program if the link is pinned.
 			if err := l.Close(); err != nil {
-				log.Warnf("Failed to close bpf_link for program %s", progName)
+				logger.Warn("Failed to close bpf_link for program",
+					logfields.ProgName, progName,
+				)
 			}
 		}()
 
@@ -237,7 +255,9 @@ func attachXDPProgram(iface netlink.Link, prog *ebpf.Program, progName, bpffsDir
 		}
 
 		// Successfully created and pinned bpf_link.
-		log.Infof("Program %s attached using bpf_link", progName)
+		logger.Info("Program attached using bpf_link",
+			logfields.ProgName, progName,
+		)
 
 		return nil
 	}
@@ -252,7 +272,9 @@ func attachXDPProgram(iface netlink.Link, prog *ebpf.Program, progName, bpffsDir
 		return fmt.Errorf("attaching program %s using bpf_link: %w", progName, err)
 	}
 
-	log.Debugf("Performing netlink attach for program %s", progName)
+	logger.Debug("Performing netlink attach for program",
+		logfields.ProgName, progName,
+	)
 
 	// Omitting XDP_FLAGS_UPDATE_IF_NOEXIST equals running 'ip' with -force,
 	// and will clobber any existing XDP attachment to the interface, including
@@ -263,7 +285,9 @@ func attachXDPProgram(iface netlink.Link, prog *ebpf.Program, progName, bpffsDir
 
 	// Nothing left to do, the netlink device now holds a reference to the prog
 	// the program stays active.
-	log.Infof("Program %s was attached using netlink", progName)
+	logger.Info("Program was attached using netlink",
+		logfields.ProgName, progName,
+	)
 
 	return nil
 }
