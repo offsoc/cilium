@@ -4,9 +4,12 @@
 package check
 
 import (
+	"cmp"
 	"errors"
 	"os"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/cilium/cilium/cilium-cli/connectivity/internal/junit"
 )
@@ -47,7 +50,7 @@ func (j *JUnitCollector) Collect(ct *ConnectivityTest) {
 
 	// Timestamp of the TestSuite is the first test's start time
 	if j.testSuite.Timestamp == "" {
-		j.testSuite.Timestamp = ct.tests[0].startTime.Format("2006-01-02T15:04:05")
+		j.testSuite.Timestamp = ct.tests[0].startTime.Format(time.RFC3339)
 	}
 	for _, t := range ct.tests {
 		test := &junit.TestCase{
@@ -61,14 +64,23 @@ func (j *JUnitCollector) Collect(ct *ConnectivityTest) {
 
 		if ct.params.LogCodeOwners {
 			scenarios := t.Scenarios()
-			properties := make([]junit.Property, 0, len(scenarios)*2)
+			owners := make(map[string]struct{})
 			for _, s := range scenarios {
-				owners := ct.GetOwners(s)
+				for _, o := range ct.GetOwners(s) {
+					owners[o] = struct{}{}
+				}
+			}
+			properties := make([]junit.Property, 0, len(owners))
+			for o := range owners {
 				properties = append(properties, junit.Property{
 					Name:  "owner",
-					Value: strings.Join(owners, ", "),
+					Value: o,
 				})
 			}
+			slices.SortFunc(properties,
+				func(a, b junit.Property) int {
+					return cmp.Compare(a.Value, b.Value)
+				})
 			test.Properties = &junit.Properties{Properties: properties}
 		}
 

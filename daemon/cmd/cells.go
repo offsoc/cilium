@@ -39,6 +39,7 @@ import (
 	fqdn "github.com/cilium/cilium/pkg/fqdn/cell"
 	"github.com/cilium/cilium/pkg/fqdn/defaultdns"
 	"github.com/cilium/cilium/pkg/gops"
+	"github.com/cilium/cilium/pkg/health"
 	hubble "github.com/cilium/cilium/pkg/hubble/cell"
 	identity "github.com/cilium/cilium/pkg/identity/cell"
 	ipamcell "github.com/cilium/cilium/pkg/ipam/cell"
@@ -71,6 +72,7 @@ import (
 	"github.com/cilium/cilium/pkg/recorder"
 	"github.com/cilium/cilium/pkg/redirectpolicy"
 	"github.com/cilium/cilium/pkg/service"
+	shell "github.com/cilium/cilium/pkg/shell/server"
 	"github.com/cilium/cilium/pkg/signal"
 	"github.com/cilium/cilium/pkg/source"
 )
@@ -133,6 +135,7 @@ var (
 
 		// Provide CRD resource names for 'k8sSynced.CRDSyncCell' below.
 		cell.Provide(func() k8sSynced.CRDSyncResourceNames { return k8sSynced.AgentCRDResourceNames() }),
+
 		// CRDSyncCell provides a promise that is resolved as soon as CRDs used by the
 		// agent have k8sSynced.
 		// Allows cells to wait for CRDs before trying to list Cilium resources.
@@ -140,7 +143,7 @@ var (
 		k8sSynced.CRDSyncCell,
 
 		// Shell for inspecting the agent. Listens on the 'shell.sock' UNIX socket.
-		shellCell,
+		shell.Cell,
 
 		// DNSProxy provides the DefaultDNSProxy singleton which is used by different
 		// packages.
@@ -332,6 +335,9 @@ var (
 
 		// FQDN rules cell provides the FQDN proxy functionality.
 		fqdn.Cell,
+
+		// Cilium health infrastructure (host and endpoint connectivity)
+		health.Cell,
 	)
 )
 

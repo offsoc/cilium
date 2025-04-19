@@ -27,8 +27,6 @@ import (
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 
-	healthApi "github.com/cilium/cilium/api/v1/health/server"
-	"github.com/cilium/cilium/api/v1/server"
 	"github.com/cilium/cilium/daemon/cmd/cni"
 	agentK8s "github.com/cilium/cilium/daemon/k8s"
 	"github.com/cilium/cilium/pkg/auth"
@@ -60,6 +58,7 @@ import (
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/flowdebug"
 	"github.com/cilium/cilium/pkg/fqdn/bootstrap"
+	"github.com/cilium/cilium/pkg/health"
 	"github.com/cilium/cilium/pkg/hive"
 	hubblecell "github.com/cilium/cilium/pkg/hubble/cell"
 	"github.com/cilium/cilium/pkg/identity"
@@ -74,7 +73,6 @@ import (
 	k8sSynced "github.com/cilium/cilium/pkg/k8s/synced"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
 	"github.com/cilium/cilium/pkg/kvstore"
-	"github.com/cilium/cilium/pkg/l2announcer"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/labelsfilter"
 	"github.com/cilium/cilium/pkg/loadbalancer/experimental"
@@ -874,6 +872,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableIPv4FragmentsTrackingName, defaults.EnableIPv4FragmentsTracking, "Enable IPv4 fragments tracking for L4-based lookups")
 	option.BindEnv(vp, option.EnableIPv4FragmentsTrackingName)
 
+	flags.Bool(option.EnableIPv6FragmentsTrackingName, defaults.EnableIPv6FragmentsTracking, "Enable IPv6 fragments tracking for L4-based lookups")
+	option.BindEnv(vp, option.EnableIPv6FragmentsTrackingName)
+
 	flags.Int(option.FragmentsMapEntriesName, defaults.FragmentsMapEntries, "Maximum number of entries in fragments tracking map")
 	option.BindEnv(vp, option.FragmentsMapEntriesName)
 
@@ -1349,6 +1350,12 @@ func initEnv(vp *viper.Viper) {
 		}
 	}
 
+	if option.Config.EnableIPv6FragmentsTracking {
+		if !option.Config.EnableIPv6 {
+			option.Config.EnableIPv6FragmentsTracking = false
+		}
+	}
+
 	if option.Config.EnableBPFTProxy {
 		if probes.HaveProgramHelper(logging.DefaultSlogLogger, ebpf.SchedCLS, asm.FnSkAssign) != nil {
 			option.Config.EnableBPFTProxy = false
@@ -1508,7 +1515,6 @@ type daemonParams struct {
 	Lifecycle           cell.Lifecycle
 	Health              cell.Health
 	Clientset           k8sClient.Clientset
-	Loader              datapath.Loader
 	WGAgent             *wireguard.Agent
 	LocalNodeStore      *node.LocalNodeStore
 	Shutdowner          hive.Shutdowner
@@ -1533,12 +1539,9 @@ type daemonParams struct {
 	IPCache             *ipcache.IPCache
 	DirReadStatus       policyDirectory.DirectoryWatcherReadStatus
 	CNIConfigManager    cni.CNIConfigManager
-	SwaggerSpec         *server.Spec
-	HealthAPISpec       *healthApi.Spec
-	ServiceCache        k8s.ServiceCache
+	CiliumHealth        health.CiliumHealthManager
 	ClusterMesh         *clustermesh.ClusterMesh
 	MonitorAgent        monitorAgent.Agent
-	L2Announcer         *l2announcer.L2Announcer
 	ServiceManager      service.ServiceManager
 	L7Proxy             *proxy.Proxy
 	DB                  *statedb.DB
@@ -1802,7 +1805,9 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 
 	bootstrapStats.healthCheck.Start()
 	if option.Config.EnableHealthChecking {
-		d.initHealth(params.HealthAPISpec, cleaner, params.Sysctl)
+		if err := d.ciliumHealth.Init(d.ctx, d.healthEndpointRouting); err != nil {
+			return fmt.Errorf("failed to initialize cilium health: %w", err)
+		}
 	}
 	bootstrapStats.healthCheck.End(true)
 

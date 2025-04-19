@@ -218,7 +218,13 @@ func (d *Daemon) initMaps() error {
 	}
 
 	if option.Config.EnableIPv4FragmentsTracking {
-		if err := fragmap.InitMap(option.Config.FragmentsMapEntries); err != nil {
+		if err := fragmap.InitMap4(option.Config.FragmentsMapEntries); err != nil {
+			return fmt.Errorf("initializing fragments map: %w", err)
+		}
+	}
+
+	if option.Config.EnableIPv6FragmentsTracking {
+		if err := fragmap.InitMap6(option.Config.FragmentsMapEntries); err != nil {
 			return fmt.Errorf("initializing fragments map: %w", err)
 		}
 	}
@@ -344,7 +350,7 @@ func setupRouteToVtepCidr() error {
 	}
 
 	addedVtepRoutes, removedVtepRoutes := cidr.DiffCIDRLists(routeCidrs, option.Config.VtepCIDRs)
-	vtepMTU := mtu.EthernetMTU - mtu.TunnelOverhead
+	vtepMTU := mtu.EthernetMTU - mtu.TunnelOverheadIPv4
 
 	if option.Config.EnableL7Proxy {
 		for _, prefix := range addedVtepRoutes {

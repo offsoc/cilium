@@ -35,6 +35,7 @@
 #include "lib/dbg.h"
 #include "lib/trace.h"
 #include "lib/l3.h"
+#include "lib/local_delivery.h"
 #include "lib/drop.h"
 #include "lib/identity.h"
 #include "lib/nodeport.h"
@@ -63,10 +64,20 @@ static __always_inline int handle_ipv6(struct __ctx_buff *ctx,
 	struct endpoint_info *ep;
 	bool decrypted;
 	bool __maybe_unused is_dsr = false;
+	fraginfo_t fraginfo __maybe_unused;
 
 	/* verifier workaround (dereference of modified ctx ptr) */
 	if (!revalidate_data_pull(ctx, &data, &data_end, &ip6))
 		return DROP_INVALID;
+
+#ifndef ENABLE_IPV6_FRAGMENTS
+	fraginfo = ipv6_get_fraginfo(ctx, ip6);
+	if (fraginfo < 0)
+		return (int)fraginfo;
+	if (ipfrag_is_fragment(fraginfo))
+		return DROP_FRAG_NOSUPPORT;
+#endif
+
 #ifdef ENABLE_NODEPORT
 	if (!ctx_skip_nodeport(ctx)) {
 		bool punt_to_stack = false;
@@ -533,6 +544,7 @@ int tail_handle_ipv4(struct __ctx_buff *ctx)
 __section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_ARP)
 int tail_handle_arp(struct __ctx_buff *ctx)
 {
+	struct remote_endpoint_info fake_info = {0};
 	union macaddr mac = THIS_INTERFACE_MAC;
 	union macaddr smac;
 	struct trace_ctx trace = {
@@ -562,7 +574,9 @@ int tail_handle_arp(struct __ctx_buff *ctx)
 	if (unlikely(ret != 0))
 		return send_drop_notify_error(ctx, UNKNOWN_ID, ret, METRIC_EGRESS);
 	if (info->tunnel_endpoint) {
-		ret = __encap_and_redirect_with_nodeid(ctx, info->tunnel_endpoint,
+		fake_info.tunnel_endpoint.ip4 = info->tunnel_endpoint;
+		fake_info.flag_has_tunnel_ep = true;
+		ret = __encap_and_redirect_with_nodeid(ctx, &fake_info,
 						       LOCAL_NODE_ID, WORLD_IPV4_ID,
 						       WORLD_IPV4_ID, &trace);
 		if (IS_ERR(ret))
@@ -669,12 +683,10 @@ int cil_from_overlay(struct __ctx_buff *ctx)
 		/* If packets are decrypted the key has already been pushed into metadata. */
 		if (!decrypted) {
 			struct bpf_tunnel_key key = {};
-			__u32 key_size = TUNNEL_KEY_WITHOUT_SRC_IP;
 
-			if (unlikely(ctx_get_tunnel_key(ctx, &key, key_size, 0) < 0)) {
-				ret = DROP_NO_TUNNEL_KEY;
+			ret = get_tunnel_key(ctx, &key);
+			if (unlikely(ret < 0))
 				goto out;
-			}
 			cilium_dbg(ctx, DBG_DECAP, key.tunnel_id, key.tunnel_label);
 
 			src_sec_identity = get_id_from_tunnel_id(key.tunnel_id, proto);

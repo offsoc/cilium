@@ -152,6 +152,7 @@ cilium-agent [flags]
       --enable-ipv4-masquerade                                    Masquerade IPv4 traffic from endpoints leaving the host (default true)
       --enable-ipv6                                               Enable IPv6 support (default true)
       --enable-ipv6-big-tcp                                       Enable IPv6 BIG TCP option which increases device's maximum GRO/GSO limits for IPv6
+      --enable-ipv6-fragment-tracking                             Enable IPv6 fragments tracking for L4-based lookups (default true)
       --enable-ipv6-masquerade                                    Masquerade IPv6 traffic from endpoints leaving the host (default true)
       --enable-ipv6-ndp                                           Enable IPv6 NDP support
       --enable-k8s                                                Enable the k8s clientset (default true)
@@ -406,4 +407,5 @@ cilium-agent [flags]
 
 * [cilium-agent completion](cilium-agent_completion.md)	 - Generate the autocompletion script for the specified shell
 * [cilium-agent hive](cilium-agent_hive.md)	 - Inspect the hive
+* [cilium-agent shell](cilium-agent_shell.md)	 - Connect to the Cilium shell
 

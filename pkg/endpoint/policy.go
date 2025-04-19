@@ -19,7 +19,6 @@ import (
 
 	"github.com/cilium/cilium/pkg/container/set"
 	"github.com/cilium/cilium/pkg/controller"
-	dptypes "github.com/cilium/cilium/pkg/datapath/types"
 	endpointid "github.com/cilium/cilium/pkg/endpoint/id"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/eventqueue"
@@ -982,6 +981,7 @@ func (e *Endpoint) runIPIdentitySync(endpointIP netip.Addr) {
 				ID := e.SecurityIdentity.ID
 				hostIP, ok := netipx.FromStdIP(node.GetIPv4())
 				if !ok {
+					e.runlock()
 					return controller.NewExitReason("Failed to convert node IPv4 address")
 				}
 				key := node.GetEndpointEncryptKeyIndex()
@@ -1075,9 +1075,8 @@ func (e *Endpoint) UpdateNoTrackRules(noTrackPort string) {
 
 // UpdateBandwidthPolicy updates the egress/ingress bandwidth of this endpoint to
 // progagate the throttle rate to the BPF data path.
-func (e *Endpoint) UpdateBandwidthPolicy(bwm dptypes.BandwidthManager, bandwidthEgress, bandwidthIngress, priority string) {
+func (e *Endpoint) UpdateBandwidthPolicy(bandwidthEgress, bandwidthIngress, priority string) {
 	ch, err := e.eventQueue.Enqueue(eventqueue.NewEvent(&EndpointPolicyBandwidthEvent{
-		bwm:              bwm,
 		ep:               e,
 		bandwidthEgress:  bandwidthEgress,
 		bandwidthIngress: bandwidthIngress,
