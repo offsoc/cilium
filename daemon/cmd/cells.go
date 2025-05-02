@@ -13,6 +13,7 @@ import (
 	healthApi "github.com/cilium/cilium/api/v1/health/server"
 	"github.com/cilium/cilium/api/v1/server"
 	"github.com/cilium/cilium/daemon/cmd/cni"
+	"github.com/cilium/cilium/daemon/healthz"
 	agentK8s "github.com/cilium/cilium/daemon/k8s"
 	"github.com/cilium/cilium/daemon/restapi"
 	"github.com/cilium/cilium/pkg/api"
@@ -20,6 +21,7 @@ import (
 	"github.com/cilium/cilium/pkg/bgpv1"
 	cgroup "github.com/cilium/cilium/pkg/cgroups/manager"
 	"github.com/cilium/cilium/pkg/ciliumenvoyconfig"
+	ciliumenvoyconfig_legacy "github.com/cilium/cilium/pkg/ciliumenvoyconfig/legacy"
 	"github.com/cilium/cilium/pkg/clustermesh"
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
 	"github.com/cilium/cilium/pkg/controller"
@@ -51,8 +53,9 @@ import (
 	"github.com/cilium/cilium/pkg/k8s/watchers/resources"
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/l2announcer"
-	loadbalancer_experimental "github.com/cilium/cilium/pkg/loadbalancer/experimental"
-	redirectpolicy_experimental "github.com/cilium/cilium/pkg/loadbalancer/experimental/redirectpolicy"
+	loadbalancer_cell "github.com/cilium/cilium/pkg/loadbalancer/cell"
+	"github.com/cilium/cilium/pkg/loadbalancer/legacy/redirectpolicy"
+	"github.com/cilium/cilium/pkg/loadbalancer/legacy/service"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/maps/metricsmap"
@@ -70,11 +73,10 @@ import (
 	"github.com/cilium/cilium/pkg/pprof"
 	"github.com/cilium/cilium/pkg/proxy"
 	"github.com/cilium/cilium/pkg/recorder"
-	"github.com/cilium/cilium/pkg/redirectpolicy"
-	"github.com/cilium/cilium/pkg/service"
 	shell "github.com/cilium/cilium/pkg/shell/server"
 	"github.com/cilium/cilium/pkg/signal"
 	"github.com/cilium/cilium/pkg/source"
+	"github.com/cilium/cilium/pkg/status"
 )
 
 var (
@@ -148,6 +150,9 @@ var (
 		// DNSProxy provides the DefaultDNSProxy singleton which is used by different
 		// packages.
 		defaultdns.Cell,
+
+		// Cilium Agent Healthz endpoints (agent, kubeproxy, ...)
+		healthz.Cell,
 	)
 
 	// ControlPlane implement the per-node control functions. These are pure
@@ -213,10 +218,7 @@ var (
 		maglev.Cell,
 
 		// Experimental control-plane for configuring service load-balancing.
-		loadbalancer_experimental.Cell,
-
-		// Experimental control-plane implementation for local redirect policies.
-		redirectpolicy_experimental.Cell,
+		loadbalancer_cell.Cell,
 
 		// Service is a datapath service handler. Its main responsibility is to reflect
 		// service-related changes into BPF maps used by datapath BPF programs.
@@ -234,6 +236,7 @@ var (
 		// CiliumEnvoyConfig provides support for the CRD CiliumEnvoyConfig that backs Ingress, Gateway API
 		// and L7 loadbalancing.
 		ciliumenvoyconfig.Cell,
+		ciliumenvoyconfig_legacy.Cell,
 
 		// Cilium REST API handlers
 		restapi.Cell,
@@ -338,6 +341,9 @@ var (
 
 		// Cilium health infrastructure (host and endpoint connectivity)
 		health.Cell,
+
+		// Cilium Status Collector
+		status.Cell,
 	)
 )
 

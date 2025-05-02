@@ -12,18 +12,24 @@ import (
 	"time"
 
 	"github.com/cilium/cilium/cilium-cli/connectivity/internal/junit"
+	"github.com/cilium/cilium/cilium-cli/utils/codeowners"
 )
 
 const MetadataDelimiter = ";metadata;"
 
 // NewJUnitCollector factory function that returns JUnitCollector.
-func NewJUnitCollector(junitProperties map[string]string, junitFile string) *JUnitCollector {
+func NewJUnitCollector(junitProperties map[string]string, junitFile string, codeowners *codeowners.Ruleset) *JUnitCollector {
 	properties := []junit.Property{
 		{Name: "Args", Value: strings.Join(os.Args[3:], "|")},
 	}
-	for key, val := range junitProperties {
-		properties = append(properties, junit.Property{Name: key, Value: val})
+	if codeowners != nil {
+		if workflowOwners, err := codeowners.WorkflowOwners(false); err == nil {
+			for _, o := range workflowOwners {
+				properties = append(properties, junit.Property{Name: "owner", Value: o})
+			}
+		}
 	}
+
 	return &JUnitCollector{
 		testSuite: &junit.TestSuite{
 			Name:    "connectivity test",
@@ -66,7 +72,11 @@ func (j *JUnitCollector) Collect(ct *ConnectivityTest) {
 			scenarios := t.Scenarios()
 			owners := make(map[string]struct{})
 			for _, s := range scenarios {
-				for _, o := range ct.GetOwners(s) {
+				codeOwners, err := ct.CodeOwners.Owners(false, s)
+				if err != nil {
+					ct.Logf("Failed to find CODEOWNERS for junit test case: %s", err)
+				}
+				for _, o := range codeOwners {
 					owners[o] = struct{}{}
 				}
 			}

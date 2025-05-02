@@ -13,8 +13,6 @@
 #define DSR_ENCAP_GENEVE	3
 #define ENABLE_HOST_ROUTING
 
-#define DISABLE_LOOPBACK_LB
-
 #define CLIENT_IP		v4_ext_one
 #define CLIENT_PORT		__bpf_htons(111)
 #define CLIENT_IP_2		v4_ext_two
@@ -112,7 +110,6 @@ mock_ctx_redirect(const struct __sk_buff *ctx __maybe_unused,
 #define TO_NETDEV	1
 
 ASSIGN_CONFIG(__u32, interface_ifindex, DEFAULT_IFACE)
-ASSIGN_CONFIG(__u32, host_secctx_from_ipcache, 1)
 
 struct {
 	__uint(type, BPF_MAP_TYPE_PROG_ARRAY);

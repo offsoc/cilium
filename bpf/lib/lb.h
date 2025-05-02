@@ -61,6 +61,7 @@ struct {
 	__type(value, struct lb_affinity_val);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, CILIUM_LB_AFFINITY_MAP_MAX_ENTRIES);
+	__uint(map_flags, LRU_MEM_FLAVOR);
 } cilium_lb6_affinity __section_maps_btf;
 #endif
 
@@ -82,6 +83,7 @@ struct {
 	__type(value, struct lb6_health);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, CILIUM_LB_BACKENDS_MAP_MAX_ENTRIES);
+	__uint(map_flags, LRU_MEM_FLAVOR);
 } cilium_lb6_health __section_maps_btf;
 #endif
 
@@ -148,6 +150,7 @@ struct {
 	__type(value, struct lb_affinity_val);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, CILIUM_LB_AFFINITY_MAP_MAX_ENTRIES);
+	__uint(map_flags, LRU_MEM_FLAVOR);
 } cilium_lb4_affinity __section_maps_btf;
 #endif
 
@@ -169,6 +172,7 @@ struct {
 	__type(value, struct lb4_health);
 	__uint(pinning, LIBBPF_PIN_BY_NAME);
 	__uint(max_entries, CILIUM_LB_BACKENDS_MAP_MAX_ENTRIES);
+	__uint(map_flags, LRU_MEM_FLAVOR);
 } cilium_lb4_health __section_maps_btf;
 #endif
 
@@ -1110,12 +1114,10 @@ static __always_inline int lb6_local(const void *map, struct __ctx_buff *ctx,
 
 	ipv6_addr_copy(&tuple->daddr, &backend->address);
 
-	if (lb6_svc_is_l7_punt_proxy(svc)) {
-		if (__lookup_ip6_endpoint(&backend->address)) {
-			ctx_skip_nodeport_set(ctx);
-			ret = LB_PUNT_TO_STACK;
-			goto drop_err;
-		}
+	if (lb6_svc_is_l7_punt_proxy(svc) &&
+	    __lookup_ip6_endpoint(&backend->address)) {
+		ctx_skip_nodeport_set(ctx);
+		return LB_PUNT_TO_STACK;
 	}
 	if (skip_xlate)
 		return CTX_ACT_OK;
@@ -1216,7 +1218,7 @@ static __always_inline int __lb4_rev_nat(struct __ctx_buff *ctx, int l3_off, int
 
 	tuple->saddr = nat->address;
 
-#ifndef DISABLE_LOOPBACK_LB
+#ifdef USE_LOOPBACK_LB
 	if (loopback) {
 		/* The packet was looped back to the sending endpoint on the
 		 * forward service translation. This implies that the original
@@ -1568,7 +1570,7 @@ lb4_xlate(struct __ctx_buff *ctx, __be32 *new_saddr __maybe_unused,
 		return DROP_WRITE_ERROR;
 
 	sum = csum_diff(&key->address, 4, new_daddr, 4, 0);
-#ifndef DISABLE_LOOPBACK_LB
+#ifdef USE_LOOPBACK_LB
 	if (new_saddr && *new_saddr) {
 		cilium_dbg_lb(ctx, DBG_LB4_LOOPBACK_SNAT, *old_saddr, *new_saddr);
 
@@ -1579,7 +1581,7 @@ lb4_xlate(struct __ctx_buff *ctx, __be32 *new_saddr __maybe_unused,
 
 		sum = csum_diff(old_saddr, 4, new_saddr, 4, sum);
 	}
-#endif /* DISABLE_LOOPBACK_LB */
+#endif /* USE_LOOPBACK_LB */
 	if (ipv4_csum_update_by_diff(ctx, l3_off, sum) < 0)
 		return DROP_CSUM_L3;
 	if (csum_off.offset) {
@@ -1871,8 +1873,8 @@ static __always_inline int lb4_local(const void *map, struct __ctx_buff *ctx,
 		lb4_update_affinity_by_addr(svc, &client_id, backend_id);
 #endif
 
-#if !defined(DISABLE_LOOPBACK_LB) || \
-	(defined(ENABLE_LOCAL_REDIRECT_POLICY) && defined(HAVE_NETNS_COOKIE))
+#if defined(USE_LOOPBACK_LB) || \
+    (defined(ENABLE_LOCAL_REDIRECT_POLICY) && defined(HAVE_NETNS_COOKIE))
 	if (saddr == backend->address) {
 	#if defined(ENABLE_LOCAL_REDIRECT_POLICY) && defined(HAVE_NETNS_COOKIE)
 		if (netns_cookie > 0 && unlikely(lb4_svc_is_localredirect(svc)) &&
@@ -1887,24 +1889,22 @@ static __always_inline int lb4_local(const void *map, struct __ctx_buff *ctx,
 		 * received on a loopback device. Perform NAT on the source address
 		 * to make it appear from an outside address.
 		 */
-	#ifndef DISABLE_LOOPBACK_LB
+	#ifdef USE_LOOPBACK_LB
 		new_saddr = IPV4_LOOPBACK;
 		state->loopback = 1;
 	#endif
 	}
 #endif
 
-#ifndef DISABLE_LOOPBACK_LB
+#ifdef USE_LOOPBACK_LB
 	if (!state->loopback)
 #endif
 		tuple->daddr = backend->address;
 
-	if (lb4_svc_is_l7_punt_proxy(svc)) {
-		if (__lookup_ip4_endpoint(backend->address)) {
-			ctx_skip_nodeport_set(ctx);
-			ret = LB_PUNT_TO_STACK;
-			goto drop_err;
-		}
+	if (lb4_svc_is_l7_punt_proxy(svc) &&
+	    __lookup_ip4_endpoint(backend->address)) {
+		ctx_skip_nodeport_set(ctx);
+		return LB_PUNT_TO_STACK;
 	}
 	if (skip_xlate)
 		return CTX_ACT_OK;
@@ -1936,7 +1936,7 @@ static __always_inline void lb4_ctx_store_state(struct __ctx_buff *ctx,
 {
 	ctx_store_meta(ctx, CB_PROXY_MAGIC, (__u32)proxy_port << 16);
 	ctx_store_meta(ctx, CB_CT_STATE, (__u32)state->rev_nat_index << 16 |
-#ifndef DISABLE_LOOPBACK_LB
+#ifdef USE_LOOPBACK_LB
 		       state->loopback);
 #else
 		       0);
@@ -1956,7 +1956,7 @@ lb4_ctx_restore_state(struct __ctx_buff *ctx, struct ct_state *state,
 {
 	__u32 meta = clear ? ctx_load_and_clear_meta(ctx, CB_CT_STATE) :
 			     ctx_load_meta(ctx, CB_CT_STATE);
-#ifndef DISABLE_LOOPBACK_LB
+#ifdef USE_LOOPBACK_LB
 	if (meta & 1)
 		state->loopback = 1;
 #endif

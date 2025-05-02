@@ -18,6 +18,7 @@
 #include "conntrack.h"
 #include "conntrack_map.h"
 #include "egress_gateway.h"
+#include "eps.h"
 #include "icmp6.h"
 #include "nat_46x64.h"
 #include "stubs.h"
@@ -139,6 +140,7 @@ struct per_cluster_snat_mapping_ipv4_inner_map {
 	__type(key, struct ipv4_ct_tuple);
 	__type(value, struct ipv4_nat_entry);
 	__uint(max_entries, SNAT_MAPPING_IPV4_SIZE);
+	__uint(map_flags, LRU_MEM_FLAVOR);
 #ifndef BPF_TEST
 };
 #else
@@ -1203,6 +1205,7 @@ struct {
 		__type(key, struct ipv6_ct_tuple);
 		__type(value, struct ipv6_nat_entry);
 		__uint(max_entries, SNAT_MAPPING_IPV6_SIZE);
+		__uint(map_flags, LRU_MEM_FLAVOR);
 	});
 } cilium_per_cluster_snat_v6_external __section_maps_btf;
 #endif

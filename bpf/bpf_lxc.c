@@ -16,11 +16,12 @@
 
 #define EVENT_SOURCE LXC_ID
 
+#define USE_LOOPBACK_LB		1
+
 #include "lib/auth.h"
 #include "lib/tailcall.h"
 #include "lib/common.h"
 #include "lib/config.h"
-#include "lib/maps.h"
 #include "lib/arp.h"
 #include "lib/edt.h"
 #include "lib/ipv6.h"
@@ -472,7 +473,6 @@ static __always_inline int handle_ipv6_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		.reason = TRACE_REASON_UNKNOWN,
 		.monitor = 0,
 	};
-	__u8 __maybe_unused encrypt_key = 0;
 	bool __maybe_unused skip_tunnel = false;
 	enum ct_status ct_status;
 	__u8 policy_match_type = POLICY_MATCH_NONE;
@@ -494,7 +494,6 @@ static __always_inline int handle_ipv6_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		info = lookup_ip6_remote_endpoint(daddr, 0);
 		if (info) {
 			*dst_sec_identity = info->sec_identity;
-			encrypt_key = get_min_encrypt_key(info->key);
 			skip_tunnel = info->flag_skip_tunnel;
 		} else {
 			*dst_sec_identity = WORLD_IPV6_ID;
@@ -720,21 +719,19 @@ ct_recreate6:
 			goto encrypt_to_stack;
 #endif /* !ENABLE_NODEPORT && ENABLE_HOST_FIREWALL */
 
-		/* Three cases exist here either (a) the encap and redirect could
-		 * not find the tunnel so fallthrough to nat46 and stack, (b)
-		 * the packet needs IPSec encap so push ctx to stack for encap, or
-		 * (c) packet was redirected to tunnel device so return.
-		 */
-		ret = encap_and_redirect_lxc(ctx, info, encrypt_key,
-					     SECLABEL_IPV6, *dst_sec_identity,
-					     &trace);
-		switch (ret) {
-		case CTX_ACT_OK:
-			goto encrypt_to_stack;
-		case DROP_NO_TUNNEL_ENDPOINT:
-			break;
-		default:
-			return ret;
+		if (info && info->flag_has_tunnel_ep) {
+			/* Two cases exist here either
+			 * (a) the packet needs IPSec encap so push ctx to stack for encap, or
+			 * (b) packet was redirected to tunnel device so return.
+			 */
+			ret = encap_and_redirect_lxc(ctx, info, SECLABEL_IPV6,
+						     *dst_sec_identity, &trace);
+			switch (ret) {
+			case CTX_ACT_OK:
+				goto encrypt_to_stack;
+			default:
+				return ret;
+			}
 		}
 	}
 #endif
@@ -770,26 +767,14 @@ pass_to_stack:
 		return ret;
 #endif
 
-#ifndef TUNNEL_MODE
-# ifdef ENABLE_IPSEC
-	if (encrypt_key && info->flag_has_tunnel_ep) {
-		ret = set_ipsec_encrypt(ctx, encrypt_key, info->tunnel_endpoint.ip4,
-					SECLABEL_IPV6, false, false);
-		if (unlikely(ret != CTX_ACT_OK))
-			return ret;
-	} else
-# endif /* ENABLE_IPSEC */
-#endif /* TUNNEL_MODE */
-	{
 #ifdef ENABLE_IDENTITY_MARK
-		/* Always encode the source identity when passing to the stack.
-		 * If the stack hairpins the packet back to a local endpoint the
-		 * source identity can still be derived even if SNAT is
-		 * performed by a component such as portmap.
-		 */
-		set_identity_mark(ctx, SECLABEL_IPV6, MARK_MAGIC_IDENTITY);
+	/* Always encode the source identity when passing to the stack.
+	 * If the stack hairpins the packet back to a local endpoint the
+	 * source identity can still be derived even if SNAT is
+	 * performed by a component such as portmap.
+	 */
+	set_identity_mark(ctx, SECLABEL_IPV6, MARK_MAGIC_IDENTITY);
 #endif
-	}
 
 #ifdef TUNNEL_MODE
 encrypt_to_stack:
@@ -911,7 +896,6 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 		.reason = TRACE_REASON_UNKNOWN,
 		.monitor = 0,
 	};
-	__u8 __maybe_unused encrypt_key = 0;
 	bool __maybe_unused skip_tunnel = false;
 	bool hairpin_flow = false; /* endpoint wants to access itself via service IP */
 	__u8 policy_match_type = POLICY_MATCH_NONE;
@@ -938,7 +922,6 @@ static __always_inline int handle_ipv4_from_lxc(struct __ctx_buff *ctx, __u32 *d
 	info = lookup_ip4_remote_endpoint(ip4->daddr, cluster_id);
 	if (info) {
 		*dst_sec_identity = info->sec_identity;
-		encrypt_key = get_min_encrypt_key(info->key);
 		skip_tunnel = info->flag_skip_tunnel;
 	} else {
 		*dst_sec_identity = WORLD_IPV4_ID;
@@ -1280,22 +1263,21 @@ skip_vtep:
 		}
 #endif
 
-		ret = encap_and_redirect_lxc(ctx, info, encrypt_key,
-					     SECLABEL_IPV4, *dst_sec_identity, &trace);
-		switch (ret) {
-		case CTX_ACT_OK:
-			/* IPsec, pass up to stack for XFRM processing. */
-			goto encrypt_to_stack;
-		case DROP_NO_TUNNEL_ENDPOINT:
-			/* Deliver via native device. */
-			break;
+		if (info && info->flag_has_tunnel_ep) {
+			ret = encap_and_redirect_lxc(ctx, info, SECLABEL_IPV4,
+						     *dst_sec_identity, &trace);
+			switch (ret) {
+			case CTX_ACT_OK:
+				/* IPsec, pass up to stack for XFRM processing. */
+				goto encrypt_to_stack;
 #ifdef ENABLE_CLUSTER_AWARE_ADDRESSING
-		case CTX_ACT_REDIRECT:
-			ctx_set_cluster_id_mark(ctx, cluster_id);
-			fallthrough;
+			case CTX_ACT_REDIRECT:
+				ctx_set_cluster_id_mark(ctx, cluster_id);
+				fallthrough;
 #endif
-		default:
-			return ret;
+			default:
+				return ret;
+			}
 		}
 	}
 #endif /* TUNNEL_MODE */
@@ -1332,26 +1314,14 @@ pass_to_stack:
 		return ret;
 #endif
 
-#ifndef TUNNEL_MODE
-# ifdef ENABLE_IPSEC
-	if (encrypt_key && info->flag_has_tunnel_ep) {
-		ret = set_ipsec_encrypt(ctx, encrypt_key, info->tunnel_endpoint.ip4,
-					SECLABEL_IPV4, false, false);
-		if (unlikely(ret != CTX_ACT_OK))
-			return ret;
-	} else
-# endif /* ENABLE_IPSEC */
-#endif /* TUNNEL_MODE */
-	{
 #ifdef ENABLE_IDENTITY_MARK
-		/* Always encode the source identity when passing to the stack.
-		 * If the stack hairpins the packet back to a local endpoint the
-		 * source identity can still be derived even if SNAT is
-		 * performed by a component such as portmap.
-		 */
-		set_identity_mark(ctx, SECLABEL_IPV4, MARK_MAGIC_IDENTITY);
+	/* Always encode the source identity when passing to the stack.
+	 * If the stack hairpins the packet back to a local endpoint the
+	 * source identity can still be derived even if SNAT is
+	 * performed by a component such as portmap.
+	 */
+	set_identity_mark(ctx, SECLABEL_IPV4, MARK_MAGIC_IDENTITY);
 #endif
-	}
 
 #if defined(TUNNEL_MODE)
 encrypt_to_stack:
@@ -1814,18 +1784,16 @@ int tail_ipv6_to_endpoint(struct __ctx_buff *ctx)
 		if (info != NULL) {
 			__u32 sec_identity = info->sec_identity;
 
-			if (sec_identity) {
-				/* When SNAT is enabled on traffic ingressing
-				 * into Cilium, all traffic from the world will
-				 * have a source IP of the host. It will only
-				 * actually be from the host if "src_sec_identity"
-				 * (passed into this function) reports the src
-				 * as the host. So we can ignore the ipcache
-				 * if it reports the source as HOST_ID.
-				 */
-				if (sec_identity != HOST_ID)
-					src_sec_identity = sec_identity;
-			}
+			/* When SNAT is enabled on traffic ingressing
+			 * into Cilium, all traffic from the world will
+			 * have a source IP of the host. It will only
+			 * actually be from the host if "src_sec_identity"
+			 * (passed into this function) reports the src
+			 * as the host. So we can ignore the ipcache
+			 * if it reports the source as HOST_ID.
+			 */
+			if (sec_identity != HOST_ID)
+				src_sec_identity = sec_identity;
 		}
 		cilium_dbg(ctx, info ? DBG_IP_ID_MAP_SUCCEED6 : DBG_IP_ID_MAP_FAILED6,
 			   ((__u32 *)src)[3], src_sec_identity);
@@ -1966,7 +1934,7 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 		if (tc_index_from_ingress_proxy(ctx))
 			break;
 
-#if defined(ENABLE_PER_PACKET_LB) && !defined(DISABLE_LOOPBACK_LB)
+#if defined(ENABLE_PER_PACKET_LB)
 		/* When an endpoint connects to itself via service clusterIP, we need
 		 * to skip the policy enforcement. If we didn't, the user would have to
 		 * define policy rules to allow pods to talk to themselves. We still
@@ -1984,7 +1952,7 @@ ipv4_policy(struct __ctx_buff *ctx, struct iphdr *ip4, __u32 src_label,
 
 		if (unlikely(ct_state->loopback))
 			break;
-#endif /* ENABLE_PER_PACKET_LB && !DISABLE_LOOPBACK_LB */
+#endif /* ENABLE_PER_PACKET_LB */
 
 		verdict = policy_can_ingress4(ctx, &cilium_policy_v2, tuple, l4_off,
 					      is_untracked_fragment, src_label, SECLABEL_IPV4,
@@ -2164,18 +2132,16 @@ int tail_ipv4_to_endpoint(struct __ctx_buff *ctx)
 		if (info != NULL) {
 			__u32 sec_identity = info->sec_identity;
 
-			if (sec_identity) {
-				/* When SNAT is enabled on traffic ingressing
-				 * into Cilium, all traffic from the world will
-				 * have a source IP of the host. It will only
-				 * actually be from the host if "src_sec_identity"
-				 * (passed into this function) reports the src
-				 * as the host. So we can ignore the ipcache
-				 * if it reports the source as HOST_ID.
-				 */
-				if (sec_identity != HOST_ID)
-					src_sec_identity = sec_identity;
-			}
+			/* When SNAT is enabled on traffic ingressing
+			 * into Cilium, all traffic from the world will
+			 * have a source IP of the host. It will only
+			 * actually be from the host if "src_sec_identity"
+			 * (passed into this function) reports the src
+			 * as the host. So we can ignore the ipcache
+			 * if it reports the source as HOST_ID.
+			 */
+			if (sec_identity != HOST_ID)
+				src_sec_identity = sec_identity;
 		}
 		cilium_dbg(ctx, info ? DBG_IP_ID_MAP_SUCCEED4 : DBG_IP_ID_MAP_FAILED4,
 			   ip4->saddr, src_sec_identity);

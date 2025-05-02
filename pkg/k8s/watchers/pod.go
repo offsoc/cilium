@@ -52,14 +52,14 @@ import (
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/labelsfilter"
 	"github.com/cilium/cilium/pkg/loadbalancer"
+	"github.com/cilium/cilium/pkg/loadbalancer/legacy/redirectpolicy"
+	"github.com/cilium/cilium/pkg/loadbalancer/legacy/service"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/node"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
-	"github.com/cilium/cilium/pkg/redirectpolicy"
-	"github.com/cilium/cilium/pkg/service"
 	"github.com/cilium/cilium/pkg/source"
 	"github.com/cilium/cilium/pkg/time"
 	ciliumTypes "github.com/cilium/cilium/pkg/types"
@@ -90,6 +90,7 @@ type k8sPodWatcherParams struct {
 	NodeAddrs         statedb.Table[datapathTables.NodeAddress]
 	LRPManager        *redirectpolicy.Manager
 	CGroupManager     cgroup.CGroupManager
+	LBConfig          loadbalancer.Config
 }
 
 func newK8sPodWatcher(params k8sPodWatcherParams) *K8sPodWatcher {
@@ -109,6 +110,7 @@ func newK8sPodWatcher(params k8sPodWatcherParams) *K8sPodWatcher {
 		db:                    params.DB,
 		pods:                  params.Pods,
 		nodeAddrs:             params.NodeAddrs,
+		lbConfig:              params.LBConfig,
 
 		controllersStarted: make(chan struct{}),
 	}
@@ -137,6 +139,7 @@ type K8sPodWatcher struct {
 	db                    *statedb.DB
 	pods                  statedb.Table[agentK8s.LocalPod]
 	nodeAddrs             statedb.Table[datapathTables.NodeAddress]
+	lbConfig              loadbalancer.Config
 
 	// controllersStarted is a channel that is closed when all watchers that do not depend on
 	// local node configuration have been started
@@ -554,9 +557,9 @@ func netnsCookieSupported(logger *slog.Logger) bool {
 	return _netnsCookieSupported
 }
 
-func (k *K8sPodWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string, logger *slog.Logger) []loadbalancer.SVC {
+func (k *K8sPodWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string, logger *slog.Logger) []loadbalancer.LegacySVC {
 	var (
-		svcs       []loadbalancer.SVC
+		svcs       []loadbalancer.LegacySVC
 		containers []slim_corev1.Container
 	)
 	containers = append(containers, pod.Spec.InitContainers...)
@@ -567,11 +570,11 @@ func (k *K8sPodWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string
 				continue
 			}
 
-			if int(p.HostPort) >= option.Config.NodePortMin &&
-				int(p.HostPort) <= option.Config.NodePortMax {
+			if uint16(p.HostPort) >= k.lbConfig.NodePortMin &&
+				uint16(p.HostPort) <= k.lbConfig.NodePortMax {
 				logger.Warn(
 					fmt.Sprintf("The requested hostPort %d is colliding with the configured NodePort range [%d, %d]. Ignoring.",
-						p.HostPort, option.Config.NodePortMin, option.Config.NodePortMax))
+						p.HostPort, k.lbConfig.NodePortMin, k.lbConfig.NodePortMax))
 				continue
 			}
 
@@ -588,11 +591,11 @@ func (k *K8sPodWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string
 				continue
 			}
 
-			var bes4 []*loadbalancer.Backend
-			var bes6 []*loadbalancer.Backend
+			var bes4 []*loadbalancer.LegacyBackend
+			var bes6 []*loadbalancer.LegacyBackend
 
 			for _, podIP := range podIPs {
-				be := loadbalancer.Backend{
+				be := loadbalancer.LegacyBackend{
 					L3n4Addr: loadbalancer.L3n4Addr{
 						AddrCluster: cmtypes.MustParseAddrCluster(podIP),
 						L4Addr: loadbalancer.L4Addr{
@@ -656,7 +659,7 @@ func (k *K8sPodWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string
 				if addr.Is4() {
 					if option.Config.EnableIPv4 && len(bes4) > 0 {
 						svcs = append(svcs,
-							loadbalancer.SVC{
+							loadbalancer.LegacySVC{
 								Frontend:         fe,
 								Backends:         bes4,
 								Type:             loadbalancer.SVCTypeHostPort,
@@ -668,7 +671,7 @@ func (k *K8sPodWatcher) genServiceMappings(pod *slim_corev1.Pod, podIPs []string
 				} else {
 					if option.Config.EnableIPv6 && len(bes6) > 0 {
 						svcs = append(svcs,
-							loadbalancer.SVC{
+							loadbalancer.LegacySVC{
 								Frontend:         fe,
 								Backends:         bes6,
 								Type:             loadbalancer.SVCTypeHostPort,
@@ -737,7 +740,7 @@ func (k *K8sPodWatcher) upsertHostPortMapping(oldPod, newPod *slim_corev1.Pod, o
 	}
 
 	for _, dpSvc := range svcs {
-		p := &loadbalancer.SVC{
+		p := &loadbalancer.LegacySVC{
 			Frontend:            dpSvc.Frontend,
 			Backends:            dpSvc.Backends,
 			Type:                dpSvc.Type,

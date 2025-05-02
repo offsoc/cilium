@@ -29,7 +29,8 @@
 #include "lib/tailcall.h"
 #include "lib/common.h"
 #include "lib/edt.h"
-#include "lib/maps.h"
+#include "lib/encrypt.h"
+#include "lib/eps.h"
 #include "lib/ipv6.h"
 #include "lib/eth.h"
 #include "lib/dbg.h"
@@ -38,6 +39,7 @@
 #include "lib/local_delivery.h"
 #include "lib/drop.h"
 #include "lib/identity.h"
+#include "lib/node.h"
 #include "lib/nodeport.h"
 #include "lib/nodeport_egress.h"
 #include "lib/clustermesh.h"
@@ -47,7 +49,6 @@
 #include "lib/vtep.h"
 #include "lib/arp.h"
 #include "lib/encap.h"
-#include "lib/eps.h"
 #endif /* ENABLE_VTEP */
 
 #define overlay_ingress_policy_hook(ctx, ip4, identity, ext_err) CTX_ACT_OK
@@ -812,8 +813,12 @@ int cil_to_overlay(struct __ctx_buff *ctx)
 	if (!ctx_get_tunnel_key(ctx, &tunnel_key, TUNNEL_KEY_WITHOUT_SRC_IP, 0))
 		src_sec_identity = get_id_from_tunnel_id(tunnel_key.tunnel_id,
 							 ctx_get_protocol(ctx));
-
-	set_identity_mark(ctx, src_sec_identity, MARK_MAGIC_OVERLAY);
+#ifdef ENABLE_IPSEC
+	if (is_esp(ctx, proto))
+		set_identity_mark(ctx, src_sec_identity, MARK_MAGIC_OVERLAY_ENCRYPTED);
+	else
+#endif
+		set_identity_mark(ctx, src_sec_identity, MARK_MAGIC_OVERLAY);
 
 #ifdef ENABLE_NODEPORT
 	if (snat_done) {
