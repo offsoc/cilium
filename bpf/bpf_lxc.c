@@ -87,8 +87,9 @@ static __always_inline int __per_packet_lb_svc_xlate_4(void *ctx, struct iphdr *
 	int ret = 0;
 
 	fraginfo = ipfrag_encode_ipv4(ip4);
+	l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
-	ret = lb4_extract_tuple(ctx, ip4, ETH_HLEN, fraginfo, &l4_off, &tuple);
+	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			goto skip_service_lookup;
@@ -146,13 +147,16 @@ static __always_inline int __per_packet_lb_svc_xlate_6(void *ctx, struct ipv6hdr
 	struct lb6_key key = {};
 	__u16 proxy_port = 0;
 	int l4_off;
-	int ret = 0;
+	int ret;
 
-	fraginfo = ipv6_get_fraginfo(ctx, ip6);
-	if (fraginfo < 0)
-		return (int)fraginfo;
+	tuple.nexthdr = ip6->nexthdr;
+	ret = ipv6_hdrlen_with_fraginfo(ctx, &tuple.nexthdr, &fraginfo);
+	if (ret < 0)
+		return ret;
 
-	ret = lb6_extract_tuple(ctx, ip6, ETH_HLEN, fraginfo, &l4_off, &tuple);
+	l4_off = ETH_HLEN + ret;
+
+	ret = lb6_extract_tuple(ctx, ip6, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			goto skip_service_lookup;
@@ -629,7 +633,7 @@ ct_recreate6:
 					  *dst_sec_identity, TRACE_EP_ID_UNKNOWN,
 					  TRACE_IFINDEX_UNKNOWN,
 					  trace.reason, trace.monitor);
-			return tail_call_internal(ctx, CILIUM_CALL_IPV6_NODEPORT_REVNAT,
+			return tail_call_internal(ctx, CILIUM_CALL_IPV6_NODEPORT_REVNAT_EGRESS,
 						  ext_err);
 		}
 #endif /* ENABLE_NODEPORT */
@@ -824,6 +828,7 @@ static __always_inline int __tail_handle_ipv6(struct __ctx_buff *ctx,
 	struct ipv6hdr *ip6;
 	fraginfo_t fraginfo __maybe_unused;
 	int ret __maybe_unused;
+	bool from_l7lb = false;
 
 	if (!revalidate_data_pull(ctx, &data, &data_end, &ip6))
 		return DROP_INVALID;
@@ -842,7 +847,10 @@ static __always_inline int __tail_handle_ipv6(struct __ctx_buff *ctx,
 	if (unlikely(is_icmp6_ndp(ctx, ip6, ETH_HLEN)))
 		return icmp6_ndp_handle(ctx, ETH_HLEN, METRIC_EGRESS, ext_err);
 
-	if (unlikely(!is_valid_lxc_src_ip(ip6)))
+#ifdef ENABLE_L7_LB
+	from_l7lb = ctx_load_meta(ctx, CB_FROM_HOST) == FROM_HOST_L7_LB;
+#endif
+	if (!from_l7lb && unlikely(!is_valid_lxc_src_ip(ip6)))
 		return DROP_INVALID_SIP;
 
 #ifdef ENABLE_PER_PACKET_LB
@@ -1369,6 +1377,7 @@ static __always_inline int __tail_handle_ipv4(struct __ctx_buff *ctx,
 	void *data, *data_end;
 	struct iphdr *ip4;
 	fraginfo_t fraginfo __maybe_unused;
+	bool from_l7lb = false;
 
 	if (!revalidate_data_pull(ctx, &data, &data_end, &ip4))
 		return DROP_INVALID;
@@ -1383,7 +1392,10 @@ static __always_inline int __tail_handle_ipv4(struct __ctx_buff *ctx,
 		return DROP_FRAG_NOSUPPORT;
 #endif
 
-	if (unlikely(!is_valid_lxc_src_ipv4(ip4)))
+#ifdef ENABLE_L7_LB
+	from_l7lb = ctx_load_meta(ctx, CB_FROM_HOST) == FROM_HOST_L7_LB;
+#endif
+	if (!from_l7lb && unlikely(!is_valid_lxc_src_ipv4(ip4)))
 		return DROP_INVALID_SIP;
 
 #ifdef ENABLE_MULTICAST
@@ -1597,7 +1609,7 @@ ipv6_policy(struct __ctx_buff *ctx, struct ipv6hdr *ip6, __u32 src_label,
 
 			ret2 = lb6_rev_nat(ctx, l4_off,
 					   ct_state->rev_nat_index, tuple,
-					   ipfrag_has_l4_header(fraginfo));
+					   ipfrag_has_l4_header(fraginfo), CT_INGRESS);
 			if (IS_ERR(ret2))
 				return ret2;
 		}

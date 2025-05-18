@@ -6,6 +6,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/cilium/statedb"
 
@@ -16,6 +17,7 @@ import (
 	"github.com/cilium/cilium/pkg/datapath/xdp"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
 	"github.com/cilium/cilium/pkg/loadbalancer"
+	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/mtu"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/option"
@@ -36,6 +38,7 @@ const (
 // is never mutated in-place.
 func newLocalNodeConfig(
 	ctx context.Context,
+	logger *slog.Logger,
 	config *option.DaemonConfig,
 	localNode node.LocalNode,
 	txn statedb.ReadTxn,
@@ -45,6 +48,7 @@ func newLocalNodeConfig(
 	masqInterface string,
 	xdpConfig xdp.Config,
 	lbConfig loadbalancer.Config,
+	maglevConfig maglev.Config,
 	mtuTbl statedb.Table[mtu.RouteMTU],
 ) (datapath.LocalNodeConfiguration, <-chan struct{}, error) {
 	auxPrefixes := []*cidr.CIDR{}
@@ -81,7 +85,7 @@ func newLocalNodeConfig(
 		AllocCIDRIPv6:                localNode.IPv6AllocCIDR,
 		NativeRoutingCIDRIPv4:        datapath.RemoteSNATDstAddrExclusionCIDRv4(localNode),
 		NativeRoutingCIDRIPv6:        datapath.RemoteSNATDstAddrExclusionCIDRv6(localNode),
-		LoopbackIPv4:                 node.GetIPv4Loopback(),
+		LoopbackIPv4:                 node.GetIPv4Loopback(logger),
 		Devices:                      nativeDevices,
 		NodeAddresses:                statedb.Collect(nodeAddrsIter),
 		DirectRoutingDevice:          directRoutingDevice,
@@ -104,5 +108,6 @@ func newLocalNodeConfig(
 		IPv6PodSubnets:               cidr.NewCIDRSlice(config.IPv6PodSubnets),
 		XDPConfig:                    xdpConfig,
 		LBConfig:                     lbConfig,
+		MaglevConfig:                 maglevConfig,
 	}, common.MergeChannels(devsWatch, addrsWatch, directRoutingDevWatch, mtuWatch), nil
 }

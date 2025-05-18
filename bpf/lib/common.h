@@ -871,11 +871,7 @@ struct ct_entry {
 	      from_tunnel:1,	/* Connection is over tunnel */
 	      reserved3:5;
 	__u16 rev_nat_index;
-	/* In the kernel ifindex is u32, so we need to check in cilium-agent
-	 * that ifindex of a NodePort device is <= MAX(u16).
-	 * Unused when HAVE_FIB_INDEX is available.
-	 */
-	__u16 ifindex;
+	__u16 reserved4;	/* unused since v1.18 */
 
 	/* *x_flags_seen represents the OR of all TCP flags seen for the
 	 * transmit/receive direction of this entry.
@@ -1089,9 +1085,6 @@ struct ct_state {
 		  closing:1,
 	      reserved:7;
 	__u32 src_sec_id;
-#ifndef HAVE_FIB_IFINDEX
-	__u16 ifindex;
-#endif
 	__u32 backend_id;	/* Backend ID in lb4_backends */
 };
 
@@ -1123,11 +1116,7 @@ struct lb6_src_range_key {
 
 static __always_inline __u64 ctx_adjust_hroom_flags(void)
 {
-#ifdef HAVE_CSUM_LEVEL
 	return BPF_F_ADJ_ROOM_NO_CSUM_RESET;
-#else
-	return 0;
-#endif
 }
 
 struct lpm_v4_key {

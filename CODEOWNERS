@@ -363,7 +363,6 @@ Makefile* @cilium/build
 /daemon/ @cilium/sig-agent
 /daemon/cmd/datapath.go @cilium/sig-datapath
 /daemon/cmd/endpoint* @cilium/endpoint
-/daemon/cmd/ipcache* @cilium/ipcache
 /daemon/cmd/kube_proxy* @cilium/sig-datapath
 /daemon/cmd/bootstrap_statistics.go @cilium/metrics
 /daemon/cmd/policy* @cilium/sig-policy
@@ -554,6 +553,7 @@ Makefile* @cilium/build
 /pkg/hubble/metrics @cilium/hubble-metrics
 /pkg/iana/ @cilium/sig-agent
 /pkg/identity @cilium/sig-policy
+/pkg/identity/restoration @cilium/sig-policy @cilium/ipcache
 /pkg/idpool/ @cilium/kvstore
 /pkg/ip/ @cilium/sig-agent
 /pkg/ipalloc/ @cilium/sig-ipam
@@ -647,7 +647,6 @@ Makefile* @cilium/build
 /test/k8s/services.go @cilium/sig-lb @cilium/ci-structure
 # Datapath tests
 /test/k8s/bandwidth.go @cilium/sig-datapath @cilium/ci-structure
-/test/k8s/chaos.go @cilium/sig-datapath @cilium/ci-structure
 /test/k8s/datapath_configuration.go @cilium/sig-datapath @cilium/ci-structure
 /test/verifier @cilium/loader @cilium/ci-structure
 # Policy tests
@@ -663,8 +662,6 @@ Makefile* @cilium/build
 # BIG TCP tests
 /test/bigtcp @cilium/sig-datapath @cilium/ci-structure
 # Misc. tests
-/test/runtime/kvstore.go @cilium/kvstore @cilium/ci-structure
-/test/runtime/chaos_agent.go @cilium/sig-agent @cilium/ci-structure
 /tools/dpgen @cilium/loader
 /tools/ @cilium/contributing
 /USERS.md @cilium/community

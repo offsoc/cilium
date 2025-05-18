@@ -275,7 +275,7 @@
    * - :spelling:ignore:`bgpControlPlane`
      - This feature set enables virtual BGP routers to be created via CiliumBGPPeeringPolicy CRDs.
      - object
-     - ``{"enabled":false,"routerIDAllocation":{"mode":"default"},"secretsNamespace":{"create":false,"name":"kube-system"},"statusReport":{"enabled":true}}``
+     - ``{"enabled":false,"routerIDAllocation":{"ipPool":"","mode":"default"},"secretsNamespace":{"create":false,"name":"kube-system"},"statusReport":{"enabled":true}}``
    * - :spelling:ignore:`bgpControlPlane.enabled`
      - Enables the BGP control plane.
      - bool
@@ -283,7 +283,11 @@
    * - :spelling:ignore:`bgpControlPlane.routerIDAllocation`
      - BGP router-id allocation mode
      - object
-     - ``{"mode":"default"}``
+     - ``{"ipPool":"","mode":"default"}``
+   * - :spelling:ignore:`bgpControlPlane.routerIDAllocation.ipPool`
+     - IP pool to allocate the BGP router-id from when the mode is ip-pool.
+     - string
+     - ``""``
    * - :spelling:ignore:`bgpControlPlane.routerIDAllocation.mode`
      - BGP router-id allocation mode. In default mode, the router-id is derived from the IPv4 address if it is available, or else it is determined by the lower 32 bits of the MAC address.
      - string
@@ -463,7 +467,7 @@
    * - :spelling:ignore:`certgen`
      - Configure certificate generation for Hubble integration. If hubble.tls.auto.method=cronJob, these values are used for the Kubernetes CronJob which will be scheduled regularly to (re)generate any certificates not provided manually.
      - object
-     - ``{"affinity":{},"annotations":{"cronJob":{},"job":{}},"extraVolumeMounts":[],"extraVolumes":[],"generateCA":true,"image":{"digest":"sha256:cb3b1480f404489cbf0dbb9ac4576f44392532800180a4d6260ab430b4cbaedc","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/certgen","tag":"v0.2.3","useDigest":true},"nodeSelector":{},"podLabels":{},"priorityClassName":"","tolerations":[],"ttlSecondsAfterFinished":1800}``
+     - ``{"affinity":{},"annotations":{"cronJob":{},"job":{}},"extraVolumeMounts":[],"extraVolumes":[],"generateCA":true,"image":{"digest":"sha256:cb3b1480f404489cbf0dbb9ac4576f44392532800180a4d6260ab430b4cbaedc","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/certgen","tag":"v0.2.3","useDigest":true},"nodeSelector":{},"podLabels":{},"priorityClassName":"","resources":{},"tolerations":[],"ttlSecondsAfterFinished":1800}``
    * - :spelling:ignore:`certgen.affinity`
      - Affinity for certgen
      - object
@@ -496,6 +500,10 @@
      - Priority class for certgen ref: https://kubernetes.io/docs/concepts/scheduling-eviction/pod-priority-preemption/#priorityclass
      - string
      - ``""``
+   * - :spelling:ignore:`certgen.resources`
+     - Resource limits for certgen ref: https://kubernetes.io/docs/concepts/configuration/manage-resources-containers
+     - object
+     - ``{}``
    * - :spelling:ignore:`certgen.tolerations`
      - Node tolerations for pod assignment on nodes with taints ref: https://kubernetes.io/docs/concepts/scheduling-eviction/taint-and-toleration/
      - list
@@ -760,6 +768,10 @@
      - Minimum number/percentage of pods that should remain scheduled. When it's set, maxUnavailable must be disabled by ``maxUnavailable: null``
      - string
      - ``nil``
+   * - :spelling:ignore:`clustermesh.apiserver.podDisruptionBudget.unhealthyPodEvictionPolicy`
+     - How are unhealthy, but running, pods counted for eviction
+     - string
+     - ``nil``
    * - :spelling:ignore:`clustermesh.apiserver.podLabels`
      - Labels to be added to clustermesh-apiserver pods
      - object
@@ -804,6 +816,10 @@
      - The internalTrafficPolicy of service used for apiserver access.
      - string
      - ``"Cluster"``
+   * - :spelling:ignore:`clustermesh.apiserver.service.labels`
+     - Labels for the clustermesh-apiserver service.
+     - object
+     - ``{}``
    * - :spelling:ignore:`clustermesh.apiserver.service.loadBalancerClass`
      - Configure a loadBalancerClass. Allows to configure the loadBalancerClass on the clustermesh-apiserver LB service in case the Service type is set to LoadBalancer (requires Kubernetes 1.24+).
      - string
@@ -1351,11 +1367,15 @@
    * - :spelling:ignore:`envoy.image`
      - Envoy container image.
      - object
-     - ``{"digest":"sha256:39221ef34c94579981243031a995dc4da6e18caab55eed746ec05a12128e1da9","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.33.2-1745918087-cdc076d75812476bcac9d0e21681e9b6cc18323b","useDigest":true}``
+     - ``{"digest":"sha256:770ae69b0332237c2a90d87d91109e75434abf0ca1ec9f3982a28daee469d4b8","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.33.3-1746785339-971577e505e5640c1642b4167205cfeaf4647ed1","useDigest":true}``
    * - :spelling:ignore:`envoy.initialFetchTimeoutSeconds`
      - Time in seconds after which the initial fetch on an xDS stream is considered timed out
      - int
      - ``30``
+   * - :spelling:ignore:`envoy.livenessProbe.enabled`
+     - Enable liveness probe for cilium-envoy
+     - bool
+     - ``true``
    * - :spelling:ignore:`envoy.livenessProbe.failureThreshold`
      - failure threshold of liveness probe
      - int
@@ -1496,6 +1516,10 @@
      - SELinux options for the ``cilium-envoy`` container
      - object
      - ``{"level":"s0","type":"spc_t"}``
+   * - :spelling:ignore:`envoy.startupProbe.enabled`
+     - Enable startup probe for cilium-envoy
+     - bool
+     - ``true``
    * - :spelling:ignore:`envoy.startupProbe.failureThreshold`
      - failure threshold of startup probe. 105 x 2s translates to the old behaviour of the readiness probe (120s delay + 30 x 3s)
      - int
@@ -1944,6 +1968,10 @@
      - Minimum number/percentage of pods that should remain scheduled. When it's set, maxUnavailable must be disabled by ``maxUnavailable: null``
      - string
      - ``nil``
+   * - :spelling:ignore:`hubble.relay.podDisruptionBudget.unhealthyPodEvictionPolicy`
+     - How are unhealthy, but running, pods counted for eviction
+     - string
+     - ``nil``
    * - :spelling:ignore:`hubble.relay.podLabels`
      - Labels to be added to hubble-relay pods
      - object
@@ -2266,6 +2294,10 @@
      - ``1``
    * - :spelling:ignore:`hubble.ui.podDisruptionBudget.minAvailable`
      - Minimum number/percentage of pods that should remain scheduled. When it's set, maxUnavailable must be disabled by ``maxUnavailable: null``
+     - string
+     - ``nil``
+   * - :spelling:ignore:`hubble.ui.podDisruptionBudget.unhealthyPodEvictionPolicy`
+     - How are unhealthy, but running, pods counted for eviction
      - string
      - ``nil``
    * - :spelling:ignore:`hubble.ui.podLabels`
@@ -2960,6 +2992,10 @@
      - Minimum number/percentage of pods that should remain scheduled. When it's set, maxUnavailable must be disabled by ``maxUnavailable: null``
      - string
      - ``nil``
+   * - :spelling:ignore:`operator.podDisruptionBudget.unhealthyPodEvictionPolicy`
+     - How are unhealthy, but running, pods counted for eviction
+     - string
+     - ``nil``
    * - :spelling:ignore:`operator.podLabels`
      - Labels to be added to cilium-operator pods
      - object
@@ -3158,6 +3194,10 @@
      - ``1``
    * - :spelling:ignore:`preflight.podDisruptionBudget.minAvailable`
      - Minimum number/percentage of pods that should remain scheduled. When it's set, maxUnavailable must be disabled by ``maxUnavailable: null``
+     - string
+     - ``nil``
+   * - :spelling:ignore:`preflight.podDisruptionBudget.unhealthyPodEvictionPolicy`
+     - How are unhealthy, but running, pods counted for eviction
      - string
      - ``nil``
    * - :spelling:ignore:`preflight.podLabels`

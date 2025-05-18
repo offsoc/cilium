@@ -27,7 +27,7 @@ import (
 	"github.com/spf13/viper"
 	"google.golang.org/grpc"
 
-	"github.com/cilium/cilium/daemon/cmd/cni"
+	"github.com/cilium/cilium/daemon/cmd/legacy"
 	agentK8s "github.com/cilium/cilium/daemon/k8s"
 	"github.com/cilium/cilium/pkg/aws/eni"
 	"github.com/cilium/cilium/pkg/bpf"
@@ -51,6 +51,7 @@ import (
 	"github.com/cilium/cilium/pkg/dial"
 	"github.com/cilium/cilium/pkg/endpoint"
 	endpointcreator "github.com/cilium/cilium/pkg/endpoint/creator"
+	endpointmetadata "github.com/cilium/cilium/pkg/endpoint/metadata"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/endpointstate"
 	"github.com/cilium/cilium/pkg/envoy"
@@ -61,6 +62,7 @@ import (
 	"github.com/cilium/cilium/pkg/identity"
 	identitycell "github.com/cilium/cilium/pkg/identity/cache/cell"
 	"github.com/cilium/cilium/pkg/identity/identitymanager"
+	identityrestoration "github.com/cilium/cilium/pkg/identity/restoration"
 	"github.com/cilium/cilium/pkg/ipam"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
 	"github.com/cilium/cilium/pkg/ipcache"
@@ -95,8 +97,6 @@ import (
 	"github.com/cilium/cilium/pkg/policy"
 	policyDirectory "github.com/cilium/cilium/pkg/policy/directory"
 	"github.com/cilium/cilium/pkg/promise"
-	"github.com/cilium/cilium/pkg/rate"
-	"github.com/cilium/cilium/pkg/status"
 	"github.com/cilium/cilium/pkg/time"
 	"github.com/cilium/cilium/pkg/version"
 	wireguard "github.com/cilium/cilium/pkg/wireguard/agent"
@@ -254,6 +254,9 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 
 	flags.Bool(option.EnableHealthChecking, defaults.EnableHealthChecking, "Enable connectivity health checking")
 	option.BindEnv(vp, option.EnableHealthChecking)
+
+	flags.Bool(option.AgentHealthRequireK8sConnectivity, true, "Require Kubernetes connectivity in agent health endpoint")
+	option.BindEnv(vp, option.AgentHealthRequireK8sConnectivity)
 
 	flags.Bool(option.EnableHealthCheckLoadBalancerIP, defaults.EnableHealthCheckLoadBalancerIP, "Enable access of the healthcheck nodePort on the LoadBalancerIP. Needs --enable-health-check-nodeport to be enabled")
 	option.BindEnv(vp, option.EnableHealthCheckLoadBalancerIP)
@@ -684,6 +687,7 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	option.BindEnv(vp, option.IPv4NodeAddr)
 
 	flags.Bool(option.Restore, true, "Restores state, if possible, from previous daemon")
+	flags.MarkHidden(option.Restore)
 	option.BindEnv(vp, option.Restore)
 
 	flags.String(option.SocketPath, defaults.SockPath, "Sets daemon's socket path to listen for connections")
@@ -938,8 +942,11 @@ func InitGlobalFlags(cmd *cobra.Command, vp *viper.Viper) {
 	flags.Bool(option.EnableBGPControlPlaneStatusReport, true, "Enable the BGP control plane status reporting")
 	option.BindEnv(vp, option.EnableBGPControlPlaneStatusReport)
 
-	flags.String(option.BGPRouterIDAllocationMode, defaults.BGPRouterIDAllocationMode, "BGP router-id allocation mode. Currently supported values: 'default' ")
+	flags.String(option.BGPRouterIDAllocationMode, option.BGPRouterIDAllocationModeDefault, "BGP router-id allocation mode. Currently supported values: 'default' or 'ip-pool'")
 	option.BindEnv(vp, option.BGPRouterIDAllocationMode)
+
+	flags.String(option.BGPRouterIDAllocationIPPool, "", "IP pool to allocate the BGP router-id from when the mode is 'ip-pool'")
+	option.BindEnv(vp, option.BGPRouterIDAllocationIPPool)
 
 	flags.Bool(option.EnablePMTUDiscovery, false, "Enable path MTU discovery to send ICMP fragmentation-needed replies to the client")
 	option.BindEnv(vp, option.EnablePMTUDiscovery)
@@ -1032,7 +1039,8 @@ func initDaemonConfigAndLogging(vp *viper.Viper) {
 		lbmap.SizeofSockRevNat6Key+lbmap.SizeofSockRevNat6Value)
 
 	option.Config.SetupLogging(vp, "cilium-agent")
-	option.Config.Populate(vp)
+
+	option.Config.Populate(logging.DefaultSlogLogger, vp)
 
 	// add hooks after setting up metrics in the option.Config
 	logging.DefaultLogger.Hooks.Add(metrics.NewLoggingHook())
@@ -1179,7 +1187,7 @@ func initEnv(vp *viper.Viper) {
 	// the path to an already mounted filesystem instead. This is
 	// useful if the daemon is being round inside a namespace and the
 	// BPF filesystem is mapped into the slave namespace.
-	bpf.CheckOrMountFS(option.Config.BPFRoot)
+	bpf.CheckOrMountFS(logging.DefaultSlogLogger, option.Config.BPFRoot)
 	cgroups.CheckOrMountCgrpFS(option.Config.CGroupRoot)
 
 	option.Config.Opts.SetBool(option.Debug, debugDatapath)
@@ -1345,10 +1353,8 @@ func initEnv(vp *viper.Viper) {
 		log.Fatalf("Cannot specify IPAM mode %s in tunnel mode.", option.Config.IPAM)
 	}
 
-	if option.Config.IPAM == ipamOption.IPAMMultiPool {
-		if option.Config.EnableIPSec {
-			log.Fatalf("Cannot specify IPAM mode %s with %s.", option.Config.IPAM, option.EnableIPSecName)
-		}
+	if option.Config.IPAM == ipamOption.IPAMMultiPool && option.Config.EnableIPSec && !option.Config.TunnelingEnabled() {
+		log.Fatalf("IPAM mode %s with %s is supported only in tunnel mode.", option.Config.IPAM, option.EnableIPSecName)
 	}
 
 	if option.Config.InstallNoConntrackIptRules {
@@ -1443,12 +1449,8 @@ var daemonCell = cell.Module(
 		promise.New[*option.DaemonConfig],
 		newSyncHostIPs,
 	),
-	// Provide a read-only copy of the current daemon settings to be consumed
-	// by the debuginfo API
-	cell.ProvidePrivate(daemonSettings),
 	cell.Invoke(registerEndpointStateResolver),
 	cell.Invoke(func(promise.Promise[*Daemon]) {}), // Force instantiation.
-	endpointBPFrogWatchdogCell,
 )
 
 type daemonParams struct {
@@ -1475,21 +1477,20 @@ type daemonParams struct {
 	NodeAddressing      datapath.NodeAddressing
 	EndpointCreator     endpointcreator.EndpointCreator
 	EndpointManager     endpointmanager.EndpointManager
+	EndpointMetadata    endpointmetadata.EndpointMetadataFetcher
 	CertManager         certificatemanager.CertificateManager
 	SecretManager       certificatemanager.SecretManager
 	IdentityAllocator   identitycell.CachingIdentityAllocator
+	IdentityRestorer    *identityrestoration.LocalIdentityRestorer
 	JobGroup            job.Group
 	Policy              policy.PolicyRepository
 	IPCache             *ipcache.IPCache
 	DirReadStatus       policyDirectory.DirectoryWatcherReadStatus
-	CNIConfigManager    cni.CNIConfigManager
 	CiliumHealth        health.CiliumHealthManager
 	ClusterMesh         *clustermesh.ClusterMesh
 	MonitorAgent        monitorAgent.Agent
 	ServiceManager      service.ServiceManager
 	DB                  *statedb.DB
-	APILimiterSet       *rate.APILimiterSet
-	Settings            cellSettings
 	Routes              statedb.Table[*datapathTables.Route]
 	Devices             statedb.Table[*datapathTables.Device]
 	NodeAddrs           statedb.Table[datapathTables.NodeAddress]
@@ -1513,15 +1514,13 @@ type daemonParams struct {
 	IPAM                *ipam.IPAM
 	CRDSyncPromise      promise.Promise[k8sSynced.CRDSync]
 	IdentityManager     identitymanager.IDManager
-	Orchestrator        datapath.Orchestrator
 	LRPManager          *redirectpolicy.Manager
 	MaglevConfig        maglev.Config
 	LBConfig            loadbalancer.Config
 	DNSProxy            bootstrap.FQDNProxyBootstrapper
-	StatusCollector     status.StatusCollector
 }
 
-func newDaemonPromise(params daemonParams) promise.Promise[*Daemon] {
+func newDaemonPromise(params daemonParams) (promise.Promise[*Daemon], legacy.DaemonInitialization) {
 	daemonResolver, daemonPromise := promise.New[*Daemon]()
 
 	// daemonCtx is the daemon-wide context cancelled when stopping.
@@ -1555,19 +1554,19 @@ func newDaemonPromise(params daemonParams) promise.Promise[*Daemon] {
 				// This validation needs to be done outside of the agent until
 				// datapath.NodeAddressing is used consistently across the code base.
 				log.Info("Validating configured node address ranges")
-				if err := node.ValidatePostInit(); err != nil {
+				if err := node.ValidatePostInit(params.Logger); err != nil {
 					return fmt.Errorf("postinit failed: %w", err)
 				}
 
 				// Store config in file before resolving the DaemonConfig promise.
-				err = option.Config.StoreInFile(option.Config.StateDir)
+				err = option.Config.StoreInFile(d.logger, option.Config.StateDir)
 				if err != nil {
-					log.WithError(err).Error("Unable to store Cilium's configuration")
+					d.logger.Error("Unable to store Cilium's configuration", logfields.Error, err)
 				}
 
-				err = option.StoreViperInFile(option.Config.StateDir)
+				err = option.StoreViperInFile(d.logger, option.Config.StateDir)
 				if err != nil {
-					log.WithError(err).Error("Unable to store Viper's configuration")
+					d.logger.Error("Unable to store Viper's configuration", logfields.Error, err)
 				}
 			}
 
@@ -1598,7 +1597,7 @@ func newDaemonPromise(params daemonParams) promise.Promise[*Daemon] {
 			return nil
 		},
 	})
-	return daemonPromise
+	return daemonPromise, legacy.DaemonInitialization{}
 }
 
 // startDaemon starts the old unmodular part of the cilium-agent.
@@ -1676,8 +1675,8 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 		if !d.endpointManager.IngressEndpointExists() {
 			// Creating Ingress Endpoint depends on the Ingress IPs having been
 			// allocated first. This happens earlier in the agent bootstrap.
-			if (option.Config.EnableIPv4 && len(node.GetIngressIPv4()) == 0) ||
-				(option.Config.EnableIPv6 && len(node.GetIngressIPv6()) == 0) {
+			if (option.Config.EnableIPv4 && len(node.GetIngressIPv4(params.Logger)) == 0) ||
+				(option.Config.EnableIPv6 && len(node.GetIngressIPv6(params.Logger)) == 0) {
 				log.Warn("Ingress IPs are not available, skipping creation of the Ingress Endpoint: Policy enforcement on Cilium Ingress will not work as expected.")
 			} else {
 				log.Info("Creating ingress endpoint")
@@ -1716,7 +1715,7 @@ func startDaemon(d *Daemon, restoredEndpoints *endpointRestoreState, cleaner *da
 		// Sleep for the --identity-restore-grace-period (default: 30 seconds k8s, 10 minutes kvstore), allowing
 		// the normal allocation processes to finish, before releasing restored resources.
 		time.Sleep(option.Config.IdentityRestoreGracePeriod)
-		d.releaseRestoredIdentities()
+		d.identityRestorer.ReleaseRestoredIdentities()
 	}()
 
 	// Migrating the ENI datapath must happen before the API is served to
@@ -1835,16 +1834,11 @@ func initClockSourceOption() {
 	}
 
 	if option.Config.EnableBPFClockProbe {
-		if probes.HaveProgramHelper(logging.DefaultSlogLogger, ebpf.XDP, asm.FnJiffies64) == nil {
-			t, err := probes.Jiffies()
-			if err == nil && t > 0 {
-				option.Config.ClockSource = option.ClockSourceJiffies
-			} else {
-				log.WithError(err).Warningf("Auto-disabling %q feature since kernel doesn't expose jiffies", option.EnableBPFClockProbe)
-				option.Config.EnableBPFClockProbe = false
-			}
+		t, err := probes.Jiffies()
+		if err == nil && t > 0 {
+			option.Config.ClockSource = option.ClockSourceJiffies
 		} else {
-			log.WithError(err).Warningf("Auto-disabling %q feature since kernel support is missing (Linux 5.5 or later required).", option.EnableBPFClockProbe)
+			log.WithError(err).Warningf("Auto-disabling %q feature since kernel doesn't expose jiffies", option.EnableBPFClockProbe)
 			option.Config.EnableBPFClockProbe = false
 		}
 	}

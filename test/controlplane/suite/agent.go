@@ -13,6 +13,7 @@ import (
 	"github.com/cilium/hive/cell"
 	"github.com/cilium/statedb"
 
+	"github.com/cilium/cilium/api/v1/server"
 	"github.com/cilium/cilium/daemon/cmd"
 	cnicell "github.com/cilium/cilium/daemon/cmd/cni"
 	fakecni "github.com/cilium/cilium/daemon/cmd/cni/fake"
@@ -81,6 +82,7 @@ func (h *agentHandle) setupCiliumAgentHive(clientset k8sClient.Clientset, extraC
 			func() cnicell.CNIConfigManager { return &fakecni.FakeCNIConfigManager{} },
 			func() ctmap.GCRunner { return ctmap.NewFakeGCRunner() },
 			func() policymap.Factory { return nil },
+			func() *server.Server { return nil },
 			k8sSynced.RejectedCRDSyncPromise,
 		),
 		fakeDatapath.Cell,
@@ -115,7 +117,7 @@ func (h *agentHandle) setupCiliumAgentHive(clientset k8sClient.Clientset, extraC
 }
 
 func (h *agentHandle) populateCiliumAgentOptions(testDir string, modConfig func(*option.DaemonConfig)) {
-	option.Config.Populate(h.hive.Viper())
+	option.Config.Populate(h.log, h.hive.Viper())
 
 	option.Config.RunDir = testDir
 	option.Config.StateDir = testDir

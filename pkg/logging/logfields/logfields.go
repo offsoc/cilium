@@ -44,6 +44,12 @@ const (
 	// EndpointID is the numeric endpoint identifier
 	EndpointID = "endpointID"
 
+	// EndpointAddressing is the endpoint addressing
+	EndpointAddressing = "addressing"
+
+	// EndpointAddressing defines whether to build an endpoint synchronously or not
+	EndpointSyncBuild = "sync-build"
+
 	// EndpointState is the current endpoint state
 	EndpointState = "endpointState"
 
@@ -478,6 +484,9 @@ const (
 	// DatapathMode is the datapath mode name
 	DatapathMode = "datapathMode"
 
+	// DatapathConfiguration is the datapath configuration
+	DatapathConfiguration = "datapathConfiguration"
+
 	// Tunnel is the tunnel name
 	Tunnel = "tunnel"
 
@@ -667,6 +676,8 @@ const (
 
 	// Count is a measure being compared to the Limit
 	Count = "count"
+
+	Total = "total"
 
 	// Debug is a boolean value for whether debug is set or not.
 	Debug = "debug"
@@ -1531,6 +1542,16 @@ const (
 
 	Candidates = "candidates"
 
+	Skipped = "skipped"
+
+	AliveEntries = "aliveEntries"
+
+	Scope = "scope"
+
+	NewLocally = "newLocally"
+
+	Released = "released"
+
 	DNSRulesV2 = "dnsRulesV2"
 
 	BPFHeaderfileHashOld = "old-" + "bpfHeaderfileHash"
@@ -1565,6 +1586,24 @@ const (
 
 	HubbleServerVersion = "hubble-server-version"
 
+	Handler = "handler"
+
+	NodeOwner = "nodeOwner"
+
+	LenStaleNodes = "lenStaleNodes"
+
+	StaleNodes = "staleNodes"
+
+	SyncInterval = "syncInterval"
+
+	BootID = "bootID"
+
+	LeaseDuration = "leaseDuration"
+
+	RenewDeadline = "renewDeadline"
+
+	RetryPeriod = "retryPeriod"
+
 	Resources = "resources"
 
 	LastModifiedVersion = "lastModifiedVersion"
@@ -1583,9 +1622,17 @@ const (
 
 	PendingCompletions = "pendingCompletions"
 
+	Root = "root"
+
+	LenConfigPairs = "lenConfigPairs"
+
 	Exists = "exists"
 
 	MulticastAddr = "multicastAddr"
+
+	IPMask4 = "ipMask4"
+
+	IPMask6 = "ipMask6"
 
 	IPRules = "ipRules"
 
@@ -1610,4 +1657,74 @@ const (
 	LookupIPAddrs = "lookupIPAddrs"
 
 	MatchPattern = "matchPattern"
+
+	BPFFSRoot = "bpffsRoot"
+
+	Section = "section"
+
+	Instruction = "instruction"
+
+	Reference = "reference"
+
+	MapRenames = "mapRenames"
+
+	Constants = "constants"
+
+	Remaining = "remaining"
+
+	Resolved = "resolved"
+
+	Scanned = "scanned"
+
+	KeySize = "keySize"
+
+	Subnets = "subnets"
+
+	Ratio = "ratio"
+
+	OldName = "oldName"
+
+	NewName = "newName"
+
+	ValueSize = "valueSize"
+
+	MaxEntries = "maxEntries"
+
+	Flags = "flags"
+
+	ExitCode = "exitCode"
+
+	NumBufferedEvents = "numBufferedEvents"
+
+	EventHandlingDuration = "eventHandlingDuration"
+
+	EventEnqueueWaitTime = "eventEnqueueWaitTime"
+
+	CalculatedInterval = "calculatedInterval"
+
+	MaxAllowedInterval = "maxAllowedInterval"
+
+	EventConsumeOffQueueWaitTime = "eventConsumeOffQueueWaitTime"
+
+	CachedSource = "cachedSource"
+
+	Info = "info"
+
+	OperatorID = "operatorID"
+
+	NewLeader = "newLeader"
+
+	KVStore = "kvstore"
+
+	LabelSelectorFlagOption = "label-selector"
+
+	RemoveCiliumNodeTaintsFlagOption = "remove-cilium-node-taints"
+
+	SetCiliumNodeTaintsFlagOption = "set-cilium-node-taints"
+
+	SetCiliumIsUpConditionFlagOption = "set-cilium-is-up-condition"
+
+	TimeSinceRestart = "timeSinceRestart"
+
+	TimeSincePodStarted = "timeSincePodStarted"
 )

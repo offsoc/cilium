@@ -8,6 +8,7 @@ import (
 	"net/netip"
 	"testing"
 
+	"github.com/cilium/hive/hivetest"
 	"github.com/stretchr/testify/require"
 
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
@@ -25,14 +26,16 @@ func (d *dummyOwner) GetNodeSuffix() string {
 }
 
 func BenchmarkInjectLabels(b *testing.B) {
+	logger := hivetest.Logger(b)
 	ctx, cancel := context.WithCancel(context.Background())
-	alloc := cache.NewCachingIdentityAllocator(&dummyOwner{}, cache.AllocatorConfig{})
-	//<-alloc.InitIdentityAllocator(nil)
+	alloc := cache.NewCachingIdentityAllocator(logger, &dummyOwner{}, cache.AllocatorConfig{})
+	// <-alloc.InitIdentityAllocator(nil)
 	PolicyHandler = &mockUpdater{
 		identities: make(map[identity.NumericIdentity]labels.LabelArray),
 	}
 	ipc := NewIPCache(&Configuration{
 		Context:           ctx,
+		Logger:            logger,
 		IdentityAllocator: alloc,
 		PolicyHandler:     PolicyHandler,
 		DatapathHandler:   &mockTriggerer{},

@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net"
+	"path"
 	"strconv"
 	"strings"
 	"testing"
@@ -36,6 +38,7 @@ import (
 	"github.com/cilium/cilium/pkg/logging"
 	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/node"
+	"github.com/cilium/cilium/pkg/node/addressing"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/source"
@@ -111,6 +114,14 @@ func TestScript(t *testing.T) {
 			flags.Set("lb-retry-backoff-max", "10ms") // tiny backoffs
 			flags.Set("bpf-lb-maglev-table-size", "1021")
 
+			// Expand $WORK in args. Used by testdata/file.txtar.
+			// This works by creating a new temporary directory for this test (e.g. /tmp/<tempdir/002)
+			// and replacing the directory with /001 which is the temp directory that scripttest created.
+			tempDir := path.Join(path.Dir(t.TempDir()), "001")
+			for i := range args {
+				args[i] = strings.ReplaceAll(args[i], "$WORK", tempDir)
+			}
+
 			// Parse the shebang arguments in the script.
 			require.NoError(t, flags.Parse(args), "flags.Parse")
 
@@ -144,6 +155,7 @@ func (tc testCommands) cmds() map[string]script.Cmd {
 		"test/bpfops-reset":          tc.opsReset(),
 		"test/bpfops-summary":        tc.opsSummary(),
 		"test/set-node-labels":       tc.setNodeLabels(),
+		"test/set-node-ip":           tc.setNodeIP(),
 	}
 }
 
@@ -219,5 +231,22 @@ func (tc testCommands) setNodeLabels() script.Cmd {
 			})
 			return nil, nil
 		})
+}
 
+func (tc testCommands) setNodeIP() script.Cmd {
+	return script.Command(
+		script.CmdUsage{Summary: "Set local node IP", Args: "ip"},
+		func(s *script.State, args ...string) (script.WaitFunc, error) {
+			if len(args) != 1 {
+				return nil, fmt.Errorf("%w: expected 'ip'", script.ErrUsage)
+			}
+			ip := net.ParseIP(args[0])
+			tc.lns.Update(func(n *node.LocalNode) {
+				n.IPAddresses = []nodeTypes.Address{
+					{Type: addressing.NodeExternalIP, IP: ip},
+				}
+				s.Logf("NodeIP set to %s\n", ip)
+			})
+			return nil, nil
+		})
 }

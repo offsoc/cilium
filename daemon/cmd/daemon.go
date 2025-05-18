@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
-	"net/netip"
 	"sync"
 
 	"github.com/cilium/hive/job"
@@ -17,7 +16,6 @@ import (
 	"github.com/sirupsen/logrus"
 	"github.com/vishvananda/netlink"
 
-	"github.com/cilium/cilium/daemon/cmd/cni"
 	agentK8s "github.com/cilium/cilium/daemon/k8s"
 	"github.com/cilium/cilium/pkg/clustermesh"
 	"github.com/cilium/cilium/pkg/controller"
@@ -32,18 +30,19 @@ import (
 	"github.com/cilium/cilium/pkg/defaults"
 	"github.com/cilium/cilium/pkg/endpoint"
 	endpointcreator "github.com/cilium/cilium/pkg/endpoint/creator"
+	endpointmetadata "github.com/cilium/cilium/pkg/endpoint/metadata"
 	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/endpointmanager"
 	"github.com/cilium/cilium/pkg/health"
 	"github.com/cilium/cilium/pkg/identity"
 	identitycell "github.com/cilium/cilium/pkg/identity/cache/cell"
 	"github.com/cilium/cilium/pkg/identity/identitymanager"
+	identityrestoration "github.com/cilium/cilium/pkg/identity/restoration"
 	"github.com/cilium/cilium/pkg/ipam"
 	ipamOption "github.com/cilium/cilium/pkg/ipam/option"
 	"github.com/cilium/cilium/pkg/ipcache"
 	"github.com/cilium/cilium/pkg/k8s"
 	k8sClient "github.com/cilium/cilium/pkg/k8s/client"
-	slim_corev1 "github.com/cilium/cilium/pkg/k8s/slim/k8s/api/core/v1"
 	"github.com/cilium/cilium/pkg/k8s/watchers"
 	"github.com/cilium/cilium/pkg/kvstore"
 	"github.com/cilium/cilium/pkg/labels"
@@ -63,11 +62,8 @@ import (
 	"github.com/cilium/cilium/pkg/option"
 	"github.com/cilium/cilium/pkg/policy"
 	policyAPI "github.com/cilium/cilium/pkg/policy/api"
-	"github.com/cilium/cilium/pkg/rate"
 	"github.com/cilium/cilium/pkg/resiliency"
-	"github.com/cilium/cilium/pkg/status"
 	"github.com/cilium/cilium/pkg/time"
-	wireguard "github.com/cilium/cilium/pkg/wireguard/agent"
 )
 
 const (
@@ -113,14 +109,13 @@ type Daemon struct {
 	endpointInitialPolicyComplete chan struct{}
 
 	identityAllocator identitycell.CachingIdentityAllocator
-
-	ipcache *ipcache.IPCache
+	identityRestorer  *identityrestoration.LocalIdentityRestorer
+	ipcache           *ipcache.IPCache
 
 	k8sWatcher  *watchers.K8sWatcher
 	k8sSvcCache k8s.ServiceCache
 
-	// endpointMetadataFetcher knows how to fetch Kubernetes metadata for endpoints.
-	endpointMetadataFetcher endpointMetadataFetcher
+	endpointMetadata endpointmetadata.EndpointMetadataFetcher
 
 	// healthEndpointRouting is the information required to set up the health
 	// endpoint's routing in ENI or Azure IPAM mode
@@ -128,35 +123,16 @@ type Daemon struct {
 
 	ciliumHealth health.CiliumHealthManager
 
-	// endpointCreations is a map of all currently ongoing endpoint
-	// creation events
-	endpointCreations *endpointCreationManager
-
-	apiLimiterSet *rate.APILimiterSet
-
-	// CIDRs for which identities were restored during bootstrap
-	restoredCIDRs map[netip.Prefix]identity.NumericIdentity
-
 	// Controllers owned by the daemon
 	controllers *controller.Manager
 	jobGroup    job.Group
 
-	// just used to tie together some status reporting
-	cniConfigManager cni.CNIConfigManager
-
-	// read-only map of all the hive settings
-	settings cellSettings
-
 	bwManager datapath.BandwidthManager
-
-	wireguardAgent *wireguard.Agent
-	orchestrator   datapath.Orchestrator
 
 	lrpManager   *redirectpolicy.Manager
 	maglevConfig maglev.Config
 
-	statusCollector status.StatusCollector
-	lbConfig        loadbalancer.Config
+	lbConfig loadbalancer.Config
 }
 
 func (d *Daemon) init() error {
@@ -275,8 +251,8 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	// detection, might disable BPF NodePort and friends. But this is fine, as
 	// the feature does not influence the decision which BPF maps should be
 	// created.
-	if err := initKubeProxyReplacementOptions(params.Sysctl, params.TunnelConfig, params.LBConfig); err != nil {
-		log.WithError(err).Error("unable to initialize kube-proxy replacement options")
+	if err := initKubeProxyReplacementOptions(params.Logger, params.Sysctl, params.TunnelConfig, params.LBConfig); err != nil {
+		params.Logger.Error("unable to initialize kube-proxy replacement options", logfields.Error, err)
 		return nil, nil, fmt.Errorf("unable to initialize kube-proxy replacement options: %w", err)
 	}
 
@@ -302,47 +278,42 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	})
 
 	d := Daemon{
-		ctx:               ctx,
-		logger:            params.Logger,
-		clientset:         params.Clientset,
-		db:                params.DB,
-		mtuConfig:         params.MTU,
-		directRoutingDev:  params.DirectRoutingDevice,
-		nodeAddressing:    params.NodeAddressing,
-		routes:            params.Routes,
-		devices:           params.Devices,
-		nodeAddrs:         params.NodeAddrs,
-		nodeDiscovery:     params.NodeDiscovery,
-		nodeLocalStore:    params.LocalNodeStore,
-		endpointCreations: newEndpointCreationManager(params.Clientset),
-		apiLimiterSet:     params.APILimiterSet,
-		controllers:       controller.NewManager(),
-		jobGroup:          params.JobGroup,
+		ctx:              ctx,
+		logger:           params.Logger,
+		clientset:        params.Clientset,
+		db:               params.DB,
+		mtuConfig:        params.MTU,
+		directRoutingDev: params.DirectRoutingDevice,
+		nodeAddressing:   params.NodeAddressing,
+		routes:           params.Routes,
+		devices:          params.Devices,
+		nodeAddrs:        params.NodeAddrs,
+		nodeDiscovery:    params.NodeDiscovery,
+		nodeLocalStore:   params.LocalNodeStore,
+		controllers:      controller.NewManager(),
+		jobGroup:         params.JobGroup,
 		// **NOTE** The global identity allocator is not yet initialized here; that
 		// happens below via InitIdentityAllocator(). Only the local identity
 		// allocator is initialized here.
 		identityAllocator: params.IdentityAllocator,
 		ipcache:           params.IPCache,
+		identityRestorer:  params.IdentityRestorer,
 		policy:            params.Policy,
 		idmgr:             params.IdentityManager,
-		cniConfigManager:  params.CNIConfigManager,
 		clustermesh:       params.ClusterMesh,
 		monitorAgent:      params.MonitorAgent,
 		svc:               params.ServiceManager,
-		settings:          params.Settings,
 		bwManager:         params.BandwidthManager,
 		endpointCreator:   params.EndpointCreator,
 		endpointManager:   params.EndpointManager,
+		endpointMetadata:  params.EndpointMetadata,
 		k8sWatcher:        params.K8sWatcher,
 		k8sSvcCache:       params.K8sSvcCache,
 		ipam:              params.IPAM,
-		wireguardAgent:    params.WGAgent,
-		orchestrator:      params.Orchestrator,
 		lrpManager:        params.LRPManager,
 		maglevConfig:      params.MaglevConfig,
 		lbConfig:          params.LBConfig,
 		ciliumHealth:      params.CiliumHealth,
-		statusCollector:   params.StatusCollector,
 	}
 
 	// initialize endpointRestoreComplete channel as soon as possible so that subsystems
@@ -358,7 +329,7 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	if option.Config.RestoreState && !option.Config.DryMode {
 		// this *must* be called before initMaps(), which will "hide"
 		// the "old" ipcache.
-		err := d.restoreLocalIdentities()
+		err := d.identityRestorer.RestoreLocalIdentities()
 		if err != nil {
 			log.WithError(err).Warn("Failed to restore existing identities from the previous ipcache. This may cause policy interruptions during restart.")
 		}
@@ -410,7 +381,6 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 
 	debug.RegisterStatusObject("k8s-service-cache", d.k8sSvcCache)
 	debug.RegisterStatusObject("ipam", d.ipam)
-	debug.RegisterStatusObject("ongoing-endpoint-creations", d.endpointCreations)
 
 	d.k8sWatcher.RunK8sServiceHandler()
 
@@ -525,8 +495,8 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 			d.nodeDiscovery.UpdateCiliumNodeResource()
 		}
 
-		if err := agentK8s.WaitForNodeInformation(d.ctx, log, params.Resources.LocalNode, params.Resources.LocalCiliumNode); err != nil {
-			log.WithError(err).Error("unable to connect to get node spec from apiserver")
+		if err := agentK8s.WaitForNodeInformation(d.ctx, d.logger, params.Resources.LocalNode, params.Resources.LocalCiliumNode); err != nil {
+			d.logger.Error("unable to connect to get node spec from apiserver", logfields.Error, err)
 			return nil, nil, fmt.Errorf("unable to connect to get node spec from apiserver: %w", err)
 		}
 
@@ -575,8 +545,8 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	}
 
 	nativeDevices, _ := datapathTables.SelectedDevices(d.devices, rxn)
-	if err := finishKubeProxyReplacementInit(params.Sysctl, nativeDevices, drdName); err != nil {
-		log.WithError(err).Error("failed to finalise LB initialization")
+	if err := finishKubeProxyReplacementInit(params.Logger, params.Sysctl, nativeDevices, drdName); err != nil {
+		d.logger.Error("failed to finalise LB initialization", logfields.Error, err)
 		return nil, nil, fmt.Errorf("failed to finalise LB initialization: %w", err)
 	}
 
@@ -651,9 +621,9 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	// k8s.WaitForNodeInformation(). These will be used later after starting
 	// IPAM initialization to finish off the `cilium_host` IP restoration.
 	var restoredRouterIPs restoredIPs
-	restoredRouterIPs.IPv4FromK8s, restoredRouterIPs.IPv6FromK8s = node.GetInternalIPv4Router(), node.GetIPv6Router()
+	restoredRouterIPs.IPv4FromK8s, restoredRouterIPs.IPv6FromK8s = node.GetInternalIPv4Router(params.Logger), node.GetIPv6Router(params.Logger)
 	// Fetch the router IPs from the filesystem in case they were set a priori
-	restoredRouterIPs.IPv4FromFS, restoredRouterIPs.IPv6FromFS = node.ExtractCiliumHostIPFromFS()
+	restoredRouterIPs.IPv4FromFS, restoredRouterIPs.IPv6FromFS = node.ExtractCiliumHostIPFromFS(params.Logger)
 
 	// Configure IPAM without using the configuration yet.
 	d.configureIPAM()
@@ -682,14 +652,14 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	if params.Clientset.IsEnabled() && option.Config.AnnotateK8sNode {
 		bootstrapStats.k8sInit.Start()
 		log.WithFields(logrus.Fields{
-			logfields.V4Prefix:       node.GetIPv4AllocRange(),
-			logfields.V6Prefix:       node.GetIPv6AllocRange(),
-			logfields.V4HealthIP:     node.GetEndpointHealthIPv4(),
-			logfields.V6HealthIP:     node.GetEndpointHealthIPv6(),
-			logfields.V4IngressIP:    node.GetIngressIPv4(),
-			logfields.V6IngressIP:    node.GetIngressIPv6(),
-			logfields.V4CiliumHostIP: node.GetInternalIPv4Router(),
-			logfields.V6CiliumHostIP: node.GetIPv6Router(),
+			logfields.V4Prefix:       node.GetIPv4AllocRange(params.Logger),
+			logfields.V6Prefix:       node.GetIPv6AllocRange(params.Logger),
+			logfields.V4HealthIP:     node.GetEndpointHealthIPv4(params.Logger),
+			logfields.V6HealthIP:     node.GetEndpointHealthIPv6(params.Logger),
+			logfields.V4IngressIP:    node.GetIngressIPv4(params.Logger),
+			logfields.V6IngressIP:    node.GetIngressIPv6(params.Logger),
+			logfields.V4CiliumHostIP: node.GetInternalIPv4Router(params.Logger),
+			logfields.V6CiliumHostIP: node.GetIPv6Router(params.Logger),
 		}).Info("Annotating k8s node")
 
 		latestLocalNode, err := d.nodeLocalStore.Get(ctx)
@@ -789,9 +759,4 @@ func (d *Daemon) Close() {
 
 	// Ensures all controllers are stopped!
 	d.controllers.RemoveAllAndWait()
-}
-
-type endpointMetadataFetcher interface {
-	FetchNamespace(nsName string) (*slim_corev1.Namespace, error)
-	FetchPod(nsName, podName string) (*slim_corev1.Pod, error)
 }

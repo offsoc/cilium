@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"log/slog"
 	"maps"
+	"net/netip"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/ratelimit"
@@ -22,7 +23,6 @@ import (
 	"github.com/cilium/cilium/pkg/api/helpers"
 	eniTypes "github.com/cilium/cilium/pkg/aws/eni/types"
 	"github.com/cilium/cilium/pkg/aws/types"
-	"github.com/cilium/cilium/pkg/cidr"
 	"github.com/cilium/cilium/pkg/defaults"
 	ipPkg "github.com/cilium/cilium/pkg/ip"
 	"github.com/cilium/cilium/pkg/ipam/option"
@@ -348,10 +348,12 @@ func (c *Client) describeNetworkInterfacesFromInstances(ctx context.Context) ([]
 				Values: []string{"*"},
 			},
 		},
-		MaxResults: aws.Int32(defaults.ENIMaxResultsPerApiCall),
 	}
 	if len(enisListFromInstances) > 0 {
 		ENIAttrs.NetworkInterfaceIds = enisListFromInstances
+	} else {
+		// MaxResults is incompatible with NetworkInterfaceIds
+		ENIAttrs.MaxResults = aws.Int32(defaults.ENIMaxResultsPerApiCall)
 	}
 
 	var result []ec2_types.NetworkInterface
@@ -408,7 +410,7 @@ func parseENI(iface *ec2_types.NetworkInterface, vpcs ipamTypes.VirtualNetworkMa
 		eni.Subnet.ID = aws.ToString(iface.SubnetId)
 
 		if subnets != nil {
-			if subnet, ok := subnets[eni.Subnet.ID]; ok && subnet.CIDR != nil {
+			if subnet, ok := subnets[eni.Subnet.ID]; ok && subnet.CIDR.IsValid() {
 				eni.Subnet.CIDR = subnet.CIDR.String()
 			}
 		}
@@ -597,14 +599,14 @@ func (c *Client) GetSubnets(ctx context.Context) (ipamTypes.SubnetMap, error) {
 	}
 
 	for _, s := range subnetList {
-		c, err := cidr.ParseCIDR(aws.ToString(s.CidrBlock))
+		cidr, err := netip.ParsePrefix(aws.ToString(s.CidrBlock))
 		if err != nil {
 			continue
 		}
 
 		subnet := &ipamTypes.Subnet{
 			ID:                 aws.ToString(s.SubnetId),
-			CIDR:               c,
+			CIDR:               cidr,
 			AvailableAddresses: int(aws.ToInt32(s.AvailableIpAddressCount)),
 			Tags:               map[string]string{},
 		}

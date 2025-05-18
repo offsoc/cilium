@@ -31,6 +31,16 @@ Setting the routable CIDR
   10.0.0.0/8`` (or ``ipv6-native-routing-cidr: fd00::/100`` for IPv6 addresses)
   in which case all destinations within that CIDR will **not** be masqueraded.
 
+  In the public cloud environment, if you don't configure ``ipv4-native-routing-cidr``, 
+  Cilium will automatically detect the VPC CIDR range as the native routing range. 
+  Cilium does not masquerade the source address for traffic that is natively
+  routable in the network, because it is possible for the endpoints to
+  communicate directly without NAT.
+  As a result, if masquerading is enabled, traffic from pods to other 
+  non-cluster resources within the same VPC (e.g., virtual machines) will be 
+  routed directly without masquerading the source IP address.
+
+
 Setting the masquerading interface
   See :ref:`masq_modes` for configuring the masquerading interfaces.
 
@@ -47,9 +57,6 @@ eBPF-based
    **IPv6** BPF masquerading is a beta feature. Please provide feedback and
    file a GitHub issue if you experience any problems. IPv4 BPF masquerading is
    production-ready.
-
-.. note::
-   BPF masquerading is incompatible with Istio.
 
 The eBPF-based implementation is the most efficient implementation. It can be enabled with
 the ``bpf.masquerade=true`` helm option.

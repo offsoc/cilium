@@ -136,7 +136,7 @@ jobs:
           CILIUM_INSTALL_DEFAULTS="${{ steps.default_vars.outputs.cilium_install_defaults }} \
             --helm-set=cni.chainingMode=portmap \
             --helm-set=kubeProxyReplacement=true \
-            --helm-set=identityChangeGracePeriod="0s" \
+            --helm-set=identityChangeGracePeriod=\"0s\" \
             --helm-set=sctp.enabled=true"
           echo cilium_install_defaults=${CILIUM_INSTALL_DEFAULTS} >> $GITHUB_OUTPUT
           echo sha=${{ steps.default_vars.outputs.sha }} >> $GITHUB_OUTPUT
@@ -200,6 +200,21 @@ jobs:
             --dump-logs-on-failure=true                   \
             --report-dir=${E2E_REPORT_DIR}                \
             --disable-log-dump=true
+
+      # Check for file-descriptor leaks from the cilium-agent process.
+      # There's no particular reason why we are checking it here, but
+      # it is a good idea to check for leaks in a CI job as this was migrated
+      # from the runtime tests' framework.
+      - name: File-descriptor leak detector
+        run: |
+          for p in $(pidof cilium-agent); do
+            num=$(sudo lsof -p $p | wc -l)
+            echo "cilium-agent($p) has $num file descriptors open"
+            if [ "$num" -gt "500" ]; then
+              echo "cilium-agent($p) has more than 500 file descriptors (potential leak)"
+              exit 1
+            fi
+          done
 
       - name: Features tested
         uses: ./.github/actions/feature-status

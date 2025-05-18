@@ -24,9 +24,9 @@ concurrency:
 
 env:
   # renovate: datasource=golang-version depName=go
-  go_version: 1.24.2
+  go_version: 1.24.3
   # renovate: datasource=docker depName=google/cloud-sdk
-  gcloud_version: 519.0.0
+  gcloud_version: 521.0.0
 
 jobs:
   cleanup-kops-clusters:
@@ -67,7 +67,7 @@ jobs:
           if ./kops get clusters --state ${{ secrets.GCP_PERF_KOPS_STATE_STORE }} -o json > /tmp/clusters.json
           then
             echo "Clusters list fetched successfully"
-            date=`date -u +%Y-%m-%d'T'%H:%M'Z' -d "3 hour ago"`
+            date=$(date -u +%Y-%m-%d'T'%H:%M'Z' -d "3 hour ago")
             cat /tmp/clusters.json | jq -r --arg date "$date" '.[] | select(.metadata.creationTimestamp < $date) | .metadata.name' > /tmp/stale-clusters.txt
             # iterate through list of cluster names in /tmp/stale-clusters.txt
             while IFS= read -r cluster; do

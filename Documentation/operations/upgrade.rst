@@ -313,6 +313,7 @@ communicating via the proxy must reconnect to re-establish connections.
   To keep the ``enableIPv4Masquerade`` enabled, explicitly set the value for
   this option to ``true``, or use a value strictly lower than 1.18 for
   ``upgradeCompatibility``.  
+* This Cilium version now requires a v5.10 Linux kernel or newer.
 
 Removed Options
 ~~~~~~~~~~~~~~~
@@ -679,10 +680,6 @@ Migration with the "Double Write" identity allocation mode
 The "Double Write" Identity Allocation Mode allows Cilium to allocate identities as KVStore values *and* as CRDs at the
 same time. This mode also has two versions: one where the source of truth comes from the kvstore (``--identity-allocation-mode=doublewrite-readkvstore``),
 and one where the source of truth comes from CRDs (``--identity-allocation-mode=doublewrite-readcrd``).
-
-.. note::
-
-    "Double Write" mode is not compatible with Consul as the KVStore
 
 The high-level migration plan looks as follows:
 

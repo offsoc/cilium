@@ -562,7 +562,7 @@ func (ct *ConnectivityTest) report() error {
 		return fmt.Errorf("[%s] %d tests failed", ct.params.TestNamespace, nf)
 	}
 
-	if ct.params.Perf && !ct.params.PerfParameters.NetQos {
+	if ct.params.Perf && !ct.params.PerfParameters.NetQos && !ct.params.PerfParameters.Bandwidth {
 		ct.Header(fmt.Sprintf("🔥 Network Performance Test Summary [%s]:", ct.params.TestNamespace))
 		ct.Logf("%s", strings.Repeat("-", 200))
 		ct.Logf("📋 %-15s | %-10s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s | %-15s", "Scenario", "Node", "Test", "Duration", "Min", "Mean", "Max", "P50", "P90", "P99", "Transaction rate OP/s")
@@ -1315,8 +1315,7 @@ func (ct *ConnectivityTest) ShouldRunConnDisruptNSTraffic() bool {
 	return ct.params.IncludeConnDisruptTestNSTraffic &&
 		ct.Features[features.NodeWithoutCilium].Enabled &&
 		(ct.Params().MultiCluster == "" || ct.Features[features.KPRNodePort].Enabled) &&
-		!ct.Features[features.KPRNodePortAcceleration].Enabled &&
-		(!ct.Features[features.IPsecEnabled].Enabled || !ct.Features[features.KPRNodePort].Enabled)
+		!ct.Features[features.KPRNodePortAcceleration].Enabled
 }
 
 func (ct *ConnectivityTest) ShouldRunConnDisruptEgressGateway() bool {

@@ -495,13 +495,38 @@ lb_l4_xlate(struct __ctx_buff *ctx, __u8 nexthdr __maybe_unused, int l4_off,
 }
 
 #ifdef ENABLE_IPV6
+static __always_inline int
+ipv6_l4_csum_update(struct __ctx_buff *ctx, int l4_off, union v6addr *old_addr,
+		    union v6addr *new_addr, struct csum_offset *csum_off,
+		    enum ct_dir dir)
+{
+	int flag = 0;
+	__be32 sum;
+
+	sum = csum_diff(old_addr->addr, 16, new_addr->addr, 16, 0);
+
+	/* We need this to workaround a bug in bpf_l4_csum_replace's usage of
+	 * inet_proto_csum_replace_by_diff. In short, for IPv6 we don't want to
+	 * update skb->csum when CHECKSUM_COMPLETE (for the reason explained above
+	 * inet_proto_csum_replace16). Unfortunately,
+	 * inet_proto_csum_replace_by_diff does update skb->csum in that case. So
+	 * we don't set BPF_F_PSEUDO_HDR to work around that.
+	 * On egress, however, we might be in CHECKSUM_PARTIAL state, in which
+	 * case we need to set BPF_F_PSEUDO_HDR or the L4 checksum won't be
+	 * updated.
+	 */
+	if (dir == CT_EGRESS)
+		flag = BPF_F_PSEUDO_HDR;
+
+	return csum_l4_replace(ctx, l4_off, csum_off, 0, sum, flag);
+}
+
 static __always_inline int __lb6_rev_nat(struct __ctx_buff *ctx, int l4_off,
 					 struct ipv6_ct_tuple *tuple,
 					 struct lb6_reverse_nat *nat,
-					 bool has_l4_header)
+					 bool has_l4_header, enum ct_dir dir)
 {
 	union v6addr old_saddr __align_stack_8;
-	__be32 sum;
 	int ret;
 
 	cilium_dbg_lb(ctx, DBG_LB6_REVERSE_NAT, nat->address.p4, nat->port);
@@ -525,9 +550,9 @@ static __always_inline int __lb6_rev_nat(struct __ctx_buff *ctx, int l4_off,
 				return ret;
 		}
 
-		sum = csum_diff(old_saddr.addr, 16, nat->address.addr, 16, 0);
 		if (csum_off.offset &&
-		    csum_l4_replace(ctx, l4_off, &csum_off, 0, sum, BPF_F_PSEUDO_HDR) < 0)
+		    ipv6_l4_csum_update(ctx, l4_off, &old_saddr, &nat->address,
+					&csum_off, dir) < 0)
 			return DROP_CSUM_L4;
 	}
 
@@ -549,7 +574,8 @@ lb6_lookup_rev_nat_entry(struct __ctx_buff *ctx __maybe_unused, __u16 index)
  * @arg tuple		tuple
  */
 static __always_inline int lb6_rev_nat(struct __ctx_buff *ctx, int l4_off, __u16 index,
-				       struct ipv6_ct_tuple *tuple, bool has_l4_header)
+				       struct ipv6_ct_tuple *tuple, bool has_l4_header,
+				       enum ct_dir dir)
 {
 	struct lb6_reverse_nat *nat;
 
@@ -557,7 +583,7 @@ static __always_inline int lb6_rev_nat(struct __ctx_buff *ctx, int l4_off, __u16
 	if (nat == NULL)
 		return 0;
 
-	return __lb6_rev_nat(ctx, l4_off, tuple, nat, has_l4_header);
+	return __lb6_rev_nat(ctx, l4_off, tuple, nat, has_l4_header, dir);
 }
 
 static __always_inline void
@@ -580,10 +606,9 @@ lb6_fill_key(struct lb6_key *key, struct ipv6_ct_tuple *tuple)
 /** Extract IPv6 CT tuple from packet
  * @arg ctx		Packet
  * @arg ip6		Pointer to L3 header
- * @arg l3_off		Offset to L3 header
  * @arg fraginfo	fraginfo, as returned by ipv6_get_fraginfo
  * @arg l4_off		Offset to L4 header
- * @arg tuple		CT tuple
+ * @arg tuple		CT tuple, with nexthdr prefilled
  *
  * Expects the ctx to be validated for direct packet access up to L4.
  *
@@ -593,20 +618,11 @@ lb6_fill_key(struct lb6_key *key, struct ipv6_ct_tuple *tuple)
  *   - Negative error code
  */
 static __always_inline int
-lb6_extract_tuple(struct __ctx_buff *ctx, struct ipv6hdr *ip6, int l3_off,
-		  fraginfo_t fraginfo, int *l4_off, struct ipv6_ct_tuple *tuple)
+lb6_extract_tuple(struct __ctx_buff *ctx, struct ipv6hdr *ip6, fraginfo_t fraginfo,
+		  int l4_off, struct ipv6_ct_tuple *tuple)
 {
-	int ret;
-
-	tuple->nexthdr = ip6->nexthdr;
 	ipv6_addr_copy(&tuple->daddr, (union v6addr *)&ip6->daddr);
 	ipv6_addr_copy(&tuple->saddr, (union v6addr *)&ip6->saddr);
-
-	ret = ipv6_hdrlen_offset(ctx, &tuple->nexthdr, l3_off);
-	if (ret < 0)
-		goto err;
-
-	*l4_off = l3_off + ret;
 
 	switch (tuple->nexthdr) {
 	case IPPROTO_TCP:
@@ -614,23 +630,13 @@ lb6_extract_tuple(struct __ctx_buff *ctx, struct ipv6hdr *ip6, int l3_off,
 #ifdef ENABLE_SCTP
 	case IPPROTO_SCTP:
 #endif  /* ENABLE_SCTP */
-		return ipv6_load_l4_ports(ctx, ip6, fraginfo, *l4_off,
+		return ipv6_load_l4_ports(ctx, ip6, fraginfo, l4_off,
 					  CT_EGRESS, &tuple->dport);
 	case IPPROTO_ICMPV6:
 		return DROP_UNSUPP_SERVICE_PROTO;
 	default:
 		return DROP_UNKNOWN_L4;
 	}
-
-err:
-	/* Make sure *l4_off is always initialized on return, because
-	 * Clang can spill it from a register to the stack even in error
-	 * flows where this value is no longer used, and this pattern is
-	 * rejected by the verifier.
-	 * Use a prominent value (-1) to highlight any potential misuse.
-	 */
-	*l4_off = -1;
-	return ret;
 }
 
 static __always_inline
@@ -674,6 +680,7 @@ struct lb6_service *lb6_lookup_service(struct lb6_key *key,
 				       const bool scope_switch)
 {
 	struct lb6_service *svc;
+	__u8 orig_proto = key->proto;
 
 	key->scope = LB_LOOKUP_SCOPE_EXT;
 	key->backend_slot = 0;
@@ -691,7 +698,16 @@ struct lb6_service *lb6_lookup_service(struct lb6_key *key,
 		if (!scope_switch || !lb6_svc_is_two_scopes(svc))
 			return svc;
 		key->scope = LB_LOOKUP_SCOPE_INT;
+		key->proto = orig_proto;
 		svc = map_lookup_elem(&cilium_lb6_services_v2, key);
+
+#if defined(ENABLE_SERVICE_PROTOCOL_DIFFERENTIATION)
+		/* Also check for ANY protocol for internal scope lookups */
+		if (!svc && key->proto != 0) {
+			key->proto = 0;
+			svc = map_lookup_elem(&cilium_lb6_services_v2, key);
+		}
+#endif
 	}
 
 	return svc;
@@ -1052,7 +1068,7 @@ static __always_inline int lb6_local(const void *map, struct __ctx_buff *ctx,
 			goto drop_err;
 
 #ifdef ENABLE_ACTIVE_CONNECTION_TRACKING
-		_lb_act_conn_open(ct_state->rev_nat_index, backend->zone);
+		_lb_act_conn_open(state->rev_nat_index, backend->zone);
 #endif
 
 		break;
@@ -1106,11 +1122,11 @@ static __always_inline int lb6_local(const void *map, struct __ctx_buff *ctx,
 		lb6_update_affinity_by_addr(svc, &client_id, backend_id);
 #endif
 
-#if defined(ENABLE_LOCAL_REDIRECT_POLICY) && defined(HAVE_NETNS_COOKIE)
+#if defined(ENABLE_LOCAL_REDIRECT_POLICY)
 	if (netns_cookie > 0 && unlikely(lb6_svc_is_localredirect(svc)) &&
 	    lb6_skip_xlate_from_ctx_to_svc(netns_cookie, tuple->daddr, tuple->sport))
 		return CTX_ACT_OK;
-#endif /* ENABLE_LOCAL_REDIRECT_POLICY && HAVE_NETNS_COOKIE */
+#endif /* ENABLE_LOCAL_REDIRECT_POLICY */
 
 	ipv6_addr_copy(&tuple->daddr, &backend->address);
 
@@ -1324,7 +1340,6 @@ lb4_fill_key(struct lb4_key *key, const struct ipv4_ct_tuple *tuple)
 /** Extract IPv4 CT tuple from packet
  * @arg ctx		Packet
  * @arg ip4		Pointer to L3 header
- * @arg l3_off		Offset to L3 header
  * @arg fraginfo	fraginfo, as returned by ipfrag_encode_ipv4
  * @arg l4_off		Offset to L4 header
  * @arg tuple		CT tuple
@@ -1335,14 +1350,12 @@ lb4_fill_key(struct lb4_key *key, const struct ipv4_ct_tuple *tuple)
  *   - Negative error code
  */
 static __always_inline int
-lb4_extract_tuple(struct __ctx_buff *ctx, struct iphdr *ip4, int l3_off,
-		  fraginfo_t fraginfo, int *l4_off, struct ipv4_ct_tuple *tuple)
+lb4_extract_tuple(struct __ctx_buff *ctx, struct iphdr *ip4, fraginfo_t fraginfo,
+		  int l4_off, struct ipv4_ct_tuple *tuple)
 {
 	tuple->nexthdr = ip4->protocol;
 	tuple->daddr = ip4->daddr;
 	tuple->saddr = ip4->saddr;
-
-	*l4_off = l3_off + ipv4_hdrlen(ip4);
 
 	switch (tuple->nexthdr) {
 	case IPPROTO_TCP:
@@ -1350,7 +1363,7 @@ lb4_extract_tuple(struct __ctx_buff *ctx, struct iphdr *ip4, int l3_off,
 #ifdef ENABLE_SCTP
 	case IPPROTO_SCTP:
 #endif  /* ENABLE_SCTP */
-		return ipv4_load_l4_ports(ctx, ip4, fraginfo, *l4_off,
+		return ipv4_load_l4_ports(ctx, ip4, fraginfo, l4_off,
 					  CT_EGRESS, &tuple->dport);
 	case IPPROTO_ICMP:
 		return DROP_UNSUPP_SERVICE_PROTO;
@@ -1400,6 +1413,7 @@ struct lb4_service *lb4_lookup_service(struct lb4_key *key,
 				       const bool scope_switch)
 {
 	struct lb4_service *svc;
+	__u8 orig_proto = key->proto;
 
 	key->scope = LB_LOOKUP_SCOPE_EXT;
 	key->backend_slot = 0;
@@ -1417,7 +1431,16 @@ struct lb4_service *lb4_lookup_service(struct lb4_key *key,
 		if (!scope_switch || !lb4_svc_is_two_scopes(svc))
 			return svc;
 		key->scope = LB_LOOKUP_SCOPE_INT;
+		key->proto = orig_proto;
 		svc = map_lookup_elem(&cilium_lb4_services_v2, key);
+
+#if defined(ENABLE_SERVICE_PROTOCOL_DIFFERENTIATION)
+		/* Also check for ANY protocol for internal scope lookups */
+		if (!svc && key->proto != 0) {
+			key->proto = 0;
+			svc = map_lookup_elem(&cilium_lb4_services_v2, key);
+		}
+#endif
 	}
 
 	return svc;
@@ -1873,14 +1896,13 @@ static __always_inline int lb4_local(const void *map, struct __ctx_buff *ctx,
 		lb4_update_affinity_by_addr(svc, &client_id, backend_id);
 #endif
 
-#if defined(USE_LOOPBACK_LB) || \
-    (defined(ENABLE_LOCAL_REDIRECT_POLICY) && defined(HAVE_NETNS_COOKIE))
+#if defined(USE_LOOPBACK_LB) || defined(ENABLE_LOCAL_REDIRECT_POLICY)
 	if (saddr == backend->address) {
-	#if defined(ENABLE_LOCAL_REDIRECT_POLICY) && defined(HAVE_NETNS_COOKIE)
+	#if defined(ENABLE_LOCAL_REDIRECT_POLICY)
 		if (netns_cookie > 0 && unlikely(lb4_svc_is_localredirect(svc)) &&
 		    lb4_skip_xlate_from_ctx_to_svc(netns_cookie, tuple->daddr, tuple->sport))
 			return CTX_ACT_OK;
-	#endif /* ENABLE_LOCAL_REDIRECT_POLICY && HAVE_NETNS_COOKIE */
+	#endif /* ENABLE_LOCAL_REDIRECT_POLICY */
 
 		/* Special loopback case: The origin endpoint has transmitted to a
 		 * service which is being translated back to the source. This would

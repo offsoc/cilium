@@ -66,18 +66,18 @@ concurrency:
 
 env:
   # renovate: datasource=golang-version depName=go
-  go_version: 1.24.2
+  go_version: 1.24.3
   # renovate: datasource=github-releases depName=eksctl-io/eksctl
   eksctl_version: v0.207.0
   # renovate: datasource=github-releases depName=kubernetes/kubernetes
   kubectl_version: v1.33.0
   # renovate: datasource=docker depName=google/cloud-sdk
-  gcloud_version: 519.0.0
+  gcloud_version: 521.0.0
 
   # Hosted under quay.io/cilium/egw-scale-utils and built by
   # a workflow in cilium/scaffolding.
   # renovate: datasource=git-refs depName=https://github.com/cilium/scaffolding branch=main
-  egw_utils_ref: f0bb787b8300176c512debb4ee6c8c98f9da0c94
+  egw_utils_ref: 821cd9ae38a6a8b6622220823f09c7db6f4094b2
   test_name: egw
   cluster_name: ${{ github.run_id }}-${{ github.run_attempt }}
 
@@ -162,6 +162,7 @@ jobs:
             --set=prometheus.enabled=true \
             --set=cluster.name=${{ env.cluster_name }} \
             ${{ matrix.test_type == 'egw' && env.EGRESS_GATEWAY_HELM_VALUES || '' }} \
+            --set=enableIPv4Masquerade=true \
             --set=bpf.masquerade=true \
             --set=kubeProxyReplacement=true \
             --set=l7Proxy=false \
@@ -172,7 +173,7 @@ jobs:
             --set=k8sClientRateLimit.qps=100 \
             --set=extraConfig.cilium-endpoint-gc-interval=24h \
             --set-string=extraConfig.enable-stale-cilium-endpoint-cleanup=false \
-            --set=prometheus.metrics="{+cilium_datapath_nat_gc_entries}" \
+            --set=prometheus.metrics=\"{+cilium_datapath_nat_gc_entries}\" \
             --set=image.override=quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/cilium-ci:${SHA} \
             --set=operator.image.override=quay.io/${{ env.QUAY_ORGANIZATION_DEV }}/operator-aws-ci:${SHA} \
             --values=values-dummy-health-server.yaml \
@@ -277,7 +278,7 @@ jobs:
           fi
 
       - name: Install Go
-        uses: actions/setup-go@0aaccfd150d50ccaeb58ebd88d36e91967a5f35b # v5.4.0
+        uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
         with:
           go-version: ${{ env.go_version }}
 
@@ -306,11 +307,11 @@ jobs:
       - name: Install eksctl CLI
         run: |
           curl -LO "https://github.com/eksctl-io/eksctl/releases/download/${{ env.eksctl_version }}/eksctl_$(uname -s)_amd64.tar.gz"
-          sudo tar xzvfC eksctl_$(uname -s)_amd64.tar.gz /usr/bin
-          rm eksctl_$(uname -s)_amd64.tar.gz
+          sudo tar xzvfC "eksctl_$(uname -s)_amd64.tar.gz" /usr/bin
+          rm "eksctl_$(uname -s)_amd64.tar.gz"
 
       - name: Set up AWS CLI credentials
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        uses: aws-actions/configure-aws-credentials@f24d7193d98baebaeacc7e2227925dd47cc267f5 # v4.2.0
         with:
           role-to-assume: ${{ secrets.AWS_PR_ASSUME_ROLE }}
           aws-region: ${{ steps.vars.outputs.eks_region }}
@@ -525,7 +526,9 @@ jobs:
               awk '{print $1}'  # Ignore the IPv6 address in dual stack clusters
           }
 
+          # shellcheck disable=SC2046
           echo CL2_EGW_GATEWAY_ADDRESS=$(get_node_internal_ip "role.scaffolding/egw-node=true") >> $GITHUB_ENV
+          # shellcheck disable=SC2046
           echo CL2_EGW_EXTERNAL_TARGET=$(get_node_internal_ip "cilium.io/no-schedule=true") >> $GITHUB_ENV
 
       - name: Run CL2
@@ -614,7 +617,7 @@ jobs:
       # Refresh credentials
       - name: Set up AWS CLI credentials
         if:  ${{ always() && steps.deploy-cluster.outcome != 'skipped' }}
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        uses: aws-actions/configure-aws-credentials@f24d7193d98baebaeacc7e2227925dd47cc267f5 # v4.2.0
         with:
           role-to-assume: ${{ secrets.AWS_PR_ASSUME_ROLE }}
           aws-region: ${{ steps.vars.outputs.eks_region }}

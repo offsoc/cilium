@@ -33,9 +33,34 @@ DECLARE_CONFIG(__u16, device_mtu, "MTU of the device the bpf program is attached
 ASSIGN_CONFIG(__u16, device_mtu, MTU)
 #define THIS_MTU CONFIG(device_mtu) /* Backwards compatibility */
 
-#define nodeport_nat_egress_ipv4_hook(ctx, ip4, info, tuple, l4_off, ext_err) CTX_ACT_OK
+/* Evaluate the input values for detecting compilation errors.
+ * Just blindly substituting this macro with the CTX_ACT_OK
+ * kills the C compile-time check against the input values
+ * (e.g. it can pass type mismatching, it can pass undefined
+ * variables, etc.). This whole block is evaluated to CTX_ACT_OK.
+ */
+#define nodeport_nat_egress_ipv4_hook(ctx, ip4, info, tuple, l4_off, ext_err) \
+({ \
+	struct __ctx_buff *_ctx __maybe_unused = ctx; \
+	struct iphdr *_ip4 __maybe_unused = ip4; \
+	__u32 _info __maybe_unused = info; \
+	struct ipv4_ct_tuple *_tuple __maybe_unused = tuple; \
+	int _l4_off __maybe_unused = l4_off; \
+	__s8 *_ext_err __maybe_unused = ext_err; \
+	CTX_ACT_OK; \
+})
+
 #define nodeport_rev_dnat_ipv4_hook(ctx, ip4, tuple, tunnel_endpoint, src_sec_identity, \
-		dst_sec_identity) -1
+		dst_sec_identity) \
+({ \
+	struct __ctx_buff *_ctx __maybe_unused = ctx; \
+	struct iphdr *_ip4 __maybe_unused = ip4; \
+	struct ipv4_ct_tuple *_tuple __maybe_unused = tuple; \
+	__u32 *_tunnel_endpoint __maybe_unused = tunnel_endpoint; \
+	__u32 *_src_sec_identity __maybe_unused = src_sec_identity; \
+	__u32 *_dst_sec_identity __maybe_unused = dst_sec_identity; \
+	-1; \
+})
 
 #ifdef ENABLE_NODEPORT
 /* The IPv6 extension should be 8-bytes aligned */
@@ -167,7 +192,7 @@ nodeport_fib_lookup_and_redirect(struct __ctx_buff *ctx,
 				 struct bpf_fib_lookup_padded *fib_params,
 				 __s8 *ext_err)
 {
-	int oif = THIS_INTERFACE_IFINDEX;
+	__u32 oif;
 	int ret;
 
 	ret = (int)fib_lookup(ctx, &fib_params->l, sizeof(fib_params->l), 0);
@@ -175,10 +200,12 @@ nodeport_fib_lookup_and_redirect(struct __ctx_buff *ctx,
 	switch (ret) {
 	case BPF_FIB_LKUP_RET_SUCCESS:
 	case BPF_FIB_LKUP_RET_NO_NEIGH:
-		if ((__u32)oif == fib_params->l.ifindex)
+		oif = fib_params->l.ifindex;
+
+		if (oif == THIS_INTERFACE_IFINDEX)
 			return CTX_ACT_OK;
 
-		return fib_do_redirect(ctx, true, fib_params, true, ret, &oif, ext_err);
+		return fib_do_redirect(ctx, true, fib_params, true, ret, oif, ext_err);
 	default:
 		*ext_err = (__s8)ret;
 		return DROP_NO_FIB;
@@ -353,11 +380,14 @@ static __always_inline int encap_geneve_dsr_opt6(struct __ctx_buff *ctx,
 	if (!info || !info->flag_has_tunnel_ep)
 		return DROP_NO_TUNNEL_ENDPOINT;
 
-	fraginfo = ipv6_get_fraginfo(ctx, ip6);
-	if (fraginfo < 0)
-		return (int)fraginfo;
+	tuple.nexthdr = ip6->nexthdr;
+	ret = ipv6_hdrlen_with_fraginfo(ctx, &tuple.nexthdr, &fraginfo);
+	if (ret < 0)
+		return ret;
 
-	ret = lb6_extract_tuple(ctx, ip6, ETH_HLEN, fraginfo, &l4_off, &tuple);
+	l4_off = ETH_HLEN + ret;
+
+	ret = lb6_extract_tuple(ctx, ip6, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret))
 		return ret;
 
@@ -843,8 +873,8 @@ drop_err:
 #endif /* ENABLE_NAT_46X64_GATEWAY */
 
 static __always_inline int
-nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, struct trace_ctx *trace,
-		       __s8 *ext_err)
+nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir,
+		       struct trace_ctx *trace, __s8 *ext_err)
 {
 	struct bpf_fib_lookup_padded fib_params = {
 		.l = {
@@ -873,11 +903,14 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		goto fib_lookup;
 #endif
 
-	fraginfo = ipv6_get_fraginfo(ctx, ip6);
-	if (fraginfo < 0)
-		return (int)fraginfo;
+	tuple.nexthdr = ip6->nexthdr;
+	ret = ipv6_hdrlen_with_fraginfo(ctx, &tuple.nexthdr, &fraginfo);
+	if (ret < 0)
+		return ret;
 
-	ret = lb6_extract_tuple(ctx, ip6, ETH_HLEN, fraginfo, &l4_off, &tuple);
+	l4_off = ETH_HLEN + ret;
+
+	ret = lb6_extract_tuple(ctx, ip6, fraginfo, l4_off, &tuple);
 	if (ret < 0) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
 			goto out;
@@ -895,15 +928,14 @@ nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, struct trace_ctx *trace,
 			return ret;
 
 		ret = lb6_rev_nat(ctx, l4_off, ct_state.rev_nat_index,
-				  &tuple, ipfrag_has_l4_header(fraginfo));
+				  &tuple, ipfrag_has_l4_header(fraginfo),
+				  dir);
 		if (IS_ERR(ret))
 			return ret;
 		if (!revalidate_data(ctx, &data, &data_end, &ip6))
 			return DROP_INVALID;
 		ctx_snat_done_set(ctx);
-#ifndef HAVE_FIB_IFINDEX
-		ifindex = ct_state.ifindex;
-#endif
+
 #ifdef TUNNEL_MODE
 		info = lookup_ip6_remote_endpoint((union v6addr *)&ip6->daddr, 0);
 		if (info && info->flag_has_tunnel_ep && !info->flag_skip_tunnel) {
@@ -980,9 +1012,8 @@ fib_redirect:
 	return fib_redirect(ctx, true, &fib_params, allow_neigh_map, ext_err, &ifindex);
 }
 
-__section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV6_NODEPORT_REVNAT)
 static __always_inline
-int tail_nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx)
+int __nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx, enum ct_dir dir)
 {
 	struct trace_ctx trace = {
 		.reason = TRACE_REASON_CT_REPLY,
@@ -991,7 +1022,7 @@ int tail_nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx)
 	__s8 ext_err = 0;
 	int ret = 0;
 
-	ret = nodeport_rev_dnat_ipv6(ctx, &trace, &ext_err);
+	ret = nodeport_rev_dnat_ipv6(ctx, dir, &trace, &ext_err);
 	if (IS_ERR(ret))
 		goto drop;
 
@@ -1014,6 +1045,27 @@ int tail_nodeport_rev_dnat_ipv6(struct __ctx_buff *ctx)
 drop:
 	return send_drop_notify_error_ext(ctx, UNKNOWN_ID, ret, ext_err,
 					  METRIC_EGRESS);
+}
+
+__section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV6_NODEPORT_REVNAT_INGRESS)
+static __always_inline
+int tail_nodeport_rev_dnat_ingress_ipv6(struct __ctx_buff *ctx)
+{
+	return __nodeport_rev_dnat_ipv6(ctx, CT_INGRESS);
+}
+
+static __always_inline
+int nodeport_rev_dnat_ingress_ipv6(struct __ctx_buff *ctx,
+				   struct trace_ctx *trace, __s8 *ext_err)
+{
+	return nodeport_rev_dnat_ipv6(ctx, CT_INGRESS, trace, ext_err);
+}
+
+__section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV6_NODEPORT_REVNAT_EGRESS)
+static __always_inline
+int tail_nodeport_rev_dnat_egress_ipv6(struct __ctx_buff *ctx)
+{
+	return __nodeport_rev_dnat_ipv6(ctx, CT_EGRESS);
 }
 
 __section_tail(CILIUM_MAP_CALLS, CILIUM_CALL_IPV6_NODEPORT_NAT_INGRESS)
@@ -1070,8 +1122,8 @@ int tail_nodeport_nat_ingress_ipv6(struct __ctx_buff *ctx)
 						   is_defined(IS_BPF_HOST)),
 					     __and(is_defined(ENABLE_IPV6_FRAGMENTS),
 						   is_defined(IS_BPF_XDP))),
-					CILIUM_CALL_IPV6_NODEPORT_REVNAT,
-					nodeport_rev_dnat_ipv6,
+					CILIUM_CALL_IPV6_NODEPORT_REVNAT_INGRESS,
+					nodeport_rev_dnat_ingress_ipv6,
 					&trace, &ext_err);
 	if (IS_ERR(ret))
 		goto drop_err;
@@ -1131,9 +1183,12 @@ int tail_nodeport_nat_egress_ipv6(struct __ctx_buff *ctx)
 		goto drop_err;
 	}
 
-	fraginfo = ipv6_get_fraginfo(ctx, ip6);
-	if (fraginfo < 0)
-		return (int)fraginfo;
+	tuple.nexthdr = ip6->nexthdr;
+	ret = ipv6_hdrlen_with_fraginfo(ctx, &tuple.nexthdr, &fraginfo);
+	if (ret < 0)
+		return ret;
+
+	l4_off = ETH_HLEN + ret;
 
 #ifdef TUNNEL_MODE
 	dst = (union v6addr *)&ip6->daddr;
@@ -1142,7 +1197,7 @@ int tail_nodeport_nat_egress_ipv6(struct __ctx_buff *ctx)
 		target.addr = CONFIG(router_ipv6);
 #endif
 
-	ret = lb6_extract_tuple(ctx, ip6, ETH_HLEN, fraginfo, &l4_off, &tuple);
+	ret = lb6_extract_tuple(ctx, ip6, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret))
 		goto drop_err;
 
@@ -1307,9 +1362,6 @@ static __always_inline int nodeport_svc_lb6(struct __ctx_buff *ctx,
 		case CT_NEW:
 			ct_state.src_sec_id = WORLD_IPV6_ID;
 			ct_state.node_port = 1;
-#ifndef HAVE_FIB_IFINDEX
-			ct_state.ifindex = (__u16)THIS_INTERFACE_IFINDEX;
-#endif
 
 			ret = ct_create6(get_ct_map6(tuple), NULL, tuple, ctx,
 					 CT_EGRESS, &ct_state, ext_err);
@@ -1379,11 +1431,14 @@ static __always_inline int nodeport_lb6(struct __ctx_buff *ctx,
 
 	cilium_capture_in(ctx);
 
-	fraginfo = ipv6_get_fraginfo(ctx, ip6);
-	if (fraginfo < 0)
-		return (int)fraginfo;
+	tuple.nexthdr = ip6->nexthdr;
+	ret = ipv6_hdrlen_with_fraginfo(ctx, &tuple.nexthdr, &fraginfo);
+	if (ret < 0)
+		return ret;
 
-	ret = lb6_extract_tuple(ctx, ip6, ETH_HLEN, fraginfo, &l4_off, &tuple);
+	l4_off = ETH_HLEN + ret;
+
+	ret = lb6_extract_tuple(ctx, ip6, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
 			is_svc_proto = false;
@@ -1630,8 +1685,9 @@ static __always_inline int encap_geneve_dsr_opt4(struct __ctx_buff *ctx, int l3_
 		int l4_off, ret;
 
 		fraginfo = ipfrag_encode_ipv4(ip4);
+		l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
-		ret = lb4_extract_tuple(ctx, ip4, l3_off, fraginfo, &l4_off, &tuple);
+		ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 		if (IS_ERR(ret))
 			return ret;
 
@@ -2133,8 +2189,9 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		return DROP_INVALID;
 
 	fraginfo = ipfrag_encode_ipv4(ip4);
+	l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
-	ret = lb4_extract_tuple(ctx, ip4, ETH_HLEN, fraginfo, &l4_off, &tuple);
+	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (ret < 0) {
 		/* If it's not a SVC protocol, we don't need to check for RevDNAT: */
 		if (ret == DROP_UNSUPP_SERVICE_PROTO || ret == DROP_UNKNOWN_L4)
@@ -2174,9 +2231,7 @@ nodeport_rev_dnat_ipv4(struct __ctx_buff *ctx, struct trace_ctx *trace,
 		if (!revalidate_data(ctx, &data, &data_end, &ip4))
 			return DROP_INVALID;
 		ctx_snat_done_set(ctx);
-#ifndef HAVE_FIB_IFINDEX
-		ifindex = ct_state.ifindex;
-#endif
+
 #if defined(TUNNEL_MODE)
 		info = lookup_ip4_remote_endpoint(ip4->daddr, 0);
 		if (info && info->flag_has_tunnel_ep && !info->flag_skip_tunnel) {
@@ -2419,6 +2474,7 @@ int tail_nodeport_nat_egress_ipv4(struct __ctx_buff *ctx)
 	struct iphdr *ip4;
 	fraginfo_t fraginfo;
 	__s8 ext_err = 0;
+	__u32 dst_sec_identity __maybe_unused = 0;
 #ifdef TUNNEL_MODE
 	__u32 src_sec_identity = ctx_load_meta(ctx, CB_SRC_LABEL);
 	__u8 cluster_id __maybe_unused = (__u8)ctx_load_meta(ctx, CB_CLUSTER_ID_EGRESS);
@@ -2432,11 +2488,13 @@ int tail_nodeport_nat_egress_ipv4(struct __ctx_buff *ctx)
 	}
 
 	fraginfo = ipfrag_encode_ipv4(ip4);
+	l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
 #ifdef TUNNEL_MODE
 	info = lookup_ip4_remote_endpoint(ip4->daddr, cluster_id);
 	if (info && info->flag_has_tunnel_ep && !info->flag_skip_tunnel) {
 		tunnel_endpoint = info->tunnel_endpoint.ip4;
+		dst_sec_identity = info->sec_identity;
 
 		target.addr = IPV4_GATEWAY;
 #if defined(ENABLE_CLUSTER_AWARE_ADDRESSING) && defined(ENABLE_INTER_CLUSTER_SNAT)
@@ -2446,7 +2504,7 @@ int tail_nodeport_nat_egress_ipv4(struct __ctx_buff *ctx)
 	}
 #endif
 
-	ret = lb4_extract_tuple(ctx, ip4, ETH_HLEN, fraginfo, &l4_off, &tuple);
+	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret))
 		goto drop_err;
 
@@ -2456,7 +2514,7 @@ int tail_nodeport_nat_egress_ipv4(struct __ctx_buff *ctx)
 	ipv4_ct_tuple_swap_ports(&tuple);
 	tuple.flags = TUPLE_F_OUT;
 
-	ret = nodeport_nat_egress_ipv4_hook(ctx, ip4, info->sec_identity, &tuple, l4_off, &ext_err);
+	ret = nodeport_nat_egress_ipv4_hook(ctx, ip4, dst_sec_identity, &tuple, l4_off, &ext_err);
 	if (ret != CTX_ACT_OK)
 		return ret;
 
@@ -2642,9 +2700,6 @@ static __always_inline int nodeport_svc_lb4(struct __ctx_buff *ctx,
 		case CT_NEW:
 			ct_state.src_sec_id = src_sec_identity;
 			ct_state.node_port = 1;
-#ifndef HAVE_FIB_IFINDEX
-			ct_state.ifindex = (__u16)THIS_INTERFACE_IFINDEX;
-#endif
 
 			ret = ct_create4(get_ct_map4(tuple), NULL, tuple, ctx,
 					 CT_EGRESS, &ct_state, ext_err);
@@ -2715,8 +2770,9 @@ static __always_inline int nodeport_lb4(struct __ctx_buff *ctx,
 	cilium_capture_in(ctx);
 
 	fraginfo = ipfrag_encode_ipv4(ip4);
+	l4_off = ETH_HLEN + ipv4_hdrlen(ip4);
 
-	ret = lb4_extract_tuple(ctx, ip4, l3_off, fraginfo, &l4_off, &tuple);
+	ret = lb4_extract_tuple(ctx, ip4, fraginfo, l4_off, &tuple);
 	if (IS_ERR(ret)) {
 		if (ret == DROP_UNSUPP_SERVICE_PROTO) {
 			is_svc_proto = false;

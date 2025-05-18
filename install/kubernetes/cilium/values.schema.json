@@ -465,6 +465,9 @@
         },
         "routerIDAllocation": {
           "properties": {
+            "ipPool": {
+              "type": "string"
+            },
             "mode": {
               "type": "string"
             }
@@ -741,6 +744,9 @@
         },
         "priorityClassName": {
           "type": "string"
+        },
+        "resources": {
+          "type": "object"
         },
         "tolerations": {
           "items": {},
@@ -1201,6 +1207,12 @@
                     "integer",
                     "string"
                   ]
+                },
+                "unhealthyPodEvictionPolicy": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "type": "object"
@@ -1283,6 +1295,9 @@
                     "Local",
                     "Cluster"
                   ]
+                },
+                "labels": {
+                  "type": "object"
                 },
                 "loadBalancerClass": {
                   "type": [
@@ -2082,6 +2097,9 @@
         },
         "livenessProbe": {
           "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
             "failureThreshold": {
               "type": "integer"
             },
@@ -2312,6 +2330,9 @@
         },
         "startupProbe": {
           "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
             "failureThreshold": {
               "type": "integer"
             },
@@ -3049,6 +3070,12 @@
                     "integer",
                     "string"
                   ]
+                },
+                "unhealthyPodEvictionPolicy": {
+                  "type": [
+                    "null",
+                    "string"
+                  ]
                 }
               },
               "type": "object"
@@ -3549,6 +3576,12 @@
                   "type": [
                     "null",
                     "integer",
+                    "string"
+                  ]
+                },
+                "unhealthyPodEvictionPolicy": {
+                  "type": [
+                    "null",
                     "string"
                   ]
                 }
@@ -4599,6 +4632,12 @@
                 "integer",
                 "string"
               ]
+            },
+            "unhealthyPodEvictionPolicy": {
+              "type": [
+                "null",
+                "string"
+              ]
             }
           },
           "type": "object"
@@ -4923,6 +4962,12 @@
               "type": [
                 "null",
                 "integer",
+                "string"
+              ]
+            },
+            "unhealthyPodEvictionPolicy": {
+              "type": [
+                "null",
                 "string"
               ]
             }
