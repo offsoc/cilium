@@ -1510,6 +1510,8 @@ const (
 
 	BootTime = "bootTime"
 
+	BootstrapTime = "bootstrapTime"
+
 	Socket = "socket"
 
 	Filter = "filter"
@@ -1694,6 +1696,18 @@ const (
 
 	ExitCode = "exitCode"
 
+	NetLink = "netLink"
+
+	NetConf = "netConf"
+
+	Result = "result"
+
+	NetNamespace = "netNamespace"
+
+	DockerHostPath = "dockerHostPath"
+
+	ImageID = "imageID"
+
 	NumBufferedEvents = "numBufferedEvents"
 
 	EventHandlingDuration = "eventHandlingDuration"
@@ -1727,4 +1741,40 @@ const (
 	TimeSinceRestart = "timeSinceRestart"
 
 	TimeSincePodStarted = "timeSincePodStarted"
+
+	DNSRules = "dnsRules"
+
+	PortProtocol = "portProtocol"
+
+	Option = "option"
+
+	RunDirectory = "runDirectory"
+
+	LibDirectory = "libDirectory"
+
+	BPFDirectory = "BPFDirectory"
+
+	StateDirectory = "StateDirectory"
+
+	Restored = "restored"
+
+	Detected = "detected"
+
+	NodeLabels = "nodeLabels"
+
+	UID = "UID"
+
+	ProviderID = "providerID"
+
+	EndpointLXCID = "endpointLXCID"
+
+	Regenerated = "regenerated"
+
+	Primary = "primary"
+
+	RTT = "rtt"
+
+	URI = "uri"
+
+	Goroutine = "goroutine"
 )

@@ -53,8 +53,14 @@ func newBPFReconciler(p reconciler.Params, g job.Group, cfg loadbalancer.Config,
 
 	// Use a custom lifecycle to start the reconciler so we can delay it starts until tables are initialized.
 	rlc := &cell.DefaultLifecycle{}
+	started := make(chan struct{})
 	p.Lifecycle.Append(cell.Hook{
 		OnStop: func(ctx cell.HookContext) error {
+			// Since starting happens asynchronously, wait for it to be done before trying to stop.
+			select {
+			case <-ctx.Done():
+			case <-started:
+			}
 			return rlc.Stop(p.Log, ctx)
 		},
 	})
@@ -87,6 +93,7 @@ func newBPFReconciler(p reconciler.Params, g job.Group, cfg loadbalancer.Config,
 
 	g.Add(
 		job.OneShot("start-reconciler", func(ctx context.Context, health cell.Health) error {
+			defer close(started)
 			// We give a short grace period for initializers to finish populating the initial contents
 			// of the tables to avoid scaling down load-balancing due to e.g. seeing services before
 			// the endpoint slices.
@@ -732,13 +739,21 @@ func (ops *BPFOps) updateFrontend(fe *loadbalancer.Frontend) error {
 	// isRoutable denotes whether this service can be accessed from outside the cluster.
 	isRoutable := !svcKey.IsSurrogate() &&
 		(svcType != loadbalancer.SVCTypeClusterIP || ops.cfg.ExternalClusterIP)
+
+	forwardingMode := loadbalancer.ToSVCForwardingMode(ops.cfg.LBMode)
+	if ops.cfg.LBModeAnnotation && svc.ForwardingMode != loadbalancer.SVCForwardingModeUndef {
+		forwardingMode = svc.ForwardingMode
+	}
+
 	flag := loadbalancer.NewSvcFlag(&loadbalancer.SvcFlagParam{
 		SvcType:          svcType,
 		SvcNatPolicy:     svc.NatPolicy,
+		SvcFwdModeDSR:    forwardingMode == loadbalancer.SVCForwardingModeDSR,
 		SvcExtLocal:      svc.ExtTrafficPolicy == loadbalancer.SVCTrafficPolicyLocal,
 		SvcIntLocal:      svc.IntTrafficPolicy == loadbalancer.SVCTrafficPolicyLocal,
 		SessionAffinity:  svc.SessionAffinity,
 		IsRoutable:       isRoutable,
+		SourceRangeDeny:  svc.GetSourceRangesPolicy() == loadbalancer.SVCSourceRangesPolicyDeny,
 		CheckSourceRange: len(svc.SourceRanges) > 0,
 		L7LoadBalancer:   svc.ProxyRedirect.Redirects(fe.ServicePort),
 		LoopbackHostport: svc.LoopbackHostPort || proxyDelegation != loadbalancer.SVCProxyDelegationNone,

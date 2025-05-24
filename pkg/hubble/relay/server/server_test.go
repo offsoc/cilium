@@ -63,7 +63,6 @@ func noopParser(t testing.TB) *parser.Parser {
 		&testutils.NoopServiceGetter,
 		&testutils.NoopLinkGetter,
 		&testutils.NoopPodMetadataGetter,
-		true,
 	)
 	require.NoError(t, err)
 	return pp
@@ -170,7 +169,7 @@ func newHubblePeer(t testing.TB, ctx context.Context, address string, hubbleObse
 func benchmarkRelayGetFlows(b *testing.B, withFieldMask bool) {
 	tmp := b.TempDir()
 	root := "unix://" + filepath.Join(tmp, "peer-")
-	ctx := context.Background()
+	ctx := b.Context()
 	numFlows := b.N
 	numPeers := 2
 

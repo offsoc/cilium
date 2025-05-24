@@ -19,16 +19,7 @@ For help with installing ``kubeadm`` and for more provisioning options please re
 
 .. note::
 
-   Cilium's kube-proxy replacement depends on the socket-LB feature,
-   which requires a v4.19.57, v5.1.16, v5.2.0 or more recent Linux kernel.
-   Linux kernels v5.3 and v5.8 add additional features that Cilium can use to
-   further optimize the kube-proxy replacement implementation.
-
-   Note that v5.0.y kernels do not have the fix required to run the kube-proxy
-   replacement since at this point in time the v5.0.y stable kernel is end-of-life
-   (EOL) and not maintained anymore on kernel.org. For individual distribution
-   maintained kernels, the situation could differ. Therefore, please check with
-   your distribution.
+   Cilium's kube-proxy replacement depends on the socket-LB feature.
 
 Quick-Start
 ###########
@@ -71,10 +62,20 @@ by using the following commands below.
    Be aware that removing ``kube-proxy`` will break existing service connections. It will also stop service related traffic
    until the Cilium replacement has been installed.
 
+.. warning::
+   When deploying the eBPF kube-proxy replacement under co-existence with
+   kube-proxy on the system, be aware that both mechanisms operate independent of each
+   other. Meaning, if the eBPF kube-proxy replacement is added or removed on an already
+   *running* cluster in order to delegate operation from respectively back to kube-proxy,
+   then it must be expected that existing connections will break since, for example,
+   both NAT tables are not aware of each other. If deployed in co-existence on a newly
+   spawned up node/cluster which does not yet serve user traffic, then this is not an
+   issue.
+
 .. code-block:: shell-session
 
    $ kubectl -n kube-system delete ds kube-proxy
-   $ # Delete the configmap as well to avoid kube-proxy being reinstalled during a Kubeadm upgrade (works only for K8s 1.19 and newer)
+   $ # Delete the configmap as well to avoid kube-proxy being reinstalled during a Kubeadm upgrade
    $ kubectl -n kube-system delete cm kube-proxy
    $ # Run on each node with root permissions:
    $ iptables-save | grep -v KUBE | iptables-restore
@@ -915,8 +916,7 @@ with ``devices``, the XDP acceleration is enabled on all devices. This means tha
 each underlying device's driver must have native XDP support on all Cilium managed
 nodes. If you have an environment where some devices support XDP but others do not
 you can have XDP enabled on the supported devices by setting
-``loadBalancer.acceleration`` to ``best-effort``. In addition, for performance
-reasons we recommend kernel >= 5.5 for the multi-device XDP acceleration.
+``loadBalancer.acceleration`` to ``best-effort``.
 
 A list of drivers supporting XDP can be found in :ref:`the XDP documentation<xdp_drivers>`.
 
@@ -1175,10 +1175,9 @@ the reserved ports, set ``nodePort.autoProtectPortRanges`` to ``false``.
 
 By default, the NodePort implementation prevents application ``bind(2)`` requests
 to NodePort service ports. In such case, the application will typically see a
-``bind: Operation not permitted`` error. This happens either globally for older
-kernels or starting from v5.7 kernels only for the host namespace by default
-and therefore not affecting any application pod ``bind(2)`` requests anymore. In
-order to opt-out from this behavior in general, this setting can be changed for
+``bind: Operation not permitted`` error. By default this happens only for the host
+namespace and therefore does not affect any application pod ``bind(2)`` requests.
+In order to opt-out from this behavior in general, this setting can be changed for
 expert users by switching ``nodePort.bindProtection`` to ``false``.
 
 .. _Configuring Maps:
@@ -1337,113 +1336,6 @@ the ``cilium-dbg service list`` dump:
 .. code-block:: shell-session
 
     $ kubectl delete deployment my-nginx
-
-kube-proxy Hybrid Modes
-***********************
-
-Cilium's eBPF kube-proxy replacement can be configured in several modes, i.e. it can
-replace kube-proxy entirely or it can co-exist with kube-proxy on the system if the
-underlying Linux kernel requirements do not support a full kube-proxy replacement.
-
-.. warning::
-   When deploying the eBPF kube-proxy replacement under co-existence with
-   kube-proxy on the system, be aware that both mechanisms operate independent of each
-   other. Meaning, if the eBPF kube-proxy replacement is added or removed on an already
-   *running* cluster in order to delegate operation from respectively back to kube-proxy,
-   then it must be expected that existing connections will break since, for example,
-   both NAT tables are not aware of each other. If deployed in co-existence on a newly
-   spawned up node/cluster which does not yet serve user traffic, then this is not an
-   issue.
-
-This section elaborates on the ``kubeProxyReplacement`` options:
-
-- ``kubeProxyReplacement=true``: When using this option, it's highly recommended
-  to run a kube-proxy-free Kubernetes setup where Cilium is expected to fully replace
-  all kube-proxy functionality. However, if it's not possible to remove kube-proxy for
-  specific reasons (e.g. Kubernetes distribution limitations), it's also acceptable to
-  leave it deployed in the background. Just be aware of the potential side effects on
-  existing nodes as mentioned above when running kube-proxy in co-existence. Once the
-  Cilium agent is up and running, it takes care of handling Kubernetes services of type
-  ClusterIP, NodePort, LoadBalancer, services with externalIPs as well as HostPort.
-  If the underlying kernel version requirements are not met
-  (see :ref:`kubeproxy-free` note), then the Cilium agent will bail out on start-up
-  with an error message.
-
-- ``kubeProxyReplacement=false``: This option is used to disable any Kubernetes service
-  handling by fully relying on kube-proxy instead, except for ClusterIP services
-  accessed from pods (pre-v1.6 behavior), or for a hybrid setup. That is,
-  kube-proxy is running in the Kubernetes cluster where Cilium
-  partially replaces and optimizes kube-proxy functionality. The ``false``
-  option requires the user to manually specify which components for the eBPF
-  kube-proxy replacement should be used.
-  Similarly to ``true`` mode, the Cilium agent will bail out on start-up with
-  an error message if the underlying kernel requirements are not met when components
-  are manually enabled. For
-  fine-grained configuration, ``socketLB.enabled``, ``nodePort.enabled``,
-  ``externalIPs.enabled`` and ``hostPort.enabled`` can be set to ``true``. By
-  default all four options are set to ``false``.
-  If you are setting ``nodePort.enabled`` to true, make sure to also
-  set ``nodePort.enableHealthCheck`` to ``false``, so that the Cilium agent does not
-  start the NodePort health check server (``kube-proxy`` will also attempt to start
-  this server, and there would otherwise be a clash when cilium attempts to bind its server to the
-  same port). A few example configurations
-  for the ``false`` option are provided below.
-
-.. note::
-
-    Switching from the ``true`` to ``false`` mode, or vice versa can break
-    existing connections to services in a cluster. The same goes for enabling, or
-    disabling ``socketLB``. It is recommended to drain all the workloads before
-    performing such configuration changes.
-
-  The following Helm setup below would be equivalent to ``kubeProxyReplacement=true``
-  in a kube-proxy-free environment:
-
-  .. parsed-literal::
-
-    helm install cilium |CHART_RELEASE| \\
-        --namespace kube-system \\
-        --set kubeProxyReplacement=false \\
-        --set socketLB.enabled=true \\
-        --set nodePort.enabled=true \\
-        --set externalIPs.enabled=true \\
-        --set hostPort.enabled=true \\
-        --set k8sServiceHost=${API_SERVER_IP} \\
-        --set k8sServicePort=${API_SERVER_PORT}
-
-
-  The following Helm setup below would be equivalent to the default Cilium service
-  handling in v1.6 or earlier in a kube-proxy environment, that is, serving ClusterIP
-  for pods:
-
-  .. parsed-literal::
-
-    helm install cilium |CHART_RELEASE| \\
-        --namespace kube-system \\
-        --set kubeProxyReplacement=false
-
-  The following Helm setup below would optimize Cilium's NodePort, LoadBalancer and services
-  with externalIPs handling for external traffic ingressing into the Cilium managed node in
-  a kube-proxy environment:
-
-  .. parsed-literal::
-
-    helm install cilium |CHART_RELEASE| \\
-        --namespace kube-system \\
-        --set kubeProxyReplacement=false \\
-        --set nodePort.enabled=true \\
-        --set externalIPs.enabled=true
-
-In Cilium's Helm chart, the default mode is ``kubeProxyReplacement=false`` for
-new deployments.
-
-The current Cilium kube-proxy replacement mode can also be introspected through the
-``cilium-dbg status`` CLI command:
-
-.. code-block:: shell-session
-
-    $ kubectl -n kube-system exec ds/cilium -- cilium-dbg status | grep KubeProxyReplacement
-    KubeProxyReplacement:   True	[eth0 (DR)]
 
 Graceful Termination
 ********************
@@ -1932,7 +1824,7 @@ Limitations
     * Cilium's eBPF kube-proxy replacement relies upon the socket-LB feature
       which uses eBPF cgroup hooks to implement the service translation. Using it with libceph
       deployments currently requires support for the getpeername(2) hook address translation in
-      eBPF, which is only available for kernels v5.8 and higher.
+      eBPF.
     * NFS and SMB mounts may break when mounted to a ``Service`` cluster IP while using socket-LB.
       This issue is known to impact Longhorn, Portworx, and Robin, but may impact other storage
       systems that implement ``ReadWriteMany`` volumes using this pattern. To avoid this problem,
@@ -1961,10 +1853,6 @@ Limitations
       setting will be ignored and a warning emitted to the Cilium agent log. Similarly,
       explicitly binding the ``hostIP`` to the loopback address in the host namespace is
       currently not supported and will log a warning to the Cilium agent log.
-    * When using the Socket-LB feature and deployed on kernels older than 5.7, Cilium is unable
-      to distinguish between host and pod namespaces due to the lack of kernel support for
-      network namespace cookies. As a result, Kubernetes services are reachable from all pods via
-      the loopback address.
     * The neighbor discovery in a multi-device environment doesn't work with the runtime device
       detection which means that the target devices for the neighbor discovery doesn't follow the
       device changes.

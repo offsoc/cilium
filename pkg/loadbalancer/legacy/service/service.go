@@ -29,8 +29,6 @@ import (
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maps/lbmap"
 	"github.com/cilium/cilium/pkg/metrics"
-	monitorAgent "github.com/cilium/cilium/pkg/monitor/agent"
-	monitorAPI "github.com/cilium/cilium/pkg/monitor/api"
 	"github.com/cilium/cilium/pkg/netns"
 	"github.com/cilium/cilium/pkg/node"
 	"github.com/cilium/cilium/pkg/node/addressing"
@@ -274,7 +272,8 @@ func (svc *svcInfo) checkLBSourceRange() bool {
 // The changes can be triggered either by k8s_watcher or directly by
 // API calls to the /services endpoint.
 type Service struct {
-	logger *slog.Logger
+	logger          *slog.Logger
+	metricsRegistry *metrics.Registry
 	lock.RWMutex
 
 	svcByHash map[string]*svcInfo
@@ -286,7 +285,6 @@ type Service struct {
 	backendByHash map[string]*lb.LegacyBackend
 
 	healthServer healthServer
-	monitorAgent monitorAgent.Agent
 
 	healthCheckers         []HealthChecker
 	healthCheckSubscribers []HealthSubscriber
@@ -309,8 +307,16 @@ type Service struct {
 }
 
 // newService creates a new instance of the service handler.
-func newService(logger *slog.Logger, monitorAgent monitorAgent.Agent, lbConfig lb.Config, lbmap datapathTypes.LBMap, backendDiscoveryHandler datapathTypes.NodeNeighbors, healthCheckers []HealthChecker, k8sControlplaneEnabled bool,
-	config *option.DaemonConfig) *Service {
+func newService(
+	logger *slog.Logger,
+	registry *metrics.Registry,
+	lbConfig lb.Config,
+	lbmap datapathTypes.LBMap,
+	backendDiscoveryHandler datapathTypes.NodeNeighbors,
+	healthCheckers []HealthChecker,
+	k8sControlplaneEnabled bool,
+	config *option.DaemonConfig,
+) *Service {
 	var localHealthServer healthServer
 	if lbConfig.EnableHealthCheckNodePort {
 		localHealthServer = healthserver.New(logger)
@@ -318,11 +324,11 @@ func newService(logger *slog.Logger, monitorAgent monitorAgent.Agent, lbConfig l
 
 	svc := &Service{
 		logger:                   logger,
+		metricsRegistry:          registry,
 		svcByHash:                map[string]*svcInfo{},
 		svcByID:                  map[lb.ID]*svcInfo{},
 		backendRefCount:          counter.Counter[string]{},
 		backendByHash:            map[string]*lb.LegacyBackend{},
-		monitorAgent:             monitorAgent,
 		healthServer:             localHealthServer,
 		healthCheckChan:          make(chan any),
 		lbmap:                    lbmap,
@@ -684,7 +690,7 @@ func (s *Service) InitMaps(ipv6, ipv4, sockMaps, restore bool) error {
 			toDelete = append(toDelete, lbmap.Service6MapV2, lbmap.Backend6MapV3, lbmap.RevNat6Map)
 		}
 		if sockMaps {
-			if err := lbmap.CreateSockRevNat6Map(); err != nil {
+			if err := lbmap.CreateSockRevNat6Map(s.metricsRegistry); err != nil {
 				return err
 			}
 		}
@@ -696,7 +702,7 @@ func (s *Service) InitMaps(ipv6, ipv4, sockMaps, restore bool) error {
 			toDelete = append(toDelete, lbmap.Service4MapV2, lbmap.Backend4MapV3, lbmap.RevNat4Map)
 		}
 		if sockMaps {
-			if err := lbmap.CreateSockRevNat4Map(); err != nil {
+			if err := lbmap.CreateSockRevNat4Map(s.metricsRegistry); err != nil {
 				return err
 			}
 		}
@@ -959,8 +965,6 @@ func (s *Service) upsertService(params *lb.LegacySVC) (bool, lb.ID, error) {
 		metrics.ServicesEventsCount.WithLabelValues("update").Inc()
 	}
 
-	s.notifyMonitorServiceUpsert(svc.frontend, svc.backends,
-		svc.svcType, svc.svcExtTrafficPolicy, svc.svcIntTrafficPolicy, svc.svcName.Name, svc.svcName.Namespace)
 	return new, lb.ID(svc.frontend.ID), nil
 }
 
@@ -2091,7 +2095,6 @@ func (s *Service) deleteServiceLocked(svc *svcInfo) error {
 	}
 
 	metrics.ServicesEventsCount.WithLabelValues("delete").Inc()
-	s.notifyMonitorServiceDelete(svc.frontend.ID)
 
 	s.notifyHealthCheckUpdateSubscribersServiceDelete(svc)
 
@@ -2198,42 +2201,6 @@ func (s *Service) deleteBackendsFromCacheLocked(svc *svcInfo) ([]lb.BackendID, [
 	}
 
 	return obsoleteBackendIDs, obsoleteBackends
-}
-
-// maxBackendsInMonitorNotifyEvent caps the number of backends to include in the monitor notify event.
-// This avoids constructing large events when service has lots of backends and churn.
-const maxBackendsInMonitorNotifyEvent = 20
-
-func (s *Service) notifyMonitorServiceUpsert(frontend lb.L3n4AddrID, backends []*lb.LegacyBackend,
-	svcType lb.SVCType, svcExtTrafficPolicy, svcIntTrafficPolicy lb.SVCTrafficPolicy, svcName, svcNamespace string,
-) {
-	id := uint32(frontend.ID)
-	fe := monitorAPI.ServiceUpsertNotificationAddr{
-		IP:   frontend.AddrCluster.AsNetIP(),
-		Port: frontend.Port,
-	}
-
-	numBackendsToInclude := min(maxBackendsInMonitorNotifyEvent, len(backends))
-	numBackendsOmitted := len(backends) - numBackendsToInclude
-
-	be := make([]monitorAPI.ServiceUpsertNotificationAddr, 0, numBackendsToInclude)
-	for _, backend := range backends[:numBackendsToInclude] {
-		b := monitorAPI.ServiceUpsertNotificationAddr{
-			IP:   backend.AddrCluster.AsNetIP(),
-			Port: backend.Port,
-		}
-		be = append(be, b)
-	}
-
-	if !option.Config.EnableInternalTrafficPolicy {
-		svcIntTrafficPolicy = lb.SVCTrafficPolicyCluster
-	}
-	msg := monitorAPI.ServiceUpsertMessage(id, fe, be, numBackendsOmitted, string(svcType), string(svcExtTrafficPolicy), string(svcIntTrafficPolicy), svcName, svcNamespace)
-	s.monitorAgent.SendEvent(monitorAPI.MessageTypeAgent, msg)
-}
-
-func (s *Service) notifyMonitorServiceDelete(id lb.ID) {
-	s.monitorAgent.SendEvent(monitorAPI.MessageTypeAgent, monitorAPI.ServiceDeleteMessage(uint32(id)))
 }
 
 // GetServiceNameByAddr returns namespace and name of the service with a given L3n4Addr. The third
