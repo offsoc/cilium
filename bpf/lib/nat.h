@@ -24,9 +24,7 @@
 #include "stubs.h"
 #include "trace.h"
 
-DECLARE_CONFIG(__u32, nat_ipv4_masquerade, "Masquerade address for IPv4 traffic")
-#define IPV4_MASQUERADE CONFIG(nat_ipv4_masquerade)
-
+DECLARE_CONFIG(union v4addr, nat_ipv4_masquerade, "Masquerade address for IPv4 traffic")
 DECLARE_CONFIG(union v6addr, nat_ipv6_masquerade, "Masquerade address for IPv6 traffic")
 
 enum  nat_dir {
@@ -636,14 +634,15 @@ snat_v4_needs_masquerade(struct __ctx_buff *ctx __maybe_unused,
 
 #if defined(ENABLE_MASQUERADE_IPV4) && defined(IS_BPF_HOST)
 	/* To prevent aliasing with masqueraded connections,
-	 * we need to track all host connections that use IPV4_MASQUERADE.
+	 * we need to track all host connections that use config
+	 * nat_ipv4_masquerade.
 	 *
 	 * This either reserves the source port (so that it's not used
 	 * for masquerading), or port-SNATs the host connection (if the sport
 	 * is already in use for a masqueraded connection).
 	 */
-	if (tuple->saddr == IPV4_MASQUERADE) {
-		target->addr = IPV4_MASQUERADE;
+	if (tuple->saddr == CONFIG(nat_ipv4_masquerade).be32) {
+		target->addr = CONFIG(nat_ipv4_masquerade).be32;
 		target->needs_ct = true;
 
 		return NAT_NEEDED;
@@ -759,7 +758,7 @@ snat_v4_needs_masquerade(struct __ctx_buff *ctx __maybe_unused,
 	}
 
 	if (local_ep) {
-		target->addr = IPV4_MASQUERADE;
+		target->addr = CONFIG(nat_ipv4_masquerade).be32;
 		return NAT_NEEDED;
 	}
 #endif /*ENABLE_MASQUERADE_IPV4 && IS_BPF_HOST */
@@ -1718,6 +1717,7 @@ snat_v6_nat_handle_icmp_error(struct __ctx_buff *ctx, __u64 off, bool has_l4_hea
 	__u16 port_off;
 	__u32 icmpoff;
 	int hdrlen;
+	__u8 type;
 	int ret;
 
 	/* According to the RFC 5508, any networking equipment that is
@@ -1757,7 +1757,23 @@ snat_v6_nat_handle_icmp_error(struct __ctx_buff *ctx, __u64 off, bool has_l4_hea
 		port_off = TCP_DPORT_OFF;
 		break;
 	case IPPROTO_ICMPV6:
-		return DROP_UNKNOWN_ICMP6_CODE;
+		if (icmp6_load_type(ctx, icmpoff, &type) < 0)
+			return DROP_INVALID;
+
+		switch (type) {
+		case ICMPV6_ECHO_REQUEST:
+			return NAT_PUNT_TO_STACK;
+		case ICMPV6_ECHO_REPLY:
+			port_off = offsetof(struct icmp6hdr, icmp6_dataun.u_echo.identifier);
+			break;
+		default:
+			return DROP_UNKNOWN_ICMP6_CODE;
+		}
+
+		if (ctx_load_bytes(ctx, icmpoff + port_off,
+				   &tuple.sport, sizeof(tuple.sport)) < 0)
+			return DROP_INVALID;
+		break;
 	default:
 		return DROP_UNKNOWN_L4;
 	}
