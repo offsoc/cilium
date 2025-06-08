@@ -38,6 +38,17 @@ newer v1.17 releases to support a disruption-less upgrade to v1.18.
 Once patched to the newest v1.17 stable release, a normal upgrade to v1.18 can
 be performed.
 
+.. note::
+
+   Because VXLAN is encrypted before being sent, operators see ESP
+   traffic between Kubernetes nodes.
+
+   This may result in the need to update firewall rules to allow ESP traffic
+   between nodes.
+   This is especially important in Google Cloud GKE environments.
+   The default firewall rules for the cluster's subnet may not allow ESP.
+
+
 Generate & Import the PSK
 =========================
 
@@ -59,18 +70,28 @@ In the example below, GCM-128-AES is used. However, any of the algorithms
 supported by Linux may be used. To generate the secret, you may use the
 following command:
 
-.. code-block:: shell-session
+.. tabs::
 
-    $ kubectl create -n kube-system secret generic cilium-ipsec-keys \
-        --from-literal=keys="3+ rfc4106(gcm(aes)) $(dd if=/dev/urandom count=20 bs=1 2> /dev/null | xxd -p -c 64) 128"
+    .. group-tab:: Cilium CLI
 
-.. attention::
+       .. parsed-literal::
 
-    The ``+`` sign in the secret is strongly recommended. It will force the use
-    of per-tunnel IPsec keys. The former global IPsec keys are considered
-    insecure (cf. `GHSA-pwqm-x5x6-5586`_) and were deprecated in v1.16. When
-    using ``+``, the per-tunnel keys will be derived from the secret you
-    generated.
+          $ cilium encrypt create-key --auth-algo rfc4106-gcm-aes
+
+    .. group-tab:: Kubectl CLI
+
+       .. parsed-literal::
+
+          $ kubectl create -n kube-system secret generic cilium-ipsec-keys \
+              --from-literal=keys="3+ rfc4106(gcm(aes)) $(dd if=/dev/urandom count=20 bs=1 2> /dev/null | xxd -p -c 64) 128"
+
+       .. attention::
+
+           The ``+`` sign in the secret is strongly recommended. It will force the use
+           of per-tunnel IPsec keys. The former global IPsec keys are considered
+           insecure (cf. `GHSA-pwqm-x5x6-5586`_) and were deprecated in v1.16. When
+           using ``+``, the per-tunnel keys will be derived from the secret you
+           generated.
 
 .. _GHSA-pwqm-x5x6-5586: https://github.com/cilium/cilium/security/advisories/GHSA-pwqm-x5x6-5586
 

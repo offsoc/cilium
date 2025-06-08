@@ -71,6 +71,7 @@ func TestScript(t *testing.T) {
 
 		h := hive.New(
 			client.FakeClientCell,
+			synced.Cell,
 			daemonk8s.ResourcesCell,
 			daemonk8s.TablesCell,
 			metrics.Cell,
@@ -100,32 +101,44 @@ func TestScript(t *testing.T) {
 			),
 			cell.Invoke(statedb.RegisterTable[tables.NodeAddress]),
 
-			cell.Module("cec-test", "test",
-				// cecResourceParser and its friends.
-				cell.Group(
-					cell.Provide(
-						newCECResourceParser,
-						func(log *slog.Logger) PortAllocator { return staticPortAllocator{log} },
-						func() FeatureMetrics {
-							return mockFeatureMetrics{}
-						},
-					),
-					node.LocalNodeStoreCell,
-					cell.Invoke(func(lns_ *node.LocalNodeStore) { lns = lns_ }),
-				),
-				tableCells,
-				controllerCells,
-
-				cell.ProvidePrivate(
-					func() promise.Promise[synced.CRDSync] {
-						r, p := promise.New[synced.CRDSync]()
-						r.Resolve(synced.CRDSync{})
-						return p
+			// cecResourceParser and its friends.
+			cell.Group(
+				cell.Provide(
+					newCECResourceParser,
+					func(log *slog.Logger) PortAllocator { return staticPortAllocator{log} },
+					func() FeatureMetrics {
+						return mockFeatureMetrics{}
 					},
-					func() resourceMutator { return fakeEnvoy },
-					func() policyTrigger { return fakeEnvoy },
 				),
+				node.LocalNodeStoreCell,
+				cell.Invoke(func(lns_ *node.LocalNodeStore) { lns = lns_ }),
 			),
+			tableCells,
+			controllerCells,
+
+			cell.ProvidePrivate(
+				func() promise.Promise[synced.CRDSync] {
+					r, p := promise.New[synced.CRDSync]()
+					r.Resolve(synced.CRDSync{})
+					return p
+				},
+				func() resourceMutator { return fakeEnvoy },
+				func() policyTrigger { return fakeEnvoy },
+			),
+
+			// Add an assertion on stop to validate that the CEC resources have been
+			// marked synced after each test.
+			cell.Invoke(func(lc cell.Lifecycle, res *synced.Resources) {
+				lc.Append(cell.Hook{
+					OnStop: func(ctx cell.HookContext) error {
+						return res.WaitForCacheSyncWithTimeout(
+							ctx, time.Second,
+							k8sAPIGroupCiliumClusterwideEnvoyConfigV2,
+							k8sAPIGroupCiliumEnvoyConfigV2,
+						)
+					},
+				})
+			}),
 		)
 
 		flags := pflag.NewFlagSet("", pflag.ContinueOnError)
@@ -485,7 +498,7 @@ type staticPortAllocator struct {
 }
 
 // AckProxyPort implements PortAllocator.
-func (s staticPortAllocator) AckProxyPort(ctx context.Context, name string) error {
+func (s staticPortAllocator) AckProxyPortWithReference(ctx context.Context, name string) error {
 	s.log.Info("AckProxyPort", logfields.Listener, name)
 	return nil
 }

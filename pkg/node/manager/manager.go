@@ -24,7 +24,6 @@ import (
 	"github.com/cilium/statedb"
 	"github.com/google/renameio/v2"
 	jsoniter "github.com/json-iterator/go"
-	"github.com/prometheus/client_golang/prometheus"
 	"go4.org/netipx"
 	"golang.org/x/sys/unix"
 	"golang.org/x/time/rate"
@@ -42,6 +41,7 @@ import (
 	"github.com/cilium/cilium/pkg/ip"
 	"github.com/cilium/cilium/pkg/ipcache"
 	ipcacheTypes "github.com/cilium/cilium/pkg/ipcache/types"
+	k8sConst "github.com/cilium/cilium/pkg/k8s/apis/cilium.io"
 	"github.com/cilium/cilium/pkg/labels"
 	"github.com/cilium/cilium/pkg/labelsfilter"
 	"github.com/cilium/cilium/pkg/lock"
@@ -253,31 +253,6 @@ type nodeMetrics struct {
 	// metricDatapathValidations is the prometheus metric to track the
 	// number of datapath node validation calls
 	DatapathValidations metric.Counter
-}
-
-// ProcessNodeDeletion upon node deletion ensures metrics associated
-// with the deleted node are no longer reported.
-// Notably for metrics node connectivity status and latency metrics
-func (*nodeMetrics) ProcessNodeDeletion(clusterName, nodeName string) {
-	// Removes all connectivity status associated with the deleted node.
-	_ = metrics.NodeConnectivityStatus.DeletePartialMatch(prometheus.Labels{
-		metrics.LabelSourceCluster:  clusterName,
-		metrics.LabelSourceNodeName: nodeName,
-	})
-	_ = metrics.NodeConnectivityStatus.DeletePartialMatch(prometheus.Labels{
-		metrics.LabelTargetCluster:  clusterName,
-		metrics.LabelTargetNodeName: nodeName,
-	})
-
-	// Removes all connectivity latency associated with the deleted node.
-	_ = metrics.NodeConnectivityLatency.DeletePartialMatch(prometheus.Labels{
-		metrics.LabelSourceCluster:  clusterName,
-		metrics.LabelSourceNodeName: nodeName,
-	})
-	_ = metrics.NodeConnectivityLatency.DeletePartialMatch(prometheus.Labels{
-		metrics.LabelTargetCluster:  clusterName,
-		metrics.LabelTargetNodeName: nodeName,
-	})
 }
 
 func NewNodeMetrics() *nodeMetrics {
@@ -804,6 +779,8 @@ func (m *manager) nodeIdentityLabels(n nodeTypes.Node) (nodeLabels labels.Labels
 		hasOverride = true
 	} else if !n.IsLocal() && option.Config.PerNodeLabelsEnabled() {
 		lbls := labels.Map2Labels(n.Labels, labels.LabelSourceNode)
+		clusterLabel := labels.NewLabel(k8sConst.PolicyLabelCluster, n.Cluster, labels.LabelSourceK8s)
+		lbls[clusterLabel.Key] = clusterLabel
 		filteredLbls, _ := labelsfilter.FilterNodeLabels(lbls)
 		nodeLabels.MergeLabels(filteredLbls)
 	}
@@ -1291,7 +1268,6 @@ func (m *manager) NodeDeleted(n nodeTypes.Node) {
 	}
 
 	m.metrics.NumNodes.Dec()
-	m.metrics.ProcessNodeDeletion(n.Cluster, n.Name)
 
 	entry.mutex.Lock()
 	delete(m.nodes, nodeIdentifier)

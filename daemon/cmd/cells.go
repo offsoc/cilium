@@ -37,7 +37,6 @@ import (
 	endpoint "github.com/cilium/cilium/pkg/endpoint/cell"
 	"github.com/cilium/cilium/pkg/envoy"
 	fqdn "github.com/cilium/cilium/pkg/fqdn/cell"
-	"github.com/cilium/cilium/pkg/fqdn/defaultdns"
 	"github.com/cilium/cilium/pkg/gops"
 	"github.com/cilium/cilium/pkg/health"
 	hubble "github.com/cilium/cilium/pkg/hubble/cell"
@@ -52,8 +51,7 @@ import (
 	"github.com/cilium/cilium/pkg/kvstore/store"
 	"github.com/cilium/cilium/pkg/l2announcer"
 	loadbalancer_cell "github.com/cilium/cilium/pkg/loadbalancer/cell"
-	"github.com/cilium/cilium/pkg/loadbalancer/legacy/redirectpolicy"
-	"github.com/cilium/cilium/pkg/loadbalancer/legacy/service"
+	loadbalancer_legacy "github.com/cilium/cilium/pkg/loadbalancer/legacy"
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/maps/metricsmap"
@@ -137,10 +135,6 @@ var (
 		// Shell for inspecting the agent. Listens on the 'shell.sock' UNIX socket.
 		shell.Cell,
 
-		// DNSProxy provides the DefaultDNSProxy singleton which is used by different
-		// packages.
-		defaultdns.Cell,
-
 		// Cilium Agent Healthz endpoints (agent, kubeproxy, ...)
 		healthz.Cell,
 	)
@@ -200,12 +194,11 @@ var (
 		// Maglev table computtations
 		maglev.Cell,
 
-		// Experimental control-plane for configuring service load-balancing.
+		// Control-plane for configuring service load-balancing
 		loadbalancer_cell.Cell,
 
-		// Service is a datapath service handler. Its main responsibility is to reflect
-		// service-related changes into BPF maps used by datapath BPF programs.
-		service.Cell,
+		// Legacy version of the load-balancing control-plane
+		loadbalancer_legacy.Cell,
 
 		// Proxy provides the proxy port allocation and related datapath coordination and
 		// makes different L7 proxies (Envoy, DNS proxy) usable to Cilium endpoints through
@@ -260,14 +253,12 @@ var (
 
 		// ClusterMesh is the Cilium's multicluster implementation.
 		cell.Config(cmtypes.DefaultClusterInfo),
+		cell.Config(cmtypes.DefaultPolicyConfig),
 		clustermesh.Cell,
 
 		// L2announcer resolves l2announcement policies, services, node labels and devices into a list of IPs+netdevs
 		// which need to be announced on the local network.
 		l2announcer.Cell,
-
-		// Redirect policy manages the Local Redirect Policies.
-		redirectpolicy.Cell,
 
 		// The node discovery cell provides the local node configuration and node discovery
 		// which communicate changes in local node information to the API server or KVStore.
@@ -384,13 +375,6 @@ func allResourceGroups(logger *slog.Logger, cfg watchers.WatcherConfiguration) (
 		// To perform the service translation and have the BPF LB datapath
 		// with the right service -> backend (k8s endpoints) translation.
 		resources.K8sAPIGroupEndpointSliceOrEndpoint,
-	}
-
-	if option.NetworkPolicyEnabled(option.Config) {
-		// Namespaces can contain labels which are essential for
-		// endpoints being restored to have the right identity.
-		// Namespaces are only used when network policies are enabled.
-		k8sGroups = append(k8sGroups, resources.K8sAPIGroupNamespaceV1Core)
 	}
 
 	if cfg.K8sNetworkPolicyEnabled() {

@@ -10,7 +10,7 @@ import (
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/metrics"
 	"github.com/cilium/cilium/pkg/metrics/metric"
-	"github.com/cilium/cilium/pkg/proxy"
+	"github.com/cilium/cilium/pkg/proxy/proxyports"
 )
 
 var (
@@ -39,7 +39,10 @@ var (
 	)
 
 	controllerCells = cell.Group(
-		cell.Invoke(registerCECController),
+		cell.Invoke(
+			registerCECController,
+			registerCachesSyncedJob,
+		),
 		metrics.Metric(newMetrics),
 	)
 
@@ -58,7 +61,7 @@ var (
 	)
 )
 
-func newPortAllocator(proxy *proxy.Proxy) PortAllocator {
+func newPortAllocator(proxy *proxyports.ProxyPorts) PortAllocator {
 	return proxy
 }
 

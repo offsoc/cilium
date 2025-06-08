@@ -19,6 +19,7 @@ import (
 
 	"github.com/cilium/cilium/pkg/hive"
 	"github.com/cilium/cilium/pkg/k8s/client"
+	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/time"
 )
 
@@ -30,8 +31,16 @@ func TestScript(t *testing.T) {
 	time.Now = func() time.Time {
 		return time.Date(2000, 1, 1, 10, 30, 0, 0, time.UTC)
 	}
-	t.Cleanup(func() { time.Now = now })
+	since := time.Since
+	time.Since = func(t time.Time) time.Duration {
+		return time.Minute
+	}
+	t.Cleanup(func() {
+		time.Now = now
+		time.Since = since
+	})
 	t.Setenv("TZ", "")
+	nodeTypes.SetName("testnode")
 
 	log := hivetest.Logger(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -48,6 +57,7 @@ func TestScript(t *testing.T) {
 				// would depend on them).
 				cell.Invoke(
 					func(statedb.Table[LocalPod]) {},
+					func(statedb.Table[Namespace]) {},
 				),
 			)
 

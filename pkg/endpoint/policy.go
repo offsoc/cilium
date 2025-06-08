@@ -942,7 +942,7 @@ func (e *Endpoint) startRegenerationFailureHandler() {
 				e.getLogger().Debug("received signal that regeneration failed")
 			case <-ctx.Done():
 				e.getLogger().Debug("exiting retrying regeneration goroutine due to endpoint being deleted")
-				return nil
+				return controller.NewExitReason("endpoint being deleted")
 			}
 
 			regenMetadata := &regeneration.ExternalRegenerationMetadata{
@@ -952,7 +952,10 @@ func (e *Endpoint) startRegenerationFailureHandler() {
 				// of the failure, simply that something failed.
 				RegenerationLevel: regeneration.RegenerateWithDatapath,
 			}
-			regen, _ := e.SetRegenerateStateIfAlive(regenMetadata)
+			regen, err := e.SetRegenerateStateIfAlive(regenMetadata)
+			if err != nil {
+				return controller.NewExitReason("endpoint being deleted")
+			}
 			if !regen {
 				// We don't need to regenerate because the endpoint is d
 				// disconnecting / is disconnected, or another regeneration has
@@ -1155,22 +1158,19 @@ func (e *Endpoint) UpdateBandwidthPolicy(bandwidthEgress, bandwidthIngress, prio
 	}
 }
 
-// GetRealizedPolicyRuleLabelsForKey returns the list of policy rule labels
-// which match a given flow key (in host byte-order). The returned
-// LabelArrayList is shallow-copied and therefore must not be mutated.
-// This function explicitly exported to be accessed by code outside of the
-// Cilium source code tree and for testing.
-func (e *Endpoint) GetRealizedPolicyRuleLabelsForKey(key policyTypes.Key) (
-	derivedFrom string,
-	revision uint64,
+// GetPolicyCorrelationInfoForKey returns the list of policy rule labels which match a given flow
+// key (in host byte-order) and associated correlation information.
+func (e *Endpoint) GetPolicyCorrelationInfoForKey(key policyTypes.Key) (
+	info policyTypes.PolicyCorrelationInfo,
 	ok bool,
 ) {
 	e.mutex.RLock()
 	defer e.mutex.RUnlock()
 
 	var err error
-	derivedFrom, err = e.realizedPolicy.GetRuleLabels(key)
-	return derivedFrom, e.policyRevision, err == nil
+	info.RuleLabels, err = e.realizedPolicy.GetRuleLabels(key)
+	info.Revision = e.policyRevision
+	return info, err == nil
 }
 
 // setDNSRulesLocked is called when the Endpoint's DNS policy has been updated.

@@ -46,6 +46,7 @@ jobs:
           filters: |
             src:
               - '!(test|Documentation)/**'
+              - '!**/*.md'
 
   preflight-clusterrole:
     runs-on: ubuntu-24.04
@@ -168,12 +169,6 @@ jobs:
           kubectl apply -f ${{ env.CONFORMANCE_TEMPLATE }}
           kubectl wait --for=condition=Available --all deployment --timeout=${{ env.TIMEOUT }}
 
-      - name: Features tested
-        uses: ./.github/actions/feature-status
-        with:
-          title: "Summary of all features tested"
-          json-filename: "${{ env.job_name }}"
-
       - name: Check prometheus metrics
         if: ${{ success() }}
         run: |
@@ -187,7 +182,7 @@ jobs:
           # https://github.com/prometheus/prometheus/issues/8852 and related issues.
           curl -sSL --remote-name-all https://github.com/prometheus/prometheus/releases/download/v${PROM_VERSION}/{prometheus-${PROM_VERSION}.linux-amd64.tar.gz,sha256sums.txt}
           sha256sum --check --ignore-missing sha256sums.txt
-          tar xzvf prometheus-${PROM_VERSION}.linux-amd64.tar.gz prometheus-${PROM_VERSION}.linux-amd64/promtool
+          tar -xzvf prometheus-${PROM_VERSION}.linux-amd64.tar.gz prometheus-${PROM_VERSION}.linux-amd64/promtool
           rm -f prometheus-${PROM_VERSION}.linux-amd64.tar.gz
           sudo mv prometheus-${PROM_VERSION}.linux-amd64/promtool /usr/bin
           cat metrics-agent.prom | promtool check metrics
@@ -215,27 +210,9 @@ jobs:
             exit 1
           fi
 
-      - name: Report cluster failure status and capture cilium-sysdump
-        if: ${{ failure() && steps.install-cilium.outcome != 'skipped' }}
-        # The following is needed to prevent hubble from receiving an empty
-        # file (EOF) on stdin and displaying no flows.
-        shell: 'script -q -e -c "bash --noprofile --norc -eo pipefail {0}"'
-        run: |
-          echo "=== Retrieve cluster state ==="
-          kubectl get pods --all-namespaces -o wide
-          cilium status
-          cilium sysdump --output-filename cilium-sysdump-out
-
-      - name: Upload cilium-sysdump
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
-        if: ${{ failure() }}
-        with:
-          name: cilium-sysdump-out.zip
-          path: cilium-sysdump-out.zip
-
-      - name: Upload features tested
+      - name: Run common post steps
         if: ${{ always() }}
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: ./.github/actions/post-logic
         with:
-          name: features-tested
-          path: ${{ env.job_name }}*.json
+          artifacts_suffix: "${{ env.job_name }}"
+          job_status: "${{ job.status }}"

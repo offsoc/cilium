@@ -406,6 +406,8 @@ struct egress_gw_policy_entry6 {
 	union v6addr egress_ip;
 	__u32 gateway_ip;
 	__u32 reserved[3]; /* reserved for future extension, e.g. v6 gateway_ip */
+	__u32 egress_ifindex;
+	__u32 reserved2; /* for even more future extension */
 };
 
 struct srv6_vrf_key4 {
@@ -511,6 +513,7 @@ enum {
 #define REASON_MISSED_CUSTOM_CALL	11
 #define REASON_DECRYPTING			12
 #define REASON_ENCRYPTING			13
+#define REASON_LB_REVNAT_DELETE		14
 
 /* Lookup scope for externalTrafficPolicy=Local */
 #define LB_LOOKUP_SCOPE_EXT	0

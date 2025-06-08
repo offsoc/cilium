@@ -611,7 +611,8 @@
         "mapDynamicSizeRatio": {
           "type": [
             "null",
-            "number"
+            "number",
+            "string"
           ]
         },
         "masquerade": {
@@ -1466,6 +1467,9 @@
         },
         "maxConnectedClusters": {
           "type": "integer"
+        },
+        "policyDefaultLocalCluster": {
+          "type": "boolean"
         },
         "useAPIServer": {
           "type": "boolean"

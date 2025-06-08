@@ -51,7 +51,6 @@ import (
 	"github.com/cilium/cilium/pkg/logging/logfields"
 	"github.com/cilium/cilium/pkg/maglev"
 	"github.com/cilium/cilium/pkg/maps/ctmap"
-	"github.com/cilium/cilium/pkg/maps/lbmap"
 	"github.com/cilium/cilium/pkg/metrics"
 	monitoragent "github.com/cilium/cilium/pkg/monitor/agent"
 	"github.com/cilium/cilium/pkg/mtu"
@@ -246,9 +245,11 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	// Check the kernel if we can make use of managed neighbor entries which
 	// simplifies and fully 'offloads' L2 resolution handling to the kernel.
 	if !option.Config.DryMode {
-		if err := probes.HaveManagedNeighbors(params.Logger); err == nil {
+		if err := probes.HaveManagedNeighbors(); err == nil {
 			params.Logger.Info("Using Managed Neighbor Kernel support")
 			option.Config.ARPPingKernelManaged = true
+		} else if !errors.Is(err, probes.ErrNotSupported) {
+			return nil, nil, fmt.Errorf("failed to probe managed neighbor support: %w", err)
 		}
 	}
 
@@ -264,20 +265,6 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	}
 
 	ctmap.InitMapInfo(params.MetricsRegistry, option.Config.EnableIPv4, option.Config.EnableIPv6, option.Config.EnableNodePort)
-
-	lbmapInitParams := lbmap.InitParams{
-		IPv4: option.Config.EnableIPv4,
-		IPv6: option.Config.EnableIPv6,
-
-		MaxSockRevNatMapEntries:  params.LBConfig.LBSockRevNatEntries,
-		ServiceMapMaxEntries:     params.LBConfig.LBServiceMapEntries,
-		BackEndMapMaxEntries:     params.LBConfig.LBBackendMapEntries,
-		RevNatMapMaxEntries:      params.LBConfig.LBRevNatEntries,
-		AffinityMapMaxEntries:    params.LBConfig.LBAffinityMapEntries,
-		SourceRangeMapMaxEntries: params.LBConfig.LBSourceRangeMapEntries,
-		MaglevMapMaxEntries:      params.LBConfig.LBMaglevMapEntries,
-	}
-	lbmap.Init(params.MetricsRegistry, lbmapInitParams)
 
 	identity.IterateReservedIdentities(func(_ identity.NumericIdentity, _ *identity.Identity) {
 		metrics.Identity.WithLabelValues(identity.ReservedIdentityType).Inc()
@@ -484,18 +471,10 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	}
 	bootstrapStats.restore.End(true)
 
+	// Load cached information from restored endpoints in to FQDN NameManager and DNS proxies
 	bootstrapStats.fqdn.Start()
-	err = params.DNSProxy.BootstrapFQDN(restoredEndpoints.possible, option.Config.ToFQDNsPreCache)
-	if err != nil {
-		bootstrapStats.fqdn.EndError(err)
-		return nil, restoredEndpoints, err
-	}
-
-	// This is done in preCleanup so that proxy stops serving DNS traffic before shutdown
-	cleaner.preCleanupFuncs.Add(func() {
-		params.DNSProxy.Cleanup()
-	})
-
+	params.DNSNameManager.RestoreCache(restoredEndpoints.possible)
+	params.DNSProxy.BootstrapFQDN(restoredEndpoints.possible)
 	bootstrapStats.fqdn.End(true)
 
 	if params.Clientset.IsEnabled() {
@@ -738,13 +717,6 @@ func newDaemon(ctx context.Context, cleaner *daemonCleanup, params *daemonParams
 	bootstrapStats.bpfBase.EndError(err)
 	if err != nil {
 		return nil, restoredEndpoints, fmt.Errorf("error while initializing daemon: %w", err)
-	}
-
-	// iptables rules can be updated only after d.init() initializes the iptables above.
-	err = params.DNSProxy.UpdateDNSDatapathRules(d.ctx)
-	if err != nil {
-		d.logger.Error("error encountered while updating DNS datapath rules.", logfields.Error, err)
-		return nil, restoredEndpoints, fmt.Errorf("error encountered while updating DNS datapath rules: %w", err)
 	}
 
 	if option.Config.EnableVTEP {

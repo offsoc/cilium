@@ -244,7 +244,7 @@ func NewProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 		return nil, errors.New("can't load a program from a nil spec")
 	}
 
-	prog, err := newProgramWithOptions(spec, opts)
+	prog, err := newProgramWithOptions(spec, opts, newBTFCache(&opts))
 	if errors.Is(err, asm.ErrUnsatisfiedMapReference) {
 		return nil, fmt.Errorf("cannot load program without loading its whole collection: %w", err)
 	}
@@ -260,7 +260,7 @@ var (
 	kfuncBadCall = []byte(fmt.Sprintf("invalid func unknown#%d\n", kfuncCallPoisonBase))
 )
 
-func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, error) {
+func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions, c *btf.Cache) (*Program, error) {
 	if len(spec.Instructions) == 0 {
 		return nil, errors.New("instructions cannot be empty")
 	}
@@ -308,18 +308,8 @@ func newProgramWithOptions(spec *ProgramSpec, opts ProgramOptions) (*Program, er
 		return nil, fmt.Errorf("kernel module search: %w", err)
 	}
 
-	var targets []*btf.Spec
-	if opts.KernelTypes != nil {
-		targets = append(targets, opts.KernelTypes)
-	}
-	if kmodName != "" && opts.KernelModuleTypes != nil {
-		if modBTF, ok := opts.KernelModuleTypes[kmodName]; ok {
-			targets = append(targets, modBTF)
-		}
-	}
-
 	var b btf.Builder
-	if err := applyRelocations(insns, targets, kmodName, spec.ByteOrder, &b); err != nil {
+	if err := applyRelocations(insns, kmodName, spec.ByteOrder, &b, c); err != nil {
 		return nil, fmt.Errorf("apply CO-RE relocations: %w", err)
 	}
 
@@ -552,11 +542,11 @@ func retryLogAttrs(attr *sys.ProgLoadAttr, startSize uint32, err error) bool {
 	return false
 }
 
-// NewProgramFromFD creates a program from a raw fd.
+// NewProgramFromFD creates a [Program] around a raw fd.
 //
 // You should not use fd after calling this function.
 //
-// Requires at least Linux 4.10. Returns an error on Windows.
+// Requires at least Linux 4.13. Returns an error on Windows.
 func NewProgramFromFD(fd int) (*Program, error) {
 	f, err := sys.NewFD(fd)
 	if err != nil {
@@ -566,9 +556,10 @@ func NewProgramFromFD(fd int) (*Program, error) {
 	return newProgramFromFD(f)
 }
 
-// NewProgramFromID returns the program for a given id.
+// NewProgramFromID returns the [Program] for a given program id. Returns
+// [ErrNotExist] if there is no eBPF program with the given id.
 //
-// Returns ErrNotExist, if there is no eBPF program with the given id.
+// Requires at least Linux 4.13.
 func NewProgramFromID(id ProgramID) (*Program, error) {
 	fd, err := sys.ProgGetFdById(&sys.ProgGetFdByIdAttr{
 		Id: uint32(id),
@@ -581,7 +572,7 @@ func NewProgramFromID(id ProgramID) (*Program, error) {
 }
 
 func newProgramFromFD(fd *sys.FD) (*Program, error) {
-	info, err := newProgramInfoFromFd(fd)
+	info, err := minimalProgramInfoFromFd(fd)
 	if err != nil {
 		fd.Close()
 		return nil, fmt.Errorf("discover program type: %w", err)
@@ -607,6 +598,14 @@ func (p *Program) Type() ProgramType {
 // Requires at least 4.10.
 func (p *Program) Info() (*ProgramInfo, error) {
 	return newProgramInfoFromFd(p.fd)
+}
+
+// Stats returns runtime statistics about the Program. Requires BPF statistics
+// collection to be enabled, see [EnableStats].
+//
+// Requires at least Linux 5.8.
+func (p *Program) Stats() (*ProgramStats, error) {
+	return newProgramStatsFromFd(p.fd)
 }
 
 // Handle returns a reference to the program's type information in the kernel.
@@ -1110,6 +1109,10 @@ func findProgramTargetInKernel(name string, progType ProgramType, attachType Att
 // Returns a non-nil handle if the type was found in a module, or btf.ErrNotFound
 // if the type wasn't found at all.
 func findTargetInKernel(kernelSpec *btf.Spec, typeName string, target *btf.Type) (*btf.Spec, *btf.Handle, error) {
+	if kernelSpec == nil {
+		return nil, nil, fmt.Errorf("nil kernelSpec: %w", btf.ErrNotFound)
+	}
+
 	err := kernelSpec.TypeByName(typeName, target)
 	if errors.Is(err, btf.ErrNotFound) {
 		spec, module, err := findTargetInModule(kernelSpec, typeName, target)
@@ -1203,4 +1206,13 @@ func findTargetInProgram(prog *Program, name string, progType ProgramType, attac
 	}
 
 	return spec.TypeID(targetFunc)
+}
+
+func newBTFCache(opts *ProgramOptions) *btf.Cache {
+	c := btf.NewCache()
+	if opts.KernelTypes != nil {
+		c.KernelTypes = opts.KernelTypes
+		c.KernelModules = opts.KernelModuleTypes
+	}
+	return c
 }
