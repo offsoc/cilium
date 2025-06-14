@@ -28,7 +28,7 @@ import (
 	daemonk8s "github.com/cilium/cilium/daemon/k8s"
 	"github.com/cilium/cilium/pkg/datapath/tables"
 	"github.com/cilium/cilium/pkg/hive"
-	"github.com/cilium/cilium/pkg/k8s/client"
+	k8sClient "github.com/cilium/cilium/pkg/k8s/client/testutils"
 	k8sTestutils "github.com/cilium/cilium/pkg/k8s/testutils"
 	"github.com/cilium/cilium/pkg/k8s/version"
 	"github.com/cilium/cilium/pkg/loadbalancer"
@@ -74,7 +74,7 @@ func TestScript(t *testing.T) {
 		ctx,
 		func(t testing.TB, args []string) *script.Engine {
 			h := hive.New(
-				client.FakeClientCell,
+				k8sClient.FakeClientCell(),
 				daemonk8s.ResourcesCell,
 				daemonk8s.TablesCell,
 
@@ -100,8 +100,8 @@ func TestScript(t *testing.T) {
 							EnableNodePort:       true,
 						}
 					},
-					func(ops *lbreconciler.BPFOps, lns *node.LocalNodeStore, w *writer.Writer) uhive.ScriptCmdsOut {
-						return uhive.NewScriptCmds(testCommands{w, lns, ops}.cmds())
+					func(ops *lbreconciler.BPFOps, lns *node.LocalNodeStore, w *writer.Writer, waitFn loadbalancer.InitWaitFunc) uhive.ScriptCmdsOut {
+						return uhive.NewScriptCmds(testCommands{w, lns, ops, waitFn}.cmds())
 					},
 				),
 
@@ -112,7 +112,6 @@ func TestScript(t *testing.T) {
 			h.RegisterFlags(flags)
 
 			// Set some defaults
-			flags.Set("enable-experimental-lb", "true")
 			flags.Set("lb-retry-backoff-min", "10ms") // as we're doing fault injection we want
 			flags.Set("lb-retry-backoff-max", "10ms") // tiny backoffs
 			flags.Set("bpf-lb-maglev-table-size", "1021")
@@ -151,9 +150,10 @@ func TestScript(t *testing.T) {
 }
 
 type testCommands struct {
-	w   *writer.Writer
-	lns *node.LocalNodeStore
-	ops *lbreconciler.BPFOps
+	w      *writer.Writer
+	lns    *node.LocalNodeStore
+	ops    *lbreconciler.BPFOps
+	waitFn loadbalancer.InitWaitFunc
 }
 
 func (tc testCommands) cmds() map[string]script.Cmd {
@@ -163,6 +163,7 @@ func (tc testCommands) cmds() map[string]script.Cmd {
 		"test/bpfops-summary":        tc.opsSummary(),
 		"test/set-node-labels":       tc.setNodeLabels(),
 		"test/set-node-ip":           tc.setNodeIP(),
+		"test/init-wait":             tc.initWait(),
 	}
 }
 
@@ -256,4 +257,13 @@ func (tc testCommands) setNodeIP() script.Cmd {
 			})
 			return nil, nil
 		})
+}
+
+func (tc testCommands) initWait() script.Cmd {
+	return script.Command(
+		script.CmdUsage{Summary: "Wait for InitWaitFunc() to return"},
+		func(s *script.State, args ...string) (script.WaitFunc, error) {
+			return nil, tc.waitFn(s.Context())
+		})
+
 }

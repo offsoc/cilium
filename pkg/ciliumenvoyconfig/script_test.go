@@ -37,9 +37,10 @@ import (
 
 	daemonk8s "github.com/cilium/cilium/daemon/k8s"
 	"github.com/cilium/cilium/pkg/datapath/tables"
+	"github.com/cilium/cilium/pkg/endpoint/regeneration"
 	"github.com/cilium/cilium/pkg/envoy"
 	"github.com/cilium/cilium/pkg/hive"
-	"github.com/cilium/cilium/pkg/k8s/client"
+	k8sClient "github.com/cilium/cilium/pkg/k8s/client/testutils"
 	"github.com/cilium/cilium/pkg/k8s/synced"
 	"github.com/cilium/cilium/pkg/k8s/testutils"
 	"github.com/cilium/cilium/pkg/k8s/version"
@@ -70,7 +71,7 @@ func TestScript(t *testing.T) {
 		var lns *node.LocalNodeStore
 
 		h := hive.New(
-			client.FakeClientCell,
+			k8sClient.FakeClientCell(),
 			synced.Cell,
 			daemonk8s.ResourcesCell,
 			daemonk8s.TablesCell,
@@ -85,6 +86,7 @@ func TestScript(t *testing.T) {
 				tables.NewNodeAddressTable,
 				statedb.RWTable[tables.NodeAddress].ToTable,
 				source.NewSources,
+				regeneration.NewFence,
 				func() *option.DaemonConfig {
 					return &option.DaemonConfig{
 						EnableIPv4:           true,
@@ -143,7 +145,6 @@ func TestScript(t *testing.T) {
 
 		flags := pflag.NewFlagSet("", pflag.ContinueOnError)
 		h.RegisterFlags(flags)
-		flags.Set("enable-experimental-lb", "true")
 
 		var opts []hivetest.LogOption
 		if *debug {

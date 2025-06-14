@@ -290,7 +290,8 @@ contributors across the globe, there is almost always someone available to help.
 | cni.chainingTarget | string | `nil` | A CNI network name in to which the Cilium plugin should be added as a chained plugin. This will cause the agent to watch for a CNI network with this network name. When it is found, this will be used as the basis for Cilium's CNI configuration file. If this is set, it assumes a chaining mode of generic-veth. As a special case, a chaining mode of aws-cni implies a chainingTarget of aws-cni. |
 | cni.confFileMountPath | string | `"/tmp/cni-configuration"` | Configure the path to where to mount the ConfigMap inside the agent pod. |
 | cni.confPath | string | `"/etc/cni/net.d"` | Configure the path to the CNI configuration directory on the host. |
-| cni.configMapKey | string | `"cni-config"` | Configure the key in the CNI ConfigMap to read the contents of the CNI configuration from. |
+| cni.configMap | string | `""` | When defined, configMap will mount the provided value as ConfigMap and interpret the 'cni.configMapKey' value as CNI configuration file and write it when the agent starts up. |
+| cni.configMapKey | string | `"cni-config"` | Configure the key in the CNI ConfigMap to read the contents of the CNI configuration from. For this to be effective, the 'cni.configMap' parameter must be specified too. Note that the 'cni.configMap' parameter is the name of the ConfigMap, while 'cni.configMapKey' is the name of the key in the ConfigMap data containing the actual configuration. |
 | cni.customConf | bool | `false` | Skip writing of the CNI configuration. This can be used if writing of the CNI configuration is performed by external automation. |
 | cni.enableRouteMTUForCNIChaining | bool | `false` | Enable route MTU for pod netns when CNI chaining is used |
 | cni.exclusive | bool | `true` | Make Cilium take ownership over the `/etc/cni/net.d` directory on the node, renaming all non-Cilium CNI configurations to `*.cilium_bak`. This ensures no Pods can be scheduled using other CNI plugins during Cilium agent downtime. |
@@ -391,7 +392,7 @@ contributors across the globe, there is almost always someone available to help.
 | envoy.httpRetryCount | int | `3` | Maximum number of retries for each HTTP request |
 | envoy.httpUpstreamLingerTimeout | string | `nil` | Time in seconds to block Envoy worker thread while an upstream HTTP connection is closing. If set to 0, the connection is closed immediately (with TCP RST). If set to -1, the connection is closed asynchronously in the background. |
 | envoy.idleTimeoutDurationSeconds | int | `60` | Set Envoy upstream HTTP idle connection timeout seconds. Does not apply to connections with pending requests. Default 60s |
-| envoy.image | object | `{"digest":"sha256:c4fe15f10b612c845709eda05d449e2735a9a7dc9b799e858d31e6ddac332b29","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.33.3-1749082895-be938e41a8b374f8084ecbf1d6883510e4059620","useDigest":true}` | Envoy container image. |
+| envoy.image | object | `{"digest":"sha256:0ce53e7bae73bc4ed31b029aff08b27913fde50b0f3384b755a2280aa5db8307","override":null,"pullPolicy":"Always","repository":"quay.io/cilium/cilium-envoy","tag":"v1.33.3-1749272486-264be40340a9340c19a875b6954c98b015e6ae41","useDigest":true}` | Envoy container image. |
 | envoy.initialFetchTimeoutSeconds | int | `30` | Time in seconds after which the initial fetch on an xDS stream is considered timed out |
 | envoy.livenessProbe.enabled | bool | `true` | Enable liveness probe for cilium-envoy |
 | envoy.livenessProbe.failureThreshold | int | `10` | failure threshold of liveness probe |
@@ -727,9 +728,8 @@ contributors across the globe, there is almost always someone available to help.
 | livenessProbe.failureThreshold | int | `10` | failure threshold of liveness probe |
 | livenessProbe.periodSeconds | int | `30` | interval between checks of the liveness probe |
 | livenessProbe.requireK8sConnectivity | bool | `false` | whether to require k8s connectivity as part of the check. |
-| loadBalancer | object | `{"acceleration":"disabled","experimental":true,"l7":{"algorithm":"round_robin","backend":"disabled","ports":[]}}` | Configure service load balancing |
+| loadBalancer | object | `{"acceleration":"disabled","l7":{"algorithm":"round_robin","backend":"disabled","ports":[]}}` | Configure service load balancing |
 | loadBalancer.acceleration | string | `"disabled"` | acceleration is the option to accelerate service handling via XDP Applicable values can be: disabled (do not use XDP), native (XDP BPF program is run directly out of the networking driver's early receive path), or best-effort (use native mode XDP acceleration on devices that support it). |
-| loadBalancer.experimental | bool | `true` | experimental enables support for the experimental load-balancing control-plane. |
 | loadBalancer.l7 | object | `{"algorithm":"round_robin","backend":"disabled","ports":[]}` | L7 LoadBalancer |
 | loadBalancer.l7.algorithm | string | `"round_robin"` | Default LB algorithm The default LB algorithm to be used for services, which can be overridden by the service annotation (e.g. service.cilium.io/lb-l7-algorithm) Applicable values: round_robin, least_request, random |
 | loadBalancer.l7.backend | string | `"disabled"` | Enable L7 service load balancing via envoy proxy. The request to a k8s service, which has specific annotation e.g. service.cilium.io/lb-l7, will be forwarded to the local backend proxy to be load balanced to the service endpoints. Please refer to docs for supported annotations for more configuration.  Applicable values:   - envoy: Enable L7 load balancing via envoy proxy. This will automatically set enable-envoy-config as well.   - disabled: Disable L7 load balancing by way of service annotation. |

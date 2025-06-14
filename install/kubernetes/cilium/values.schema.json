@@ -1500,6 +1500,9 @@
         "confPath": {
           "type": "string"
         },
+        "configMap": {
+          "type": "string"
+        },
         "configMapKey": {
           "type": "string"
         },
@@ -4158,9 +4161,6 @@
       "properties": {
         "acceleration": {
           "type": "string"
-        },
-        "experimental": {
-          "type": "boolean"
         },
         "l7": {
           "properties": {

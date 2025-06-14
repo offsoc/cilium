@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net"
 	"path"
-	"sync"
 
 	"github.com/cilium/hive/cell"
 	"github.com/spf13/cobra"
@@ -18,7 +17,6 @@ import (
 
 	cmk8s "github.com/cilium/cilium/clustermesh-apiserver/clustermesh/k8s"
 	"github.com/cilium/cilium/clustermesh-apiserver/syncstate"
-	operatorWatchers "github.com/cilium/cilium/operator/watchers"
 	"github.com/cilium/cilium/pkg/clustermesh/mcsapi"
 	"github.com/cilium/cilium/pkg/clustermesh/operator"
 	cmtypes "github.com/cilium/cilium/pkg/clustermesh/types"
@@ -41,7 +39,6 @@ import (
 	nodeStore "github.com/cilium/cilium/pkg/node/store"
 	nodeTypes "github.com/cilium/cilium/pkg/node/types"
 	"github.com/cilium/cilium/pkg/option"
-	"github.com/cilium/cilium/pkg/promise"
 	"github.com/cilium/cilium/pkg/version"
 )
 
@@ -50,9 +47,10 @@ func NewCmd(h *hive.Hive) *cobra.Command {
 		Use:   "clustermesh",
 		Short: "Run ClusterMesh",
 		Run: func(cmd *cobra.Command, args []string) {
-			logger := logging.DefaultSlogLogger.With(logfields.LogSubsys, "clustermesh-apiserver")
-			if err := h.Run(logger); err != nil {
-				logging.Fatal(logger, err.Error())
+			// slogloggercheck: it has been initialized in the PreRun function.
+			if err := h.Run(logging.DefaultSlogLogger); err != nil {
+				// slogloggercheck: log fatal errors using the default logger before it's initialized.
+				logging.Fatal(logging.DefaultSlogLogger, err.Error())
 			}
 		},
 		PreRun: func(cmd *cobra.Command, args []string) {
@@ -60,6 +58,7 @@ func NewCmd(h *hive.Hive) *cobra.Command {
 			metrics.Namespace = metrics.CiliumClusterMeshAPIServerNamespace
 			option.Config.SetupLogging(h.Viper(), "clustermesh-apiserver")
 
+			// slogloggercheck: it has been properly initialized now.
 			logger := logging.DefaultSlogLogger.With(logfields.LogSubsys, "clustermesh-apiserver")
 
 			option.Config.Populate(logger, h.Viper())
@@ -76,14 +75,14 @@ func NewCmd(h *hive.Hive) *cobra.Command {
 type parameters struct {
 	cell.In
 
-	CfgMCSAPI      operator.MCSAPIConfig
-	ClusterInfo    cmtypes.ClusterInfo
-	Clientset      k8sClient.Clientset
-	Resources      cmk8s.Resources
-	BackendPromise promise.Promise[kvstore.BackendOperations]
-	StoreFactory   store.Factory
-	SyncState      syncstate.SyncState
-	CESConfig      cmk8s.CiliumEndpointSliceConfig
+	CfgMCSAPI    operator.MCSAPIConfig
+	ClusterInfo  cmtypes.ClusterInfo
+	Clientset    k8sClient.Clientset
+	Resources    cmk8s.Resources
+	Backend      kvstore.Client
+	StoreFactory store.Factory
+	SyncState    syncstate.SyncState
+	CESConfig    cmk8s.CiliumEndpointSliceConfig
 
 	Logger *slog.Logger
 }
@@ -95,12 +94,7 @@ func registerHooks(lc cell.Lifecycle, params parameters) error {
 				return errors.New("Kubernetes client not configured, cannot continue.")
 			}
 
-			backend, err := params.BackendPromise.Await(ctx)
-			if err != nil {
-				return err
-			}
-
-			startServer(params.ClusterInfo, params.Clientset, backend, params.Resources, params.StoreFactory, params.SyncState, params.CfgMCSAPI.ClusterMeshEnableMCSAPI, params.Logger, params.CESConfig.EnableCiliumEndpointSlice)
+			startServer(params.ClusterInfo, params.Clientset, params.Backend, params.Resources, params.StoreFactory, params.SyncState, params.CfgMCSAPI.ClusterMeshEnableMCSAPI, params.Logger, params.CESConfig.EnableCiliumEndpointSlice)
 			return nil
 		},
 	})
@@ -460,15 +454,6 @@ func startServer(
 		go synchronize(ctx, resources.CiliumSlimEndpoints, newEndpointSynchronizer(ctx, logger, cinfo, backend, factory, syncState.WaitForResource(), enableCiliumEndpointSlice))
 	}
 
-	operatorWatchers.StartSynchronizingServices(ctx, &sync.WaitGroup{}, operatorWatchers.ServiceSyncParameters{
-		ClusterInfo:  cinfo,
-		Clientset:    clientset,
-		Services:     resources.Services,
-		Endpoints:    resources.Endpoints,
-		Backend:      backend,
-		StoreFactory: factory,
-		SyncCallback: syncState.WaitForResource(),
-	}, logger)
 	go mcsapi.StartSynchronizingServiceExports(ctx, mcsapi.ServiceExportSyncParameters{
 		Logger:                  logger,
 		ClusterName:             cinfo.Name,
