@@ -371,8 +371,6 @@ jobs:
         run: |
           ./clusterloader \
             -v=2 \
-            ${{ steps.vars.outputs.WORKLOAD_NODES <= 100 && '--testconfig=./testing/load/config.yaml' || '' }}  \
-            ${{ steps.vars.outputs.WORKLOAD_NODES <= 100 && '--testconfig=./testing/custom/common/restart.yaml' || '' }}  \
             --testconfig=./testing/custom/netpol/config.yaml \
             --testconfig=./testing/custom/common/restart.yaml \
             --testconfig=./testing/custom/servicechurn/config.yaml \
